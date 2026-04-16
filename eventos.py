@@ -22,7 +22,7 @@ UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
-# Controle de reset do uploader
+# Controle de reset do uploader para evitar travas no widget
 if 'uploader_id' not in st.session_state:
     st.session_state['uploader_id'] = 0
 
@@ -119,14 +119,17 @@ with st.sidebar:
                 st.success("OK!")
             except Exception as e:
                 st.error(f"Erro: {e}")
+    
+    st.divider()
+    
+    # RELÓGIO MOVIDO PARA A SIDEBAR (Abaixo dos botões)
+    @st.fragment(run_every="1s")
+    def sidebar_clock():
+        st.metric(label="🕒 Hora de Brasília", value=get_hora_brasilia().strftime("%H:%M:%S"))
+    
+    sidebar_clock()
 
 st.title("🎮 BR THE LAST WORLD - Painel")
-
-@st.fragment(run_every="1s")
-def clock_component():
-    st.metric(label="🕒 Hora de Brasília", value=get_hora_brasilia().strftime("%H:%M:%S"))
-
-clock_component()
 
 tab1, tab2 = st.tabs(["📅 Agendamentos", "📜 Logs"])
 
@@ -136,28 +139,32 @@ with tab1:
     with col_form:
         st.subheader("🚀 Novo Evento")
         
-        uploader_key = f"uploader_{st.session_state['uploader_id']}"
+        # Chave dinâmica para forçar limpeza após cada agendamento
+        uploader_key = f"up_v_{st.session_state['uploader_id']}"
         up_file = st.file_uploader("Arquivo (XML ou JSON)", type=["xml", "json"], key=uploader_key)
         
-        mapa_choice = st.selectbox("Selecione o Mapa", ["Chernarus", "Livonia"], key="map_selector")
+        mapa_choice = st.selectbox("Selecione o Mapa", ["Chernarus", "Livonia"], key="map_select_key")
         
         caminhos = {
             "Chernarus": "/dayzxb_missions/dayzOffline.chernarusplus/custom",
             "Livonia": "/dayzxb_missions/dayzOffline.enoch/custom"
         }
         
-        dt_ev = st.date_input("Data", min_value=get_hora_brasilia(), key="date_main")
+        dt_ev = st.date_input("Data", min_value=get_hora_brasilia(), key="date_key")
         
         c_t1, c_t2 = st.columns(2)
-        h_in = c_t1.text_input("Entrada (HH:MM)", "19:55", key="time_in")
-        h_out = c_t2.text_input("Saída (HH:MM)", "21:55", key="time_out")
+        h_in = c_t1.text_input("Entrada (HH:MM)", "19:55", key="h_in_key")
+        h_out = c_t2.text_input("Saída (HH:MM)", "21:55", key="h_out_key")
         
-        recorrencia = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key="rec_selector")
+        recorrencia = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key="rec_key")
         
         if st.button("Confirmar Agendamento", use_container_width=True):
             if up_file:
+                # Processamento seguro do arquivo
+                file_content = up_file.getbuffer()
                 path = os.path.join(UPLOAD_DIR, up_file.name)
-                with open(path, "wb") as f: f.write(up_file.getbuffer())
+                with open(path, "wb") as f:
+                    f.write(file_content)
                 
                 nova = {
                     "id": str(time.time()), 
@@ -172,10 +179,11 @@ with tab1:
                 data["agendas"].append(nova)
                 save_data(data)
                 
+                # Incrementa o ID para mudar a key e forçar o reset do widget de upload
                 st.session_state['uploader_id'] += 1
                 
-                st.success("Agendado!")
-                time.sleep(0.5)
+                st.success(f"✅ {up_file.name} agendado!")
+                time.sleep(1)
                 st.rerun()
             else:
                 st.warning("Selecione um arquivo primeiro!")
@@ -189,13 +197,11 @@ with tab1:
             cor = {"Aguardando": "🔵", "Ativo": "🟢", "Finalizado": "⚪"}.get(agenda['status'], "🔴")
             
             with st.expander(f"{cor} {agenda['file']} - {agenda.get('mapa', 'Chernarus')}"):
-                # Layout de informações detalhadas
                 st.markdown(f"**Janela do Agendamento:** {agenda['in']} > {agenda['out']}")
                 st.markdown(f"**Data do Agendamento:** {agenda['data']} ({agenda['rec']})")
                 st.markdown(f"**Arquivo Carregado:** `{agenda['file']}`")
                 st.markdown(f"**Mapa:** {agenda.get('mapa', 'Chernarus')}")
                 st.markdown(f"**Status Atual:** {agenda['status']}")
-                
                 st.divider()
                 
                 if st.button("Remover Agendamento", key=f"del_{agenda['id']}", type="secondary", use_container_width=True):
