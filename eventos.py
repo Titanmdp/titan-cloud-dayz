@@ -22,6 +22,7 @@ UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
+@st.cache_data(ttl=10) # Cache curto para evitar leituras excessivas de disco
 def load_data():
     if os.path.exists(CONFIG_FILE):
         try:
@@ -34,6 +35,7 @@ def load_data():
 def save_data(data_to_save):
     with open(CONFIG_FILE, "w") as f:
         json.dump(data_to_save, f, indent=4)
+    st.cache_data.clear() # Limpa o cache para atualizar a lista
 
 # --- MOTOR DE AUTOMAÇÃO ---
 def disparar_ftp(acao, filename, local_path, mapa_path):
@@ -42,17 +44,13 @@ def disparar_ftp(acao, filename, local_path, mapa_path):
         ftp = ftplib.FTP()
         ftp.connect(conf["host"], int(conf["port"]), timeout=15)
         ftp.login(conf["user"], conf["pass"])
-        
-        # Entra no caminho específico salvo no agendamento
         ftp.cwd(mapa_path)
-        
         if acao == "UPLOAD" and os.path.exists(local_path):
             with open(local_path, 'rb') as f:
                 ftp.storbinary(f'STOR {filename}', f)
         elif acao == "DELETE":
             try: ftp.delete(filename)
             except: pass
-            
         ftp.quit()
         return True, "Sucesso"
     except Exception as e:
@@ -63,18 +61,13 @@ def automatic_worker():
         now = get_hora_brasilia()
         hoje = now.strftime("%d/%m/%Y")
         agora = now.strftime("%H:%M")
-        
         current_data = load_data()
         mudou = False
         for agenda in current_data["agendas"]:
-            # Gatilho de Entrada
             if agenda["data"] == hoje and agenda["in"] == agora and agenda.get("status") == "Aguardando":
-                # Passa o caminho do mapa salvo na agenda
                 success, err = disparar_ftp("UPLOAD", agenda["file"], agenda["local_path"], agenda.get("path"))
                 agenda["status"] = "Ativo" if success else f"Erro In: {err}"
                 mudou = True
-            
-            # Gatilho de Saída
             if agenda["data"] == hoje and agenda["out"] == agora and agenda.get("status") == "Ativo":
                 success, err = disparar_ftp("DELETE", agenda["file"], agenda["local_path"], agenda.get("path"))
                 if success:
@@ -90,7 +83,6 @@ def automatic_worker():
                 else:
                     agenda["status"] = f"Erro Out: {err}"
                 mudou = True
-        
         if mudou: save_data(current_data)
         time.sleep(15)
 
@@ -126,32 +118,37 @@ with st.sidebar:
 
 st.title("🎮 BR THE LAST WORLD - Painel")
 
+# RELÓGIO ISOLADO (CORRIGIDO)
 @st.fragment(run_every="1s")
-def show_clock():
+def clock_component():
     st.metric(label="🕒 Hora de Brasília", value=get_hora_brasilia().strftime("%H:%M:%S"))
 
-show_clock()
+clock_component()
 
 tab1, tab2 = st.tabs(["📅 Agendamentos", "📜 Logs"])
 
 with tab1:
-    c1, c2 = st.columns([1, 1.5])
-    with c1:
+    col_form, col_list = st.columns([1, 1.5])
+    
+    with col_form:
         st.subheader("🚀 Novo Evento")
-        up_file = st.file_uploader("Arquivo (XML ou JSON)", type=["xml", "json"])
+        # Usamos uma chave única para evitar que o componente resete
+        up_file = st.file_uploader("Arquivo (XML ou JSON)", type=["xml", "json"], key="uploader_main")
         
-        # --- NOVO: SELEÇÃO DE MAPA ---
-        mapa_choice = st.selectbox("Selecione o Mapa do Servidor", ["Chernarus", "Livonia"])
+        mapa_choice = st.selectbox("Selecione o Mapa", ["Chernarus", "Livonia"], key="map_selector")
+        
         caminhos = {
             "Chernarus": "/dayzxb_missions/dayzOffline.chernarusplus/custom",
             "Livonia": "/dayzxb_missions/dayzOffline.enoch/custom"
         }
         
-        dt_ev = st.date_input("Data", min_value=get_hora_brasilia())
+        dt_ev = st.date_input("Data", min_value=get_hora_brasilia(), key="date_main")
+        
         c_t1, c_t2 = st.columns(2)
-        h_in = c_t1.text_input("Entrada (HH:MM)", "19:55")
-        h_out = c_t2.text_input("Saída (HH:MM)", "21:55")
-        rec = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"])
+        h_in = c_t1.text_input("Entrada (HH:MM)", "19:55", key="time_in")
+        h_out = c_t2.text_input("Saída (HH:MM)", "21:55", key="time_out")
+        
+        recorrencia = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key="rec_selector")
         
         if st.button("Confirmar Agendamento", use_container_width=True):
             if up_file:
@@ -162,25 +159,23 @@ with tab1:
                     "id": str(time.time()), 
                     "file": up_file.name, 
                     "local_path": path,
-                    "mapa": mapa_choice, # Nome amigável
-                    "path": caminhos[mapa_choice], # Caminho real do FTP
+                    "mapa": mapa_choice,
+                    "path": caminhos[mapa_choice],
                     "data": dt_ev.strftime("%d/%m/%Y"), 
-                    "in": h_in, "out": h_out, "rec": rec, 
+                    "in": h_in, "out": h_out, "rec": recorrencia, 
                     "status": "Aguardando"
                 }
                 data["agendas"].append(nova)
                 save_data(data)
-                st.success(f"✅ {up_file.name} ({mapa_choice}) agendado!")
+                st.success("Agendado!")
                 st.rerun()
 
-    with c2:
+    with col_list:
         st.subheader("📋 Lista de Execução")
         for i, agenda in enumerate(data["agendas"]):
             cor = {"Aguardando": "🔵", "Ativo": "🟢", "Finalizado": "⚪"}.get(agenda['status'], "🔴")
             with st.expander(f"{cor} {agenda['file']} - {agenda.get('mapa', 'Chernarus')}"):
-                st.write(f"📅 **Data:** {agenda['data']}")
                 st.write(f"🕒 **Janela:** {agenda['in']} > {agenda['out']}")
-                st.write(f"🗺️ **Mapa:** {agenda.get('mapa', 'Chernarus')}")
                 if st.button("Remover", key=f"del_{agenda['id']}"):
                     if os.path.exists(agenda['local_path']):
                         try: os.remove(agenda['local_path'])
@@ -190,7 +185,7 @@ with tab1:
                     st.rerun()
 
 with tab2:
-    st.subheader("Console de Monitoramento")
-    st.code(f"[{get_hora_brasilia().strftime('%H:%M:%S')}] Motor Ativo (Suporte Chernarus/Livonia).")
+    st.subheader("Console")
+    st.code(f"Motor Ativo | {get_hora_brasilia().strftime('%H:%M:%S')}")
     for agenda in data["agendas"]:
-        st.text(f"Arquivo: {agenda['file']} | Mapa: {agenda.get('mapa')} | Status: {agenda['status']}")
+        st.text(f"Arquivo: {agenda['file']} | Status: {agenda['status']}")
