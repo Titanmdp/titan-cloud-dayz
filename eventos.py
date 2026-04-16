@@ -10,7 +10,6 @@ from datetime import datetime, timedelta, timezone
 FUSO_BR = timezone(timedelta(hours=-3))
 
 def get_hora_brasilia():
-    """Retorna o datetime atual no fuso de Brasília"""
     return datetime.now(FUSO_BR)
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
@@ -43,7 +42,9 @@ def disparar_ftp(acao, filename, local_path):
         ftp = ftplib.FTP()
         ftp.connect(conf["host"], int(conf["port"]), timeout=15)
         ftp.login(conf["user"], conf["pass"])
+        # Pasta padrão da Nitrado para arquivos customizados
         ftp.cwd("/dayzxb_missions/dayzOffline.chernarusplus/custom")
+        
         if acao == "UPLOAD" and os.path.exists(local_path):
             with open(local_path, 'rb') as f:
                 ftp.storbinary(f'STOR {filename}', f)
@@ -130,8 +131,8 @@ with tab1:
     c1, c2 = st.columns([1, 1.5])
     with c1:
         st.subheader("🚀 Novo Evento")
-        # AJUSTE: Agora aceita XML e JSON
-        up_file = st.file_uploader("Arquivo de Evento (XML ou JSON)", type=["xml", "json"])
+        # AJUSTE: Aqui permitimos XML e JSON
+        up_file = st.file_uploader("Selecione o arquivo (XML ou JSON)", type=["xml", "json"])
         dt_ev = st.date_input("Data", min_value=get_hora_brasilia())
         h_in = st.text_input("Entrada (HH:MM)", "19:55")
         h_out = st.text_input("Saída (HH:MM)", "21:55")
@@ -141,18 +142,23 @@ with tab1:
             if up_file:
                 path = os.path.join(UPLOAD_DIR, up_file.name)
                 with open(path, "wb") as f: f.write(up_file.getbuffer())
+                
                 nova = {
                     "id": str(time.time()), 
                     "file": up_file.name, 
                     "local_path": path, 
                     "data": dt_ev.strftime("%d/%m/%Y"), 
-                    "in": h_in, "out": h_out, "rec": rec, 
+                    "in": h_in, 
+                    "out": h_out, 
+                    "rec": rec, 
                     "status": "Aguardando"
                 }
                 data["agendas"].append(nova)
                 save_data(data)
                 st.success(f"✅ {up_file.name} agendado!")
                 st.rerun()
+            else:
+                st.error("Selecione um arquivo primeiro!")
 
     with c2:
         st.subheader("📋 Lista de Execução")
