@@ -22,7 +22,11 @@ UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
-@st.cache_data(ttl=10) # Cache curto para evitar leituras excessivas de disco
+# Controle de reset do uploader
+if 'uploader_id' not in st.session_state:
+    st.session_state['uploader_id'] = 0
+
+@st.cache_data(ttl=10)
 def load_data():
     if os.path.exists(CONFIG_FILE):
         try:
@@ -35,7 +39,7 @@ def load_data():
 def save_data(data_to_save):
     with open(CONFIG_FILE, "w") as f:
         json.dump(data_to_save, f, indent=4)
-    st.cache_data.clear() # Limpa o cache para atualizar a lista
+    st.cache_data.clear()
 
 # --- MOTOR DE AUTOMAÇÃO ---
 def disparar_ftp(acao, filename, local_path, mapa_path):
@@ -118,7 +122,6 @@ with st.sidebar:
 
 st.title("🎮 BR THE LAST WORLD - Painel")
 
-# RELÓGIO ISOLADO (CORRIGIDO)
 @st.fragment(run_every="1s")
 def clock_component():
     st.metric(label="🕒 Hora de Brasília", value=get_hora_brasilia().strftime("%H:%M:%S"))
@@ -132,8 +135,10 @@ with tab1:
     
     with col_form:
         st.subheader("🚀 Novo Evento")
-        # Usamos uma chave única para evitar que o componente resete
-        up_file = st.file_uploader("Arquivo (XML ou JSON)", type=["xml", "json"], key="uploader_main")
+        
+        # A chave muda dinamicamente para resetar o campo após cada agendamento
+        uploader_key = f"uploader_{st.session_state['uploader_id']}"
+        up_file = st.file_uploader("Arquivo (XML ou JSON)", type=["xml", "json"], key=uploader_key)
         
         mapa_choice = st.selectbox("Selecione o Mapa", ["Chernarus", "Livonia"], key="map_selector")
         
@@ -167,8 +172,15 @@ with tab1:
                 }
                 data["agendas"].append(nova)
                 save_data(data)
+                
+                # Incrementa o ID para resetar o widget de upload no próximo rerun
+                st.session_state['uploader_id'] += 1
+                
                 st.success("Agendado!")
+                time.sleep(0.5) # Pequena pausa para o usuário ver o sucesso
                 st.rerun()
+            else:
+                st.warning("Selecione um arquivo primeiro!")
 
     with col_list:
         st.subheader("📋 Lista de Execução")
