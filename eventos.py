@@ -4,10 +4,9 @@ import os
 import json
 import time
 import threading
-from datetime import datetime, timedelta, timezone # Adicionado timezone
+from datetime import datetime, timedelta, timezone
 
 # --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASÍLIA) ---
-# Criamos um objeto de fuso horário fixo para UTC-3
 FUSO_BR = timezone(timedelta(hours=-3))
 
 def get_hora_brasilia():
@@ -58,7 +57,6 @@ def disparar_ftp(acao, filename, local_path):
 
 def automatic_worker():
     while True:
-        # USA HORA DE BRASÍLIA PARA O MOTOR
         now = get_hora_brasilia()
         hoje = now.strftime("%d/%m/%Y")
         agora = now.strftime("%H:%M")
@@ -120,10 +118,8 @@ with st.sidebar:
 
 st.title("🎮 BR THE LAST WORLD - Painel")
 
-# --- RELÓGIO AJUSTADO PARA BRASÍLIA ---
 @st.fragment(run_every="1s")
 def show_clock():
-    # USA HORA DE BRASÍLIA PARA O DISPLAY
     st.metric(label="🕒 Hora de Brasília", value=get_hora_brasilia().strftime("%H:%M:%S"))
 
 show_clock()
@@ -134,8 +130,8 @@ with tab1:
     c1, c2 = st.columns([1, 1.5])
     with c1:
         st.subheader("🚀 Novo Evento")
-        up_file = st.file_uploader("Arquivo XML", type=["xml"])
-        # Data de hoje também ajustada para o fuso brasileiro no calendário
+        # AJUSTE: Agora aceita XML e JSON
+        up_file = st.file_uploader("Arquivo de Evento (XML ou JSON)", type=["xml", "json"])
         dt_ev = st.date_input("Data", min_value=get_hora_brasilia())
         h_in = st.text_input("Entrada (HH:MM)", "19:55")
         h_out = st.text_input("Saída (HH:MM)", "21:55")
@@ -145,10 +141,17 @@ with tab1:
             if up_file:
                 path = os.path.join(UPLOAD_DIR, up_file.name)
                 with open(path, "wb") as f: f.write(up_file.getbuffer())
-                nova = {"id": str(time.time()), "file": up_file.name, "local_path": path, "data": dt_ev.strftime("%d/%m/%Y"), "in": h_in, "out": h_out, "rec": rec, "status": "Aguardando"}
+                nova = {
+                    "id": str(time.time()), 
+                    "file": up_file.name, 
+                    "local_path": path, 
+                    "data": dt_ev.strftime("%d/%m/%Y"), 
+                    "in": h_in, "out": h_out, "rec": rec, 
+                    "status": "Aguardando"
+                }
                 data["agendas"].append(nova)
                 save_data(data)
-                st.success("Agendado!")
+                st.success(f"✅ {up_file.name} agendado!")
                 st.rerun()
 
     with c2:
@@ -167,7 +170,6 @@ with tab1:
 
 with tab2:
     st.subheader("Console de Monitoramento")
-    # Log de monitoramento também com hora de Brasília
-    st.code(f"[{get_hora_brasilia().strftime('%H:%M:%S')}] Motor Ativo (Fuso: Brasília).")
+    st.code(f"[{get_hora_brasilia().strftime('%H:%M:%S')}] Motor Ativo (Suporte XML/JSON).")
     for agenda in data["agendas"]:
         st.text(f"Arquivo: {agenda['file']} | Status: {agenda['status']} | Data: {agenda['data']}")
