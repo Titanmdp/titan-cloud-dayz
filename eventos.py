@@ -36,14 +36,15 @@ def save_data(data_to_save):
         json.dump(data_to_save, f, indent=4)
 
 # --- MOTOR DE AUTOMAÇÃO ---
-def disparar_ftp(acao, filename, local_path):
+def disparar_ftp(acao, filename, local_path, mapa_path):
     conf = load_data()["ftp"]
     try:
         ftp = ftplib.FTP()
         ftp.connect(conf["host"], int(conf["port"]), timeout=15)
         ftp.login(conf["user"], conf["pass"])
-        # Pasta padrão da Nitrado para arquivos customizados
-        ftp.cwd("/dayzxb_missions/dayzOffline.chernarusplus/custom")
+        
+        # Entra no caminho específico salvo no agendamento
+        ftp.cwd(mapa_path)
         
         if acao == "UPLOAD" and os.path.exists(local_path):
             with open(local_path, 'rb') as f:
@@ -51,6 +52,7 @@ def disparar_ftp(acao, filename, local_path):
         elif acao == "DELETE":
             try: ftp.delete(filename)
             except: pass
+            
         ftp.quit()
         return True, "Sucesso"
     except Exception as e:
@@ -65,12 +67,16 @@ def automatic_worker():
         current_data = load_data()
         mudou = False
         for agenda in current_data["agendas"]:
+            # Gatilho de Entrada
             if agenda["data"] == hoje and agenda["in"] == agora and agenda.get("status") == "Aguardando":
-                success, err = disparar_ftp("UPLOAD", agenda["file"], agenda["local_path"])
+                # Passa o caminho do mapa salvo na agenda
+                success, err = disparar_ftp("UPLOAD", agenda["file"], agenda["local_path"], agenda.get("path"))
                 agenda["status"] = "Ativo" if success else f"Erro In: {err}"
                 mudou = True
+            
+            # Gatilho de Saída
             if agenda["data"] == hoje and agenda["out"] == agora and agenda.get("status") == "Ativo":
-                success, err = disparar_ftp("DELETE", agenda["file"], agenda["local_path"])
+                success, err = disparar_ftp("DELETE", agenda["file"], agenda["local_path"], agenda.get("path"))
                 if success:
                     if agenda["rec"] == "Único":
                         agenda["status"] = "Finalizado"
@@ -84,6 +90,7 @@ def automatic_worker():
                 else:
                     agenda["status"] = f"Erro Out: {err}"
                 mudou = True
+        
         if mudou: save_data(current_data)
         time.sleep(15)
 
@@ -131,11 +138,19 @@ with tab1:
     c1, c2 = st.columns([1, 1.5])
     with c1:
         st.subheader("🚀 Novo Evento")
-        # AJUSTE: Aqui permitimos XML e JSON
-        up_file = st.file_uploader("Selecione o arquivo (XML ou JSON)", type=["xml", "json"])
+        up_file = st.file_uploader("Arquivo (XML ou JSON)", type=["xml", "json"])
+        
+        # --- NOVO: SELEÇÃO DE MAPA ---
+        mapa_choice = st.selectbox("Selecione o Mapa do Servidor", ["Chernarus", "Livonia"])
+        caminhos = {
+            "Chernarus": "/dayzxb_missions/dayzOffline.chernarusplus/custom",
+            "Livonia": "/dayzxb_missions/dayzOffline.enoch/custom"
+        }
+        
         dt_ev = st.date_input("Data", min_value=get_hora_brasilia())
-        h_in = st.text_input("Entrada (HH:MM)", "19:55")
-        h_out = st.text_input("Saída (HH:MM)", "21:55")
+        c_t1, c_t2 = st.columns(2)
+        h_in = c_t1.text_input("Entrada (HH:MM)", "19:55")
+        h_out = c_t2.text_input("Saída (HH:MM)", "21:55")
         rec = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"])
         
         if st.button("Confirmar Agendamento", use_container_width=True):
@@ -146,26 +161,26 @@ with tab1:
                 nova = {
                     "id": str(time.time()), 
                     "file": up_file.name, 
-                    "local_path": path, 
+                    "local_path": path,
+                    "mapa": mapa_choice, # Nome amigável
+                    "path": caminhos[mapa_choice], # Caminho real do FTP
                     "data": dt_ev.strftime("%d/%m/%Y"), 
-                    "in": h_in, 
-                    "out": h_out, 
-                    "rec": rec, 
+                    "in": h_in, "out": h_out, "rec": rec, 
                     "status": "Aguardando"
                 }
                 data["agendas"].append(nova)
                 save_data(data)
-                st.success(f"✅ {up_file.name} agendado!")
+                st.success(f"✅ {up_file.name} ({mapa_choice}) agendado!")
                 st.rerun()
-            else:
-                st.error("Selecione um arquivo primeiro!")
 
     with c2:
         st.subheader("📋 Lista de Execução")
         for i, agenda in enumerate(data["agendas"]):
             cor = {"Aguardando": "🔵", "Ativo": "🟢", "Finalizado": "⚪"}.get(agenda['status'], "🔴")
-            with st.expander(f"{cor} {agenda['file']} - {agenda['data']}"):
-                st.write(f"Janela: {agenda['in']} > {agenda['out']} | Status: {agenda['status']}")
+            with st.expander(f"{cor} {agenda['file']} - {agenda.get('mapa', 'Chernarus')}"):
+                st.write(f"📅 **Data:** {agenda['data']}")
+                st.write(f"🕒 **Janela:** {agenda['in']} > {agenda['out']}")
+                st.write(f"🗺️ **Mapa:** {agenda.get('mapa', 'Chernarus')}")
                 if st.button("Remover", key=f"del_{agenda['id']}"):
                     if os.path.exists(agenda['local_path']):
                         try: os.remove(agenda['local_path'])
@@ -176,6 +191,6 @@ with tab1:
 
 with tab2:
     st.subheader("Console de Monitoramento")
-    st.code(f"[{get_hora_brasilia().strftime('%H:%M:%S')}] Motor Ativo (Suporte XML/JSON).")
+    st.code(f"[{get_hora_brasilia().strftime('%H:%M:%S')}] Motor Ativo (Suporte Chernarus/Livonia).")
     for agenda in data["agendas"]:
-        st.text(f"Arquivo: {agenda['file']} | Status: {agenda['status']} | Data: {agenda['data']}")
+        st.text(f"Arquivo: {agenda['file']} | Mapa: {agenda.get('mapa')} | Status: {agenda['status']}")
