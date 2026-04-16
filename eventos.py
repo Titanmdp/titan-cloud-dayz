@@ -4,7 +4,15 @@ import os
 import json
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone # Adicionado timezone
+
+# --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASÍLIA) ---
+# Criamos um objeto de fuso horário fixo para UTC-3
+FUSO_BR = timezone(timedelta(hours=-3))
+
+def get_hora_brasilia():
+    """Retorna o datetime atual no fuso de Brasília"""
+    return datetime.now(FUSO_BR)
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Titan Cloud", layout="wide", page_icon="🚀")
@@ -29,17 +37,6 @@ def save_data(data_to_save):
     with open(CONFIG_FILE, "w") as f:
         json.dump(data_to_save, f, indent=4)
 
-# --- FUNÇÃO TÉCNICA: TESTAR CONEXÃO ---
-def testar_conexao_ftp(host, user, psw, port):
-    try:
-        ftp = ftplib.FTP()
-        ftp.connect(host, int(port), timeout=10)
-        ftp.login(user, psw)
-        ftp.quit()
-        return True, "Conexão estabelecida com sucesso!"
-    except Exception as e:
-        return False, str(e)
-
 # --- MOTOR DE AUTOMAÇÃO ---
 def disparar_ftp(acao, filename, local_path):
     conf = load_data()["ftp"]
@@ -61,9 +58,11 @@ def disparar_ftp(acao, filename, local_path):
 
 def automatic_worker():
     while True:
-        now = datetime.now()
+        # USA HORA DE BRASÍLIA PARA O MOTOR
+        now = get_hora_brasilia()
         hoje = now.strftime("%d/%m/%Y")
         agora = now.strftime("%H:%M")
+        
         current_data = load_data()
         mudou = False
         for agenda in current_data["agendas"]:
@@ -103,28 +102,29 @@ with st.sidebar:
     data["ftp"]["pass"] = st.text_input("Senha", type="password", value=data["ftp"]["pass"])
     data["ftp"]["port"] = st.text_input("Porta", value=data["ftp"]["port"])
     
-    # Colunas para organizar os botões de ação na sidebar
     col_save, col_test = st.columns(2)
-    
     with col_save:
         if st.button("Salvar Dados"):
             save_data(data)
             st.success("Salvo!")
-            
     with col_test:
         if st.button("⚡ Testar"):
-            with st.spinner("Testando..."):
-                ok, msg = testar_conexao_ftp(data["ftp"]["host"], data["ftp"]["user"], data["ftp"]["pass"], data["ftp"]["port"])
-                if ok: st.success("OK!")
-                else: st.error("Erro!")
-                if not ok: st.info(msg) # Mostra o erro detalhado se falhar
+            try:
+                ftp_test = ftplib.FTP()
+                ftp_test.connect(data["ftp"]["host"], int(data["ftp"]["port"]), timeout=10)
+                ftp_test.login(data["ftp"]["user"], data["ftp"]["pass"])
+                ftp_test.quit()
+                st.success("OK!")
+            except Exception as e:
+                st.error(f"Erro: {e}")
 
 st.title("🎮 BR THE LAST WORLD - Painel")
 
-# --- RELÓGIO (Isolado em fragmento) ---
+# --- RELÓGIO AJUSTADO PARA BRASÍLIA ---
 @st.fragment(run_every="1s")
 def show_clock():
-    st.metric(label="🕒 Hora do Servidor", value=datetime.now().strftime("%H:%M:%S"))
+    # USA HORA DE BRASÍLIA PARA O DISPLAY
+    st.metric(label="🕒 Hora de Brasília", value=get_hora_brasilia().strftime("%H:%M:%S"))
 
 show_clock()
 
@@ -135,7 +135,8 @@ with tab1:
     with c1:
         st.subheader("🚀 Novo Evento")
         up_file = st.file_uploader("Arquivo XML", type=["xml"])
-        dt_ev = st.date_input("Data", min_value=datetime.now())
+        # Data de hoje também ajustada para o fuso brasileiro no calendário
+        dt_ev = st.date_input("Data", min_value=get_hora_brasilia())
         h_in = st.text_input("Entrada (HH:MM)", "19:55")
         h_out = st.text_input("Saída (HH:MM)", "21:55")
         rec = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"])
@@ -166,6 +167,7 @@ with tab1:
 
 with tab2:
     st.subheader("Console de Monitoramento")
-    st.code(f"Motor Ativo. Verificando a cada 15s...")
+    # Log de monitoramento também com hora de Brasília
+    st.code(f"[{get_hora_brasilia().strftime('%H:%M:%S')}] Motor Ativo (Fuso: Brasília).")
     for agenda in data["agendas"]:
         st.text(f"Arquivo: {agenda['file']} | Status: {agenda['status']} | Data: {agenda['data']}")
