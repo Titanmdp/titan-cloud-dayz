@@ -136,7 +136,6 @@ with tab1:
     with col_form:
         st.subheader("🚀 Novo Evento")
         
-        # A chave muda dinamicamente para resetar o campo após cada agendamento
         uploader_key = f"uploader_{st.session_state['uploader_id']}"
         up_file = st.file_uploader("Arquivo (XML ou JSON)", type=["xml", "json"], key=uploader_key)
         
@@ -173,22 +172,33 @@ with tab1:
                 data["agendas"].append(nova)
                 save_data(data)
                 
-                # Incrementa o ID para resetar o widget de upload no próximo rerun
                 st.session_state['uploader_id'] += 1
                 
                 st.success("Agendado!")
-                time.sleep(0.5) # Pequena pausa para o usuário ver o sucesso
+                time.sleep(0.5)
                 st.rerun()
             else:
                 st.warning("Selecione um arquivo primeiro!")
 
     with col_list:
         st.subheader("📋 Lista de Execução")
+        if not data["agendas"]:
+            st.info("Nenhum agendamento pendente.")
+            
         for i, agenda in enumerate(data["agendas"]):
             cor = {"Aguardando": "🔵", "Ativo": "🟢", "Finalizado": "⚪"}.get(agenda['status'], "🔴")
+            
             with st.expander(f"{cor} {agenda['file']} - {agenda.get('mapa', 'Chernarus')}"):
-                st.write(f"🕒 **Janela:** {agenda['in']} > {agenda['out']}")
-                if st.button("Remover", key=f"del_{agenda['id']}"):
+                # Layout de informações detalhadas
+                st.markdown(f"**Janela do Agendamento:** {agenda['in']} > {agenda['out']}")
+                st.markdown(f"**Data do Agendamento:** {agenda['data']} ({agenda['rec']})")
+                st.markdown(f"**Arquivo Carregado:** `{agenda['file']}`")
+                st.markdown(f"**Mapa:** {agenda.get('mapa', 'Chernarus')}")
+                st.markdown(f"**Status Atual:** {agenda['status']}")
+                
+                st.divider()
+                
+                if st.button("Remover Agendamento", key=f"del_{agenda['id']}", type="secondary", use_container_width=True):
                     if os.path.exists(agenda['local_path']):
                         try: os.remove(agenda['local_path'])
                         except: pass
