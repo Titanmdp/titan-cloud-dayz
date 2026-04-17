@@ -6,6 +6,7 @@ import time
 import threading
 import secrets
 import string
+import requests
 from datetime import datetime, timedelta, timezone
 
 # --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASÍLIA) ---
@@ -40,6 +41,8 @@ def load_db(file, default_data):
     return default_data
 
 def save_db(file, data):
+    if not data and os.path.exists(file): 
+        return # Proteção: não salva se os dados sumiram da memória
     with open(file, "w") as f:
         json.dump(data, f, indent=4)
 
@@ -90,17 +93,50 @@ def validar_acesso(key):
         return False, "Sua KeyUser expirou!"
     return False, "KeyUser inválida!"
 
+def get_user_location():
+    try:
+        # Busca dados baseados no IP do visitante
+        response = requests.get('http://ip-api.com/json/', timeout=5).json()
+        if response['status'] == 'success':
+            return {
+                "ip": response['query'],
+                "cidade": response['city'],
+                "estado": response['regionName'],
+                "pais": response['country']
+            }
+    except:
+        return {"ip": "0.0.0.0", "cidade": "Desconhecido", "estado": "---", "pais": "---"}
+
 # --- TELA DE LOGIN ---
 if not st.session_state.authenticated:
     st.title("🔑 Titan Cloud - Login")
     login_key = st.text_input("Insira sua KeyUser", type="password")
+    
     if st.button("Entrar no Painel", use_container_width=True):
         ok, cargo = validar_acesso(login_key)
+        
         if ok:
+            # 1. Gera um Token Único para esta sessão (Aba do navegador)
+            token_sessao = secrets.token_hex(8)
+            
+            # 2. Captura os dados de quem está logando
+            dados_log = get_user_location()
+            
+            # 3. Se for cliente, atualiza o monitoramento no banco de dados
+            if cargo == "client":
+                st.session_state.db_users["keys"][login_key]["last_session"] = token_sessao
+                st.session_state.db_users["keys"][login_key]["last_ip"] = dados_log["ip"]
+                st.session_state.db_users["keys"][login_key]["local"] = dados_log["local"]
+                st.session_state.db_users["keys"][login_key]["last_login"] = get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
+                save_db(DB_USERS, st.session_state.db_users)
+
+            # 4. Define as variáveis de estado
             st.session_state.authenticated = True
             st.session_state.user_key = login_key
             st.session_state.role = cargo
+            st.session_state.session_token = token_sessao # Guarda o token no navegador
             st.session_state.view_mode = "admin" if cargo == "admin" else "client"
+            
             st.rerun()
         else:
             st.error(cargo)
@@ -150,57 +186,79 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         st.rerun()
 
     with tab_adm2:
-        st.subheader("👥 Gestão de Clientes Ativos")
-        if not st.session_state.db_users["keys"]:
-            st.info("Nenhum cliente cadastrado no momento.")
+    st.subheader("👥 Gestão de Clientes Ativos")
+    if not st.session_state.db_users["keys"]:
+        st.info("Nenhum cliente cadastrado no momento.")
+    
+    for k, v in list(st.session_state.db_users["keys"].items()):
+        dt_exp_check = datetime.strptime(v["expires"], "%d/%m/%Y").date()
+        dias_rest = (dt_exp_check - get_hora_brasilia().date()).days
+        cor_status = "🟢" if dias_rest > 0 else "🔴"
         
-        for k, v in list(st.session_state.db_users["keys"].items()):
-            dt_exp_check = datetime.strptime(v["expires"], "%d/%m/%Y").date()
-            dias_rest = (dt_exp_check - get_hora_brasilia().date()).days
-            cor_status = "🟢" if dias_rest > 0 else "🔴"
-            
-            # Busca limites globais configurados ou usa o padrão inicial
-            limites_globais = st.session_state.db_users.get('config_planos', PLANOS)
-            uso_atual = len(st.session_state.db_clients.get(k, {}).get("agendas", []))
-            limite_padrao = limites_globais.get(v.get('plano', 'Starter'), 2)
-            limite_final = v.get('limite_extra', limite_padrao)
-            
-            with st.expander(f"{cor_status} {v['server']} | {v.get('plano', 'Starter')} ({uso_atual}/{limite_final})"):
-                st.markdown("### 🔑 Credenciais de Acesso")
-                st.code(k) 
-                st.divider()
-                c_edit1, c_edit2 = st.columns(2)
-                with c_edit1:
-                    st.markdown("#### 📝 Informações e Plano")
-                    new_n = st.text_input("Editar Nome do Servidor", value=v['server'], key=f"n_{k}")
-                    new_p = st.selectbox("Trocar Plano", list(PLANOS.keys()), 
-                                         index=list(PLANOS.keys()).index(v.get('plano', 'Starter')), 
-                                         key=f"p_{k}")
-                    new_lim = st.number_input("Ajustar Limite de Eventos", min_value=1, value=int(limite_final), key=f"lim_{k}")
-                    if st.button("💾 Salvar Alterações", key=f"bn_{k}", use_container_width=True):
-                        st.session_state.db_users["keys"][k]['server'] = new_n
-                        st.session_state.db_users["keys"][k]['plano'] = new_p
-                        st.session_state.db_users["keys"][k]['limite_extra'] = new_lim
-                        save_db(DB_USERS, st.session_state.db_users)
-                        st.success("Dados atualizados!")
-                        st.rerun()
-                with c_edit2:
-                    st.markdown("#### 📅 Validade do Acesso")
-                    st.write(f"**Expira em:** {v['expires']} ({dias_rest} dias)")
-                    add_d = st.number_input("Adicionar dias", min_value=1, value=30, key=f"d_{k}")
-                    if st.button("➕ Estender/Renovar", key=f"bd_{k}", use_container_width=True):
-                        nova_data = (dt_exp_check + timedelta(days=add_d)).strftime("%d/%m/%Y")
-                        st.session_state.db_users["keys"][k]['expires'] = nova_data
-                        save_db(DB_USERS, st.session_state.db_users)
-                        st.success(f"Estendido para {nova_data}!")
-                        st.rerun()
-                st.divider()
-                if st.button("🗑️ EXCLUIR CLIENTE", key=f"del_{k}", type="primary", use_container_width=True):
-                    del st.session_state.db_users["keys"][k]
-                    if k in st.session_state.db_clients: del st.session_state.db_clients[k]
+        # Busca limites globais configurados ou usa o padrão inicial
+        limites_globais = st.session_state.db_users.get('config_planos', PLANOS)
+        uso_atual = len(st.session_state.db_clients.get(k, {}).get("agendas", []))
+        limite_padrao = limites_globais.get(v.get('plano', 'Starter'), 2)
+        limite_final = v.get('limite_extra', limite_padrao)
+        
+        with st.expander(f"{cor_status} {v['server']} | {v.get('plano', 'Starter')} ({uso_atual}/{limite_final})"):
+            st.markdown("### 🔑 Credenciais de Acesso")
+            st.code(k) 
+            st.divider()
+
+            # --- NOVO: MONITORAMENTO DE ACESSOS ---
+            st.markdown("#### 🌐 Monitoramento e Segurança")
+            col_mon1, col_mon2 = st.columns(2)
+            with col_mon1:
+                st.write(f"**📍 Localização:** {v.get('local', 'Nenhum acesso registrado')}")
+                st.write(f"**🖥️ IP:** {v.get('last_ip', '0.0.0.0')}")
+            with col_mon2:
+                st.write(f"**🕒 Último Login:** {v.get('last_login', '---')}")
+                if st.button("🚫 Banir Acesso (Expirar Key)", key=f"ban_{k}", type="primary", use_container_width=True):
+                    # Define a data de expiração para o passado (ontem)
+                    v['expires'] = (get_hora_brasilia() - timedelta(days=1)).strftime("%d/%m/%Y")
                     save_db(DB_USERS, st.session_state.db_users)
-                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                    st.warning(f"O acesso de {v['server']} foi bloqueado.")
                     st.rerun()
+            
+            st.divider()
+            
+            c_edit1, c_edit2 = st.columns(2)
+            with c_edit1:
+                st.markdown("#### 📝 Informações e Plano")
+                new_n = st.text_input("Editar Nome do Servidor", value=v['server'], key=f"n_{k}")
+                new_p = st.selectbox("Trocar Plano", list(PLANOS.keys()), 
+                                     index=list(PLANOS.keys()).index(v.get('plano', 'Starter')), 
+                                     key=f"p_{k}")
+                new_lim = st.number_input("Ajustar Limite de Eventos", min_value=1, value=int(limite_final), key=f"lim_{k}")
+                if st.button("💾 Salvar Alterações", key=f"bn_{k}", use_container_width=True):
+                    st.session_state.db_users["keys"][k]['server'] = new_n
+                    st.session_state.db_users["keys"][k]['plano'] = new_p
+                    st.session_state.db_users["keys"][k]['limite_extra'] = new_lim
+                    save_db(DB_USERS, st.session_state.db_users)
+                    st.success("Dados atualizados!")
+                    st.rerun()
+            
+            with c_edit2:
+                st.markdown("#### 📅 Validade do Acesso")
+                st.write(f"**Expira em:** {v['expires']} ({dias_rest} dias)")
+                add_d = st.number_input("Adicionar dias", min_value=1, value=30, key=f"d_{k}")
+                if st.button("➕ Estender/Renovar", key=f"bd_{k}", use_container_width=True):
+                    nova_data = (dt_exp_check + timedelta(days=add_d)).strftime("%d/%m/%Y")
+                    st.session_state.db_users["keys"][k]['expires'] = nova_data
+                    save_db(DB_USERS, st.session_state.db_users)
+                    st.success(f"Estendido para {nova_data}!")
+                    st.rerun()
+            
+            st.divider()
+            
+            if st.button("🗑️ EXCLUIR CLIENTE PERMANENTEMENTE", key=f"del_{k}", type="primary", use_container_width=True, help="Remove todos os dados e agendamentos do cliente."):
+                del st.session_state.db_users["keys"][k]
+                if k in st.session_state.db_clients: 
+                    del st.session_state.db_clients[k]
+                save_db(DB_USERS, st.session_state.db_users)
+                save_db(DB_CLIENTS, st.session_state.db_clients)
+                st.rerun()
 
     with tab_adm3:
         st.subheader("⚙️ Configuração Global de Limites")
@@ -239,10 +297,16 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
 # --- ÁREA DO CLIENTE ---
 user_id = st.session_state.user_key
 
-# 1. FORÇAR RECARREGAMENTO DO BANCO (Crucial para ver os Logs do Robô)
-st.session_state.db_clients = load_db(DB_CLIENTS, {})
+# 1. SINCRONIZAÇÃO TOTAL (Evita perda de agendas e garante trava de sessão)
+# Carregamos os dados direto do disco para variáveis temporárias
+db_disco_clients = load_db(DB_CLIENTS, {})
+db_disco_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
 
-# Inicializa o banco de dados do cliente se for o primeiro acesso dele
+# Atualizamos o session_state com o que veio do disco (Fonte da Verdade)
+st.session_state.db_clients = db_disco_clients
+st.session_state.db_users = db_disco_users
+
+# 2. Inicialização Segura (Garante que a estrutura exista sem apagar o que já tem)
 if user_id not in st.session_state.db_clients:
     st.session_state.db_clients[user_id] = {
         "ftp": {"host": "", "user": "", "pass": "", "port": "21"}, 
@@ -251,19 +315,35 @@ if user_id not in st.session_state.db_clients:
     }
     save_db(DB_CLIENTS, st.session_state.db_clients)
 
+# Definimos o client_data apontando para a memória já sincronizada
 client_data = st.session_state.db_clients[user_id]
 
-# Correção para clientes antigos que não possuem a chave logs
+# Correção para manter logs sempre ativos
 if "logs" not in client_data:
     client_data["logs"] = []
     save_db(DB_CLIENTS, st.session_state.db_clients)
 
-# Busca informações do usuário no banco de chaves (Admin)
+# 3. Busca informações do usuário (Admin)
 user_info = st.session_state.db_users["keys"].get(user_id, {
     "server": "Meu Servidor (Admin)", 
     "plano": "Enterprise", 
     "expires": "31/12/2099"
 })
+
+# --- TRAVA DE ACESSO SIMULTÂNEO ---
+if st.session_state.role == "client":
+    # Buscamos o token direto do user_info recém carregado do disco
+    token_valido = user_info.get("last_session")
+    
+    # Se o token guardado no navegador for diferente do último gravado no disco:
+    if st.session_state.get('session_token') != token_valido:
+        st.warning("⚠️ Sessão Finalizada")
+        st.error("Esta KeyUser foi conectada em outro dispositivo ou navegador.")
+        st.info("Para garantir a segurança, permitimos apenas um acesso simultâneo.")
+        if st.button("Fazer Login Novamente", use_container_width=True):
+            st.session_state.authenticated = False
+            st.rerun()
+        st.stop() # Bloqueia o restante do painel para evitar sobrescrever dados
 
 # --- LÓGICA DE LIMITES (PAINEL DINÂMICO) ---
 # 1. Busca os limites globais configurados na Tab 3 (Admin). 
