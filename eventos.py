@@ -203,12 +203,13 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
 
     st.title("🛡️ Painel de Controle - Administrador")
     
-    # 1. Definição das 4 abas no topo do bloco Admin
-    tab_adm1, tab_adm2, tab_adm3, tab_adm4 = st.tabs([
+    # 1. AJUSTE: Atualizada a lista para 5 abas
+    tab_adm1, tab_adm2, tab_adm3, tab_adm4, tab_adm5 = st.tabs([
         "➕ Gerar Chaves", 
         "👥 Gestão de Clientes", 
         "⚙️ Configurar Planos",
-        "💾 Backup/Restore"
+        "💾 Backup/Restore",
+        "📢 Comunicados"
     ])
 
     with tab_adm1:
@@ -361,6 +362,53 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         else: st.error("❌ Arquivo inválido!")
                     except Exception as e: st.error(f"❌ Erro: {e}")
 
+    with tab_adm5:
+        st.subheader("📢 Enviar Comunicado Oficial")
+        col_c1, col_c2 = st.columns([1, 2])
+        
+        with col_c1:
+            # Seleção de Alvos
+            opcoes_clientes = {v['server']: k for k, v in st.session_state.db_users["keys"].items()}
+            alvos = st.multiselect("Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos")
+            
+            st.write("**Enviar via:**")
+            send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
+            send_mail = st.checkbox("E-mail")
+            send_wa = st.checkbox("WhatsApp")
+            send_disc = st.checkbox("Discord (Webhook do Cliente)")
+
+        with col_c2:
+            titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="tit_com")
+            corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="msg_com")
+            
+            if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
+                if titulo_com and corpo_com:
+                    destinatarios = []
+                    if "Todos" in alvos:
+                        destinatarios = list(st.session_state.db_users["keys"].keys())
+                    else:
+                        destinatarios = [opcoes_clientes[nome] for nome in alvos]
+
+                    comunicado_obj = {
+                        "id": str(time.time()),
+                        "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
+                        "titulo": titulo_com,
+                        "mensagem": corpo_com,
+                        "lido": False
+                    }
+                    
+                    for d_id in destinatarios:
+                        if "comunicados" not in st.session_state.db_clients[d_id]:
+                            st.session_state.db_clients[d_id]["comunicados"] = []
+                        st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
+                    
+                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                    st.success(f"✅ Comunicado enviado para {len(destinatarios)} clientes!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("Preencha o título e a mensagem.")
+
     # O st.stop() deve ficar aqui, fora das tabs, mas dentro do bloco admin
     st.stop()
 
@@ -368,32 +416,31 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
 user_id = st.session_state.user_key
 
 # 1. SINCRONIZAÇÃO TOTAL (Evita perda de agendas e garante trava de sessão)
-# Forçamos a leitura do disco para que a memória esteja sempre idêntica ao arquivo JSON
 db_disco_clients = load_db(DB_CLIENTS, {})
 db_disco_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
 
-# Atualizamos o estado da sessão com os dados reais do disco
 st.session_state.db_clients = db_disco_clients
 st.session_state.db_users = db_disco_users
 
-# 2. Inicialização Segura (Cria o perfil do cliente no banco se não existir)
+# 2. Inicialização Segura
 if user_id not in st.session_state.db_clients:
     st.session_state.db_clients[user_id] = {
         "ftp": {"host": "", "user": "", "pass": "", "port": "21"}, 
         "agendas": [],
-        "logs": []  
+        "logs": [],
+        "comunicados": [] # Nova chave para os avisos do Admin
     }
     save_db(DB_CLIENTS, st.session_state.db_clients)
 
-# Apontamos para o conjunto de dados deste cliente específico
 client_data = st.session_state.db_clients[user_id]
 
-# Garante que a lista de logs exista (importante para evitar erro de renderização)
+# Correções de estrutura para clientes antigos
 if "logs" not in client_data:
     client_data["logs"] = []
-    save_db(DB_CLIENTS, st.session_state.db_clients)
+if "comunicados" not in client_data:
+    client_data["comunicados"] = []
 
-# 3. Busca informações de contrato e plano do usuário
+# 3. Busca informações de contrato
 user_info = st.session_state.db_users["keys"].get(user_id, {
     "server": "Meu Servidor (Admin)", 
     "plano": "Enterprise", 
@@ -402,10 +449,7 @@ user_info = st.session_state.db_users["keys"].get(user_id, {
 
 # --- TRAVA DE ACESSO SIMULTÂNEO ---
 if st.session_state.role == "client":
-    # Verificamos qual foi o último token de login gerado no banco de dados
     token_valido = user_info.get("last_session")
-    
-    # Se o token deste navegador for diferente do token oficial no disco, desconecta
     if st.session_state.get('session_token') != token_valido:
         st.warning("⚠️ Sessão Finalizada")
         st.error("Esta KeyUser foi conectada em outro dispositivo ou navegador.")
@@ -413,21 +457,15 @@ if st.session_state.role == "client":
         if st.button("Fazer Login Novamente", use_container_width=True):
             st.session_state.authenticated = False
             st.rerun()
-        st.stop() # Interrompe a execução aqui para proteger os dados
+        st.stop()
 
-# --- LÓGICA DE LIMITES (PAINEL DINÂMICO) ---
-# Busca limites da Tab 3 ou usa o padrão do topo do código
+# --- LÓGICA DE LIMITES E EXPIRAÇÃO ---
 limites_globais = st.session_state.db_users.get('config_planos', PLANOS)
 plano_atual = user_info.get("plano", "Starter")
-
-# Hierarquia: Limite Extra (Tab 2) > Limite Global (Tab 3)
 limite_padrao_do_plano = limites_globais.get(plano_atual, 2)
 limite_agendas = int(user_info.get("limite_extra", limite_padrao_do_plano))
-
-# Conta total de agendamentos ativos/programados
 total_agendas = len(client_data.get("agendas", []))
 
-# --- LÓGICA DE EXPIRAÇÃO ---
 if st.session_state.get('role') == "admin":
     exp_status = "Ilimitado (Admin)"
 else:
@@ -435,8 +473,83 @@ else:
         dt_exp_obj = datetime.strptime(user_info["expires"], "%d/%m/%Y").date()
         dias_restantes = (dt_exp_obj - get_hora_brasilia().date()).days
         exp_status = f"{max(0, dias_restantes)} dias"
-    except Exception:
+    except:
         exp_status = "Erro na data"
+
+# --- BARRA LATERAL (SIDEBAR) DO CLIENTE ---
+with st.sidebar:
+    st.title("👤 Minha Conta")
+    
+    # Botão para Admin voltar ao painel
+    if st.session_state.role == "admin":
+        if st.button("⚙️ VOLTAR AO PAINEL ADMIN", type="primary", use_container_width=True):
+            st.session_state.view_mode = "admin"
+            st.rerun()
+            
+    # Informações de Status
+    st.write(f"Servidor: **{user_info['server']}**")
+    st.write(f"Plano: **{plano_atual}**")
+    st.markdown(f"Expira em: **{exp_status}**")
+    
+    # Barra de Progresso de Agendamentos
+    progresso = min(total_agendas / limite_agendas, 1.0) if limite_agendas > 0 else 0
+    st.progress(progresso, text=f"Uso: {total_agendas}/{limite_agendas}")
+    
+    # Popover de Regras e Suporte (O "Pop-up" profissional)
+    st.divider()
+    with st.popover("ℹ️ Informações e Suporte", use_container_width=True):
+        st.markdown("### 📜 Regras de Uso")
+        st.caption("Ao utilizar o sistema, você concorda com:")
+        st.write("- Proibido compartilhamento de KeyUser.")
+        st.write("- Respeito aos limites de processos do plano.")
+        st.write("- O Admin não se responsabiliza por dados de FTP incorretos.")
+        
+        st.divider()
+        st.markdown("### ✉️ Contatar Admin")
+        with st.form("form_suporte"):
+            assunto = st.text_input("Assunto", placeholder="Ex: Dúvida sobre plano")
+            mensagem = st.text_area("Sua dúvida ou problema")
+            if st.form_submit_button("Enviar Ticket", use_container_width=True):
+                # Registra no log do cliente para o Admin visualizar
+                registrar_log(user_id, f"SOLICITAÇÃO DE SUPORTE: {assunto}", "info")
+                st.success("Mensagem enviada com sucesso!")
+    
+    st.divider()
+    if st.button("🚪 Sair do Sistema", use_container_width=True):
+        st.session_state.authenticated = False
+        st.rerun()
+
+# --- CORPO PRINCIPAL: TÍTULO E ABAS ---
+st.title(f"🎮 {user_info['server']}")
+
+# Criação das 3 abas principais
+tab1, tab2, tab3 = st.tabs(["📅 Agendamentos", "📜 Logs", "📢 Comunicados"])
+
+with tab1:
+    # --- MANTENHA AQUI SEU CÓDIGO ATUAL DE AGENDAMENTOS ---
+    st.subheader("📅 Seus Agendamentos")
+    # (Insira aqui o loop de agendas que você já tem)
+    pass
+
+with tab2:
+    # --- MANTENHA AQUI SEU CÓDIGO ATUAL DE LOGS ---
+    st.subheader("📜 Histórico de Atividades")
+    # (Insira aqui o display de logs que você já tem)
+    pass
+
+with tab3:
+    # --- NOVA ABA DE COMUNICADOS ---
+    st.subheader("📢 Comunicados Oficiais")
+    # Busca as mensagens enviadas pelo Admin na tab_adm5
+    mensagens = client_data.get("comunicados", [])
+    
+    if not mensagens:
+        st.info("Você não possui comunicados recentes.")
+    else:
+        for m in mensagens:
+            # Mostra cada comunicado em um expander elegante
+            with st.expander(f"📌 {m['titulo']} - {m['data']}"):
+                st.write(m['mensagem'])
 
 # --- MOTOR DE AUTOMAÇÃO (ROBÔ DE EXECUÇÃO) ---
 
