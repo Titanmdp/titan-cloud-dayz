@@ -126,7 +126,8 @@ if not st.session_state.authenticated:
             if cargo == "client":
                 st.session_state.db_users["keys"][login_key]["last_session"] = token_sessao
                 st.session_state.db_users["keys"][login_key]["last_ip"] = dados_log["ip"]
-                st.session_state.db_users["keys"][login_key]["local"] = dados_log["local"]
+                # Ajustado para usar as chaves corretas:
+                st.session_state.db_users["keys"][login_key]["local"] = f"{dados_log['cidade']} - {dados_log['estado']}"
                 st.session_state.db_users["keys"][login_key]["last_login"] = get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
                 save_db(DB_USERS, st.session_state.db_users)
 
@@ -186,11 +187,11 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         st.rerun()
 
     with tab_adm2:
-    st.subheader("👥 Gestão de Clientes Ativos")
-    if not st.session_state.db_users["keys"]:
-        st.info("Nenhum cliente cadastrado no momento.")
-    
-    for k, v in list(st.session_state.db_users["keys"].items()):
+        st.subheader("👥 Gestão de Clientes Ativos") # Verifique se há 8 espaços aqui
+        if not st.session_state.db_users["keys"]:
+            st.info("Nenhum cliente cadastrado no momento.")
+        
+        for k, v in list(st.session_state.db_users["keys"].items()):
         dt_exp_check = datetime.strptime(v["expires"], "%d/%m/%Y").date()
         dias_rest = (dt_exp_check - get_hora_brasilia().date()).days
         cor_status = "🟢" if dias_rest > 0 else "🔴"
@@ -298,15 +299,15 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
 user_id = st.session_state.user_key
 
 # 1. SINCRONIZAÇÃO TOTAL (Evita perda de agendas e garante trava de sessão)
-# Carregamos os dados direto do disco para variáveis temporárias
+# Forçamos a leitura do disco para que a memória esteja sempre idêntica ao arquivo JSON
 db_disco_clients = load_db(DB_CLIENTS, {})
 db_disco_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
 
-# Atualizamos o session_state com o que veio do disco (Fonte da Verdade)
+# Atualizamos o estado da sessão com os dados reais do disco
 st.session_state.db_clients = db_disco_clients
 st.session_state.db_users = db_disco_users
 
-# 2. Inicialização Segura (Garante que a estrutura exista sem apagar o que já tem)
+# 2. Inicialização Segura (Cria o perfil do cliente no banco se não existir)
 if user_id not in st.session_state.db_clients:
     st.session_state.db_clients[user_id] = {
         "ftp": {"host": "", "user": "", "pass": "", "port": "21"}, 
@@ -315,15 +316,15 @@ if user_id not in st.session_state.db_clients:
     }
     save_db(DB_CLIENTS, st.session_state.db_clients)
 
-# Definimos o client_data apontando para a memória já sincronizada
+# Apontamos para o conjunto de dados deste cliente específico
 client_data = st.session_state.db_clients[user_id]
 
-# Correção para manter logs sempre ativos
+# Garante que a lista de logs exista (importante para evitar erro de renderização)
 if "logs" not in client_data:
     client_data["logs"] = []
     save_db(DB_CLIENTS, st.session_state.db_clients)
 
-# 3. Busca informações do usuário (Admin)
+# 3. Busca informações de contrato e plano do usuário
 user_info = st.session_state.db_users["keys"].get(user_id, {
     "server": "Meu Servidor (Admin)", 
     "plano": "Enterprise", 
@@ -332,34 +333,29 @@ user_info = st.session_state.db_users["keys"].get(user_id, {
 
 # --- TRAVA DE ACESSO SIMULTÂNEO ---
 if st.session_state.role == "client":
-    # Buscamos o token direto do user_info recém carregado do disco
+    # Verificamos qual foi o último token de login gerado no banco de dados
     token_valido = user_info.get("last_session")
     
-    # Se o token guardado no navegador for diferente do último gravado no disco:
+    # Se o token deste navegador for diferente do token oficial no disco, desconecta
     if st.session_state.get('session_token') != token_valido:
         st.warning("⚠️ Sessão Finalizada")
         st.error("Esta KeyUser foi conectada em outro dispositivo ou navegador.")
-        st.info("Para garantir a segurança, permitimos apenas um acesso simultâneo.")
+        st.info("Para sua segurança, permitimos apenas um acesso simultâneo por conta.")
         if st.button("Fazer Login Novamente", use_container_width=True):
             st.session_state.authenticated = False
             st.rerun()
-        st.stop() # Bloqueia o restante do painel para evitar sobrescrever dados
+        st.stop() # Interrompe a execução aqui para proteger os dados
 
 # --- LÓGICA DE LIMITES (PAINEL DINÂMICO) ---
-# 1. Busca os limites globais configurados na Tab 3 (Admin). 
-# Se a Tab 3 nunca foi usada, ele usa o dicionário PLANOS do topo do código.
+# Busca limites da Tab 3 ou usa o padrão do topo do código
 limites_globais = st.session_state.db_users.get('config_planos', PLANOS)
-
-# 2. Identifica o plano do cliente atual
 plano_atual = user_info.get("plano", "Starter")
 
-# 3. Define o limite final seguindo a hierarquia de prioridade:
-# Prioridade 1: Limite extra individual definido na Tab 2 (Gestão de Clientes)
-# Prioridade 2: Limite global do plano definido na Tab 3 (Configurar Planos)
+# Hierarquia: Limite Extra (Tab 2) > Limite Global (Tab 3)
 limite_padrao_do_plano = limites_globais.get(plano_atual, 2)
-limite_agendas = user_info.get("limite_extra", limite_padrao_do_plano)
+limite_agendas = int(user_info.get("limite_extra", limite_padrao_do_plano))
 
-# 4. Conta quantos eventos o cliente já tem criados
+# Conta total de agendamentos ativos/programados
 total_agendas = len(client_data.get("agendas", []))
 
 # --- LÓGICA DE EXPIRAÇÃO ---
@@ -367,10 +363,8 @@ if st.session_state.get('role') == "admin":
     exp_status = "Ilimitado (Admin)"
 else:
     try:
-        # Calcula a diferença entre a data de expiração e hoje
         dt_exp_obj = datetime.strptime(user_info["expires"], "%d/%m/%Y").date()
         dias_restantes = (dt_exp_obj - get_hora_brasilia().date()).days
-        # Garante que não mostre dias negativos
         exp_status = f"{max(0, dias_restantes)} dias"
     except Exception:
         exp_status = "Erro na data"
