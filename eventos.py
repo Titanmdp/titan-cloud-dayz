@@ -490,249 +490,174 @@ else:
     except:
         exp_status = "Erro na data"
 
-# --- BARRA LATERAL (SIDEBAR) DO CLIENTE ---
+# --- ÁREA DO CLIENTE ---
+user_id = st.session_state.user_key
+
+# 1. SINCRONIZAÇÃO E INICIALIZAÇÃO SEGURA
+db_disco_clients = load_db(DB_CLIENTS, {})
+db_disco_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
+st.session_state.db_clients = db_disco_clients
+st.session_state.db_users = db_disco_users
+
+if user_id not in st.session_state.db_clients:
+    st.session_state.db_clients[user_id] = {
+        "ftp": {"host": "", "user": "", "pass": "", "port": "21"}, 
+        "agendas": [], "logs": [], "comunicados": []
+    }
+    save_db(DB_CLIENTS, st.session_state.db_clients)
+
+client_data = st.session_state.db_clients[user_id]
+user_info = st.session_state.db_users["keys"].get(user_id, {"server": "Servidor", "plano": "Starter", "expires": "01/01/2000"})
+
+# --- BARRA LATERAL (SIDEBAR) ÚNICA ---
 with st.sidebar:
     st.title("👤 Minha Conta")
     
-    # Botão para Admin voltar ao painel
     if st.session_state.role == "admin":
-        if st.button("⚙️ VOLTAR AO PAINEL ADMIN", type="primary", use_container_width=True, key="btn_voltar_admin"):
+        if st.button("⚙️ VOLTAR AO PAINEL ADMIN", type="primary", use_container_width=True, key="back_to_admin_unique"):
             st.session_state.view_mode = "admin"
             st.rerun()
             
-    # Informações de Status
     st.write(f"Servidor: **{user_info['server']}**")
     st.write(f"Plano: **{plano_atual}**")
     st.markdown(f"Expira em: **{exp_status}**")
     
-    # Barra de Progresso de Agendamentos
     progresso = min(total_agendas / limite_agendas, 1.0) if limite_agendas > 0 else 0
     st.progress(progresso, text=f"Uso: {total_agendas}/{limite_agendas}")
     
-    # Popover de Regras e Suporte
     st.divider()
     with st.popover("ℹ️ Informações e Suporte", use_container_width=True):
         st.markdown("### 📜 Regras de Uso")
-        st.write("- Proibido compartilhamento de KeyUser.")
-        st.write("- Respeito aos limites de processos do plano.")
-        st.write("- O Admin não se responsabiliza por dados de FTP incorretos.")
-        
+        st.write("- Proibido compartilhar KeyUser.\n- Respeite os limites do plano.")
         st.divider()
-        st.markdown("### ✉️ Contatar Admin")
-        # Chave única para o formulário de suporte
-        with st.form("form_suporte_cliente", clear_on_submit=True):
-            assunto_sup = st.text_input("Assunto", key="sup_assunto")
-            mensagem_sup = st.text_area("Sua dúvida", key="sup_msg")
+        with st.form("form_suporte_sidebar", clear_on_submit=True):
+            assunto_sup = st.text_input("Assunto", key="sidebar_sup_assunto")
+            mensagem_sup = st.text_area("Sua dúvida", key="sidebar_sup_msg")
             if st.form_submit_button("Enviar Ticket", use_container_width=True):
-                registrar_log(user_id, f"SOLICITAÇÃO DE SUPORTE: {assunto_sup}", "info")
-                st.success("Mensagem enviada!")
+                registrar_log(user_id, f"SUPORTE: {assunto_sup}", "info")
+                st.success("Enviado!")
 
-    # --- CONFIGURAÇÕES FTP ---
-    st.divider()
     st.subheader("⚙️ Configurações FTP")
-    # Chaves únicas para os inputs de FTP
-    client_data["ftp"]["host"] = st.text_input("Host", value=client_data["ftp"]["host"], key="ftp_host_input")
-    client_data["ftp"]["user"] = st.text_input("Usuário", value=client_data["ftp"]["user"], key="ftp_user_input")
-    client_data["ftp"]["pass"] = st.text_input("Senha", type="password", value=client_data["ftp"]["pass"], key="ftp_pass_input")
-    client_data["ftp"]["port"] = st.text_input("Porta", value=client_data["ftp"]["port"], key="ftp_port_input")
+    client_data["ftp"]["host"] = st.text_input("Host", value=client_data["ftp"]["host"], key="f_host")
+    client_data["ftp"]["user"] = st.text_input("Usuário", value=client_data["ftp"]["user"], key="f_user")
+    client_data["ftp"]["pass"] = st.text_input("Senha", type="password", value=client_data["ftp"]["pass"], key="f_pass")
+    client_data["ftp"]["port"] = st.text_input("Porta", value=client_data["ftp"]["port"], key="f_port")
     
-    c_sv, c_ts = st.columns(2)
-    if c_sv.button("Salvar Dados", use_container_width=True, key="btn_save_ftp"):
+    col_btn1, col_btn2 = st.columns(2)
+    if col_btn1.button("Salvar Dados", use_container_width=True, key="f_save"):
         save_db(DB_CLIENTS, st.session_state.db_clients)
         st.success("Salvo!")
-        
-    if c_ts.button("⚡ Testar", use_container_width=True, key="btn_test_ftp"):
+    if col_btn2.button("⚡ Testar", use_container_width=True, key="f_test"):
         try:
-            import ftplib
             ftp_t = ftplib.FTP()
             ftp_t.connect(client_data["ftp"]["host"], int(client_data["ftp"]["port"]), timeout=10)
             ftp_t.login(client_data["ftp"]["user"], client_data["ftp"]["pass"])
             ftp_t.quit()
-            registrar_log(user_id, "Conexão FTP testada com sucesso.", "sucesso")
+            registrar_log(user_id, "FTP OK", "sucesso")
             st.success("Conexão OK!")
         except Exception as e:
-            registrar_log(user_id, f"Falha no teste FTP: {str(e)}", "erro")
-            st.error("Erro na conexão")
+            st.error("Erro FTP")
 
     st.divider()
-    if st.button("🚪 Sair do Painel", use_container_width=True, key="btn_logout_sidebar"):
+    if st.button("🚪 Sair do Sistema", use_container_width=True, key="logout_final"):
         st.session_state.authenticated = False
         st.rerun()
 
-    # Relógio em tempo real
     @st.fragment(run_every="1s")
     def sidebar_clock():
         st.metric(label="🕒 Brasília", value=get_hora_brasilia().strftime("%H:%M:%S"))
     sidebar_clock()
 
-# --- CORPO PRINCIPAL: TÍTULO E ABAS ---
+# --- CORPO PRINCIPAL ÚNICO ---
 st.title(f"🎮 {user_info['server']}")
-
-# Criação das 3 abas principais (Apenas uma vez no código)
 tab1, tab2, tab3 = st.tabs(["📅 Agendamentos", "📜 Logs", "📢 Comunicados"])
 
 with tab1:
     c1, c2 = st.columns([1, 1.5])
-    
     with c1:
         st.subheader("🚀 Novo Evento")
         if total_agendas >= limite_agendas:
-            st.error(f"Limite do plano {plano_atual} atingido ({limite_agendas}).")
+            st.error("Limite atingido.")
         else:
-            if 'uploader_id' not in st.session_state: st.session_state.uploader_id = 0
-            up_file = st.file_uploader("Arquivo", type=["xml", "json"], key=f"up_{st.session_state.uploader_id}")
-            mapa = st.selectbox("Mapa", ["Chernarus", "Livonia"], key="sel_mapa_novo")
-            caminhos = {
-                "Chernarus": "/dayzxb_missions/dayzOffline.chernarusplus/custom", 
-                "Livonia": "/dayzxb_missions/dayzOffline.enoch/custom"
-            }
-            dt_ev = st.date_input("Data", min_value=get_hora_brasilia(), key="date_evento_novo")
-            h_in = st.text_input("Entrada", "19:55", key="h_in_novo")
-            h_out = st.text_input("Saída", "21:55", key="h_out_novo")
-            rec = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key="rec_novo")
-            
-            if st.button("Confirmar Agendamento", use_container_width=True, key="btn_confirm_agenda"):
+            up_file = st.file_uploader("Arquivo", type=["xml", "json"], key="up_main_client")
+            mapa = st.selectbox("Mapa", ["Chernarus", "Livonia"], key="map_main")
+            dt_ev = st.date_input("Data", min_value=get_hora_brasilia(), key="date_main")
+            h_in = st.text_input("Entrada", "19:55", key="in_main")
+            h_out = st.text_input("Saída", "21:55", key="out_main")
+            if st.button("Confirmar Agendamento", use_container_width=True, key="conf_main"):
                 if up_file:
-                    safe_filename = f"{user_id[:5]}_{up_file.name}"
-                    path = os.path.join(UPLOAD_DIR, safe_filename)
-                    with open(path, "wb") as f: 
-                        f.write(up_file.getbuffer())
-                    
-                    nova = {
-                        "id": str(time.time()), 
-                        "file": up_file.name, 
-                        "local_path": path, 
-                        "mapa": mapa, 
-                        "path": caminhos[mapa], 
-                        "data": dt_ev.strftime("%d/%m/%Y"), 
-                        "in": h_in, 
-                        "out": h_out, 
-                        "rec": rec, 
-                        "status": "Aguardando"
-                    }
-                    
-                    client_data["agendas"].append(nova)
+                    safe_fn = f"{user_id[:5]}_{up_file.name}"
+                    path = os.path.join(UPLOAD_DIR, safe_fn)
+                    with open(path, "wb") as f: f.write(up_file.getbuffer())
+                    client_data["agendas"].append({"id": str(time.time()), "file": up_file.name, "local_path": path, "mapa": mapa, "path": "/dayzxb_missions/dayzOffline.chernarusplus/custom" if mapa=="Chernarus" else "/dayzxb_missions/dayzOffline.enoch/custom", "data": dt_ev.strftime("%d/%m/%Y"), "in": h_in, "out": h_out, "rec": "Único", "status": "Aguardando"})
                     save_db(DB_CLIENTS, st.session_state.db_clients)
-                    registrar_log(user_id, f"Novo agendamento: {up_file.name}", "info")
-                    st.success("Evento agendado!")
-                    st.session_state.uploader_id += 1
+                    registrar_log(user_id, f"Agendado: {up_file.name}", "info")
                     st.rerun()
 
     with c2:
         st.subheader("📋 Lista de Execução")
-        if not client_data.get("agendas"):
-            st.info("Nenhum evento agendado.")
-        else:
-            for agenda in client_data["agendas"]:
-                status_atual = agenda.get('status', 'Aguardando')
-                cor = {"Aguardando": "🔵", "Ativo": "🟢", "Finalizado": "⚪"}.get(status_atual, "🔴")
-                with st.expander(f"{cor} {agenda['file']} ({agenda['data']})"):
-                    st.write(f"Status: {status_atual}")
-                    if st.button("Remover", key=f"del_{agenda['id']}", use_container_width=True):
-                        client_data["agendas"] = [a for a in client_data["agendas"] if a["id"] != agenda["id"]]
-                        save_db(DB_CLIENTS, st.session_state.db_clients)
-                        st.rerun()
+        for agenda in client_data.get("agendas", []):
+            cor = {"Aguardando": "🔵", "Ativo": "🟢"}.get(agenda.get("status"), "🔴")
+            with st.expander(f"{cor} {agenda['file']}"):
+                st.write(f"Data: {agenda['data']} | Status: {agenda.get('status')}")
+                if st.button("Remover", key=f"rem_{agenda['id']}", use_container_width=True):
+                    client_data["agendas"] = [a for a in client_data["agendas"] if a["id"] != agenda["id"]]
+                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                    st.rerun()
 
 with tab2:
     st.subheader("📜 Histórico de Atividades")
-    # Carregamento fresco para garantir sincronia com o worker
-    db_fresco = load_db(DB_CLIENTS, {})
-    logs_frescos = db_fresco.get(user_id, {}).get("logs", [])
-    
-    if not logs_frescos:
-        st.info("Sem logs no momento.")
-    else:
-        if st.button("Limpar Histórico", key="btn_clear_logs"):
-            client_data["logs"] = []
-            save_db(DB_CLIENTS, st.session_state.db_clients)
-            st.rerun()
-
-        for log in logs_frescos:
-            if "🔴" in log: st.error(log)
-            elif "🟢" in log: st.success(log)
-            else: st.info(log)
+    logs = load_db(DB_CLIENTS, {}).get(user_id, {}).get("logs", [])
+    if not logs: st.info("Sem logs.")
+    for log in logs:
+        if "🔴" in log: st.error(log)
+        elif "🟢" in log: st.success(log)
+        else: st.info(log)
 
 with tab3:
     st.subheader("📢 Comunicados Oficiais")
-    mensagens = client_data.get("comunicados", [])
-    if not mensagens:
-        st.info("Sem comunicados.")
-    else:
-        for m in mensagens:
-            with st.expander(f"📌 {m['titulo']} - {m['data']}"):
-                st.write(m['mensagem'])
+    for m in client_data.get("comunicados", []):
+        with st.expander(f"📌 {m['titulo']} - {m['data']}"):
+            st.write(m['mensagem'])
 
-# --- MOTOR DE AUTOMAÇÃO (ROBÔ DE EXECUÇÃO) ---
-
+# --- MOTOR DE AUTOMAÇÃO ---
 def disparar_ftp_pro(client_id, acao, filename, local_path, mapa_path):
-    """Função central para subir ou deletar arquivos com registro de logs"""
     db_atual = load_db(DB_CLIENTS, {})
-    if client_id not in db_atual: 
-        return False, "Cliente não encontrado"
-    
+    if client_id not in db_atual: return False, "Erro"
     conf = db_atual[client_id]["ftp"]
     try:
         ftp = ftplib.FTP()
         ftp.connect(conf["host"], int(conf["port"]), timeout=15)
         ftp.login(conf["user"], conf["pass"])
         ftp.cwd(mapa_path)
-        
-        if acao == "UPLOAD" and os.path.exists(local_path):
-            with open(local_path, 'rb') as f:
-                ftp.storbinary(f'STOR {filename}', f)
-            registrar_log(client_id, f"Upload concluído: {filename}", "sucesso")
-        
+        if acao == "UPLOAD":
+            with open(local_path, 'rb') as f: ftp.storbinary(f'STOR {filename}', f)
         elif acao == "DELETE":
-            try: 
-                ftp.delete(filename)
-                registrar_log(client_id, f"Remoção concluída: {filename}", "sucesso")
-            except: 
-                pass
-        
+            try: ftp.delete(filename)
+            except: pass
         ftp.quit()
         return True, "Sucesso"
-    except Exception as e:
-        registrar_log(client_id, f"Erro no FTP ({acao}): {str(e)}", "erro")
-        return False, str(e)
+    except Exception as e: return False, str(e)
 
 def pro_worker():
-    """Loop que verifica agendamentos a cada 15 segundos"""
     while True:
         now = get_hora_brasilia()
-        hoje = now.strftime("%d/%m/%Y")
-        agora = now.strftime("%H:%M")
+        hoje, agora = now.strftime("%d/%m/%Y"), now.strftime("%H:%M")
         db_all = load_db(DB_CLIENTS, {})
-        mudou_global = False
-        
+        mudou = False
         for c_id, c_info in db_all.items():
-            for agenda in c_info["agendas"]:
-                # --- LÓGICA DE ENTRADA (UPLOAD) ---
-                if agenda["data"] == hoje and agenda["in"] == agora and agenda.get("status") == "Aguardando":
-                    success, err = disparar_ftp_pro(c_id, "UPLOAD", agenda["file"], agenda["local_path"], agenda["path"])
-                    agenda["status"] = "Ativo" if success else f"Erro: {err}"
-                    mudou_global = True
-                
-                # --- LÓGICA DE SAÍDA (DELETE) ---
-                if agenda["data"] == hoje and agenda["out"] == agora and agenda.get("status") == "Ativo":
-                    success, err = disparar_ftp_pro(c_id, "DELETE", agenda["file"], agenda["local_path"], agenda["path"])
-                    if success:
-                        if agenda["rec"] == "Único": 
-                            agenda["status"] = "Finalizado"
-                        else:
-                            dt = datetime.strptime(agenda["data"], "%d/%m/%Y")
-                            if agenda["rec"] == "Diário": dt += timedelta(days=1)
-                            if agenda["rec"] == "Semanal": dt += timedelta(weeks=1)
-                            agenda["data"] = dt.strftime("%d/%m/%Y")
-                            agenda["status"] = "Aguardando"
-                    else:
-                        agenda["status"] = f"Erro Out: {err}"
-                    mudou_global = True
-                    
-        if mudou_global:
-            save_db(DB_CLIENTS, db_all)
+            for ag in c_info["agendas"]:
+                if ag["data"] == hoje and ag["in"] == agora and ag.get("status") == "Aguardando":
+                    success, _ = disparar_ftp_pro(c_id, "UPLOAD", ag["file"], ag["local_path"], ag["path"])
+                    ag["status"] = "Ativo" if success else "Erro"
+                    mudou = True
+                if ag["data"] == hoje and ag["out"] == agora and ag.get("status") == "Ativo":
+                    disparar_ftp_pro(c_id, "DELETE", ag["file"], ag["local_path"], ag["path"])
+                    ag["status"] = "Finalizado"
+                    mudou = True
+        if mudou: save_db(DB_CLIENTS, db_all)
         time.sleep(15)
 
-# Inicia o motor em uma thread separada (se ainda não foi iniciado)
 if 'worker_started' not in st.session_state:
     threading.Thread(target=pro_worker, daemon=True).start()
     st.session_state['worker_started'] = True
