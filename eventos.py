@@ -509,11 +509,10 @@ with st.sidebar:
     progresso = min(total_agendas / limite_agendas, 1.0) if limite_agendas > 0 else 0
     st.progress(progresso, text=f"Uso: {total_agendas}/{limite_agendas}")
     
-    # Popover de Regras e Suporte (O "Pop-up" profissional)
+    # Popover de Regras e Suporte
     st.divider()
     with st.popover("ℹ️ Informações e Suporte", use_container_width=True):
         st.markdown("### 📜 Regras de Uso")
-        st.caption("Ao utilizar o sistema, você concorda com:")
         st.write("- Proibido compartilhamento de KeyUser.")
         st.write("- Respeito aos limites de processos do plano.")
         st.write("- O Admin não se responsabiliza por dados de FTP incorretos.")
@@ -521,17 +520,46 @@ with st.sidebar:
         st.divider()
         st.markdown("### ✉️ Contatar Admin")
         with st.form("form_suporte"):
-            assunto = st.text_input("Assunto", placeholder="Ex: Dúvida sobre plano")
-            mensagem = st.text_area("Sua dúvida ou problema")
+            assunto = st.text_input("Assunto")
+            mensagem = st.text_area("Sua dúvida")
             if st.form_submit_button("Enviar Ticket", use_container_width=True):
-                # Registra no log do cliente para o Admin visualizar
                 registrar_log(user_id, f"SOLICITAÇÃO DE SUPORTE: {assunto}", "info")
-                st.success("Mensagem enviada com sucesso!")
-    
+                st.success("Mensagem enviada!")
+
+    # --- CONFIGURAÇÕES FTP ---
     st.divider()
-    if st.button("🚪 Sair do Sistema", use_container_width=True):
+    st.subheader("⚙️ Configurações FTP")
+    client_data["ftp"]["host"] = st.text_input("Host", value=client_data["ftp"]["host"])
+    client_data["ftp"]["user"] = st.text_input("Usuário", value=client_data["ftp"]["user"])
+    client_data["ftp"]["pass"] = st.text_input("Senha", type="password", value=client_data["ftp"]["pass"])
+    client_data["ftp"]["port"] = st.text_input("Porta", value=client_data["ftp"]["port"])
+    
+    c_sv, c_ts = st.columns(2)
+    if c_sv.button("Salvar Dados", use_container_width=True):
+        save_db(DB_CLIENTS, st.session_state.db_clients)
+        st.success("Salvo!")
+    if c_ts.button("⚡ Testar", use_container_width=True):
+        try:
+            ftp_t = ftplib.FTP()
+            ftp_t.connect(client_data["ftp"]["host"], int(client_data["ftp"]["port"]), timeout=10)
+            ftp_t.login(client_data["ftp"]["user"], client_data["ftp"]["pass"])
+            ftp_t.quit()
+            registrar_log(user_id, "Conexão FTP testada com sucesso.", "sucesso")
+            st.success("Conexão OK!")
+        except Exception as e:
+            registrar_log(user_id, f"Falha no teste FTP: {str(e)}", "erro")
+            st.error("Erro na conexão")
+
+    st.divider()
+    if st.button("🚪 Sair", use_container_width=True):
         st.session_state.authenticated = False
         st.rerun()
+
+    # Relógio em tempo real
+    @st.fragment(run_every="1s")
+    def sidebar_clock():
+        st.metric(label="🕒 Brasília", value=get_hora_brasilia().strftime("%H:%M:%S"))
+    sidebar_clock()
 
 # --- CORPO PRINCIPAL: TÍTULO E ABAS ---
 st.title(f"🎮 {user_info['server']}")
@@ -540,28 +568,103 @@ st.title(f"🎮 {user_info['server']}")
 tab1, tab2, tab3 = st.tabs(["📅 Agendamentos", "📜 Logs", "📢 Comunicados"])
 
 with tab1:
-    # --- MANTENHA AQUI SEU CÓDIGO ATUAL DE AGENDAMENTOS ---
-    st.subheader("📅 Seus Agendamentos")
-    # (Insira aqui o loop de agendas que você já tem)
-    pass
+    c1, c2 = st.columns([1, 1.5])
+    
+    with c1:
+        st.subheader("🚀 Novo Evento")
+        if total_agendas >= limite_agendas:
+            st.error(f"Limite do plano {plano_atual} atingido ({limite_agendas}).")
+        else:
+            if 'uploader_id' not in st.session_state: st.session_state.uploader_id = 0
+            up_file = st.file_uploader("Arquivo", type=["xml", "json"], key=f"up_{st.session_state.uploader_id}")
+            mapa = st.selectbox("Mapa", ["Chernarus", "Livonia"])
+            caminhos = {
+                "Chernarus": "/dayzxb_missions/dayzOffline.chernarusplus/custom", 
+                "Livonia": "/dayzxb_missions/dayzOffline.enoch/custom"
+            }
+            dt_ev = st.date_input("Data", min_value=get_hora_brasilia())
+            h_in = st.text_input("Entrada", "19:55")
+            h_out = st.text_input("Saída", "21:55")
+            rec = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"])
+            
+            if st.button("Confirmar Agendamento", use_container_width=True):
+                if up_file:
+                    safe_filename = f"{user_id[:5]}_{up_file.name}"
+                    path = os.path.join(UPLOAD_DIR, safe_filename)
+                    with open(path, "wb") as f: 
+                        f.write(up_file.getbuffer())
+                    
+                    nova = {
+                        "id": str(time.time()), 
+                        "file": up_file.name, 
+                        "local_path": path, 
+                        "mapa": mapa, 
+                        "path": caminhos[mapa], 
+                        "data": dt_ev.strftime("%d/%m/%Y"), 
+                        "in": h_in, 
+                        "out": h_out, 
+                        "rec": rec, 
+                        "status": "Aguardando"
+                    }
+                    
+                    client_data["agendas"].append(nova)
+                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                    registrar_log(user_id, f"Novo agendamento criado: {up_file.name} ({mapa})", "info")
+                    
+                    st.success("Evento agendado com sucesso!")
+                    st.session_state.uploader_id += 1
+                    st.rerun()
+                else:
+                    st.warning("Por favor, selecione um arquivo.")
+
+    with c2:
+        st.subheader("📋 Lista de Execução")
+        if not client_data.get("agendas"):
+            st.info("Nenhum evento agendado no momento.")
+        else:
+            for agenda in client_data["agendas"]:
+                status_atual = agenda.get('status', 'Aguardando')
+                cor = {"Aguardando": "🔵", "Ativo": "🟢", "Finalizado": "⚪"}.get(status_atual, "🔴")
+                
+                with st.expander(f"{cor} {agenda['file']} - {agenda['mapa']}"):
+                    st.write(f"**Janela:** {agenda['in']} > {agenda['out']} | **Data:** {agenda['data']}")
+                    st.write(f"**Recorrência:** {agenda['rec']} | **Status:** {status_atual}")
+                    
+                    if st.button("Remover Agendamento", key=f"del_{agenda['id']}", use_container_width=True):
+                        nome_arquivo = agenda['file']
+                        client_data["agendas"] = [a for a in client_data["agendas"] if a["id"] != agenda["id"]]
+                        save_db(DB_CLIENTS, st.session_state.db_clients)
+                        registrar_log(user_id, f"Agendamento removido: {nome_arquivo}", "info")
+                        st.toast(f"Evento {nome_arquivo} removido!")
+                        st.rerun()
 
 with tab2:
-    # --- MANTENHA AQUI SEU CÓDIGO ATUAL DE LOGS ---
     st.subheader("📜 Histórico de Atividades")
-    # (Insira aqui o display de logs que você já tem)
-    pass
+    db_fresco = load_db(DB_CLIENTS, {})
+    logs_frescos = db_fresco.get(user_id, {}).get("logs", [])
+    
+    if not logs_frescos:
+        st.info("Nenhuma atividade registrada nos logs ainda.")
+    else:
+        if st.button("Limpar Histórico"):
+            db_fresco[user_id]["logs"] = []
+            save_db(DB_CLIENTS, db_fresco)
+            st.rerun()
+
+        for log in logs_frescos:
+            if "🔴" in log: st.error(log)
+            elif "🟢" in log: st.success(log)
+            elif "📡" in log: st.warning(log)
+            else: st.info(log)
 
 with tab3:
-    # --- NOVA ABA DE COMUNICADOS ---
     st.subheader("📢 Comunicados Oficiais")
-    # Busca as mensagens enviadas pelo Admin na tab_adm5
     mensagens = client_data.get("comunicados", [])
     
     if not mensagens:
         st.info("Você não possui comunicados recentes.")
     else:
         for m in mensagens:
-            # Mostra cada comunicado em um expander elegante
             with st.expander(f"📌 {m['titulo']} - {m['data']}"):
                 st.write(m['mensagem'])
 
