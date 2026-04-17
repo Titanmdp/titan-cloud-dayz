@@ -496,7 +496,7 @@ with st.sidebar:
     
     # Botão para Admin voltar ao painel
     if st.session_state.role == "admin":
-        if st.button("⚙️ VOLTAR AO PAINEL ADMIN", type="primary", use_container_width=True):
+        if st.button("⚙️ VOLTAR AO PAINEL ADMIN", type="primary", use_container_width=True, key="btn_voltar_admin"):
             st.session_state.view_mode = "admin"
             st.rerun()
             
@@ -519,27 +519,31 @@ with st.sidebar:
         
         st.divider()
         st.markdown("### ✉️ Contatar Admin")
-        with st.form("form_suporte"):
-            assunto = st.text_input("Assunto")
-            mensagem = st.text_area("Sua dúvida")
+        # Chave única para o formulário de suporte
+        with st.form("form_suporte_cliente", clear_on_submit=True):
+            assunto_sup = st.text_input("Assunto", key="sup_assunto")
+            mensagem_sup = st.text_area("Sua dúvida", key="sup_msg")
             if st.form_submit_button("Enviar Ticket", use_container_width=True):
-                registrar_log(user_id, f"SOLICITAÇÃO DE SUPORTE: {assunto}", "info")
+                registrar_log(user_id, f"SOLICITAÇÃO DE SUPORTE: {assunto_sup}", "info")
                 st.success("Mensagem enviada!")
 
     # --- CONFIGURAÇÕES FTP ---
     st.divider()
     st.subheader("⚙️ Configurações FTP")
-    client_data["ftp"]["host"] = st.text_input("Host", value=client_data["ftp"]["host"])
-    client_data["ftp"]["user"] = st.text_input("Usuário", value=client_data["ftp"]["user"])
-    client_data["ftp"]["pass"] = st.text_input("Senha", type="password", value=client_data["ftp"]["pass"])
-    client_data["ftp"]["port"] = st.text_input("Porta", value=client_data["ftp"]["port"])
+    # Chaves únicas para os inputs de FTP
+    client_data["ftp"]["host"] = st.text_input("Host", value=client_data["ftp"]["host"], key="ftp_host_input")
+    client_data["ftp"]["user"] = st.text_input("Usuário", value=client_data["ftp"]["user"], key="ftp_user_input")
+    client_data["ftp"]["pass"] = st.text_input("Senha", type="password", value=client_data["ftp"]["pass"], key="ftp_pass_input")
+    client_data["ftp"]["port"] = st.text_input("Porta", value=client_data["ftp"]["port"], key="ftp_port_input")
     
     c_sv, c_ts = st.columns(2)
-    if c_sv.button("Salvar Dados", use_container_width=True):
+    if c_sv.button("Salvar Dados", use_container_width=True, key="btn_save_ftp"):
         save_db(DB_CLIENTS, st.session_state.db_clients)
         st.success("Salvo!")
-    if c_ts.button("⚡ Testar", use_container_width=True):
+        
+    if c_ts.button("⚡ Testar", use_container_width=True, key="btn_test_ftp"):
         try:
+            import ftplib
             ftp_t = ftplib.FTP()
             ftp_t.connect(client_data["ftp"]["host"], int(client_data["ftp"]["port"]), timeout=10)
             ftp_t.login(client_data["ftp"]["user"], client_data["ftp"]["pass"])
@@ -551,7 +555,7 @@ with st.sidebar:
             st.error("Erro na conexão")
 
     st.divider()
-    if st.button("🚪 Sair", use_container_width=True):
+    if st.button("🚪 Sair do Painel", use_container_width=True, key="btn_logout_sidebar"):
         st.session_state.authenticated = False
         st.rerun()
 
@@ -564,7 +568,7 @@ with st.sidebar:
 # --- CORPO PRINCIPAL: TÍTULO E ABAS ---
 st.title(f"🎮 {user_info['server']}")
 
-# Criação das 3 abas principais
+# Criação das 3 abas principais (Apenas uma vez no código)
 tab1, tab2, tab3 = st.tabs(["📅 Agendamentos", "📜 Logs", "📢 Comunicados"])
 
 with tab1:
@@ -577,17 +581,17 @@ with tab1:
         else:
             if 'uploader_id' not in st.session_state: st.session_state.uploader_id = 0
             up_file = st.file_uploader("Arquivo", type=["xml", "json"], key=f"up_{st.session_state.uploader_id}")
-            mapa = st.selectbox("Mapa", ["Chernarus", "Livonia"])
+            mapa = st.selectbox("Mapa", ["Chernarus", "Livonia"], key="sel_mapa_novo")
             caminhos = {
                 "Chernarus": "/dayzxb_missions/dayzOffline.chernarusplus/custom", 
                 "Livonia": "/dayzxb_missions/dayzOffline.enoch/custom"
             }
-            dt_ev = st.date_input("Data", min_value=get_hora_brasilia())
-            h_in = st.text_input("Entrada", "19:55")
-            h_out = st.text_input("Saída", "21:55")
-            rec = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"])
+            dt_ev = st.date_input("Data", min_value=get_hora_brasilia(), key="date_evento_novo")
+            h_in = st.text_input("Entrada", "19:55", key="h_in_novo")
+            h_out = st.text_input("Saída", "21:55", key="h_out_novo")
+            rec = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key="rec_novo")
             
-            if st.button("Confirmar Agendamento", use_container_width=True):
+            if st.button("Confirmar Agendamento", use_container_width=True, key="btn_confirm_agenda"):
                 if up_file:
                     safe_filename = f"{user_id[:5]}_{up_file.name}"
                     path = os.path.join(UPLOAD_DIR, safe_filename)
@@ -609,60 +613,50 @@ with tab1:
                     
                     client_data["agendas"].append(nova)
                     save_db(DB_CLIENTS, st.session_state.db_clients)
-                    registrar_log(user_id, f"Novo agendamento criado: {up_file.name} ({mapa})", "info")
-                    
-                    st.success("Evento agendado com sucesso!")
+                    registrar_log(user_id, f"Novo agendamento: {up_file.name}", "info")
+                    st.success("Evento agendado!")
                     st.session_state.uploader_id += 1
                     st.rerun()
-                else:
-                    st.warning("Por favor, selecione um arquivo.")
 
     with c2:
         st.subheader("📋 Lista de Execução")
         if not client_data.get("agendas"):
-            st.info("Nenhum evento agendado no momento.")
+            st.info("Nenhum evento agendado.")
         else:
             for agenda in client_data["agendas"]:
                 status_atual = agenda.get('status', 'Aguardando')
                 cor = {"Aguardando": "🔵", "Ativo": "🟢", "Finalizado": "⚪"}.get(status_atual, "🔴")
-                
-                with st.expander(f"{cor} {agenda['file']} - {agenda['mapa']}"):
-                    st.write(f"**Janela:** {agenda['in']} > {agenda['out']} | **Data:** {agenda['data']}")
-                    st.write(f"**Recorrência:** {agenda['rec']} | **Status:** {status_atual}")
-                    
-                    if st.button("Remover Agendamento", key=f"del_{agenda['id']}", use_container_width=True):
-                        nome_arquivo = agenda['file']
+                with st.expander(f"{cor} {agenda['file']} ({agenda['data']})"):
+                    st.write(f"Status: {status_atual}")
+                    if st.button("Remover", key=f"del_{agenda['id']}", use_container_width=True):
                         client_data["agendas"] = [a for a in client_data["agendas"] if a["id"] != agenda["id"]]
                         save_db(DB_CLIENTS, st.session_state.db_clients)
-                        registrar_log(user_id, f"Agendamento removido: {nome_arquivo}", "info")
-                        st.toast(f"Evento {nome_arquivo} removido!")
                         st.rerun()
 
 with tab2:
     st.subheader("📜 Histórico de Atividades")
+    # Carregamento fresco para garantir sincronia com o worker
     db_fresco = load_db(DB_CLIENTS, {})
     logs_frescos = db_fresco.get(user_id, {}).get("logs", [])
     
     if not logs_frescos:
-        st.info("Nenhuma atividade registrada nos logs ainda.")
+        st.info("Sem logs no momento.")
     else:
-        if st.button("Limpar Histórico"):
-            db_fresco[user_id]["logs"] = []
-            save_db(DB_CLIENTS, db_fresco)
+        if st.button("Limpar Histórico", key="btn_clear_logs"):
+            client_data["logs"] = []
+            save_db(DB_CLIENTS, st.session_state.db_clients)
             st.rerun()
 
         for log in logs_frescos:
             if "🔴" in log: st.error(log)
             elif "🟢" in log: st.success(log)
-            elif "📡" in log: st.warning(log)
             else: st.info(log)
 
 with tab3:
     st.subheader("📢 Comunicados Oficiais")
     mensagens = client_data.get("comunicados", [])
-    
     if not mensagens:
-        st.info("Você não possui comunicados recentes.")
+        st.info("Sem comunicados.")
     else:
         for m in mensagens:
             with st.expander(f"📌 {m['titulo']} - {m['data']}"):
