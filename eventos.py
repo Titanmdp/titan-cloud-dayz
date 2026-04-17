@@ -30,6 +30,20 @@ def buscar_localizacao_cliente():
         }
     return None
 
+# --- FUNÇÃO ANTI-SONO (MANTER VIVO) ---
+def manter_vivo():
+    while True:
+        try:
+            # Substitua pela sua URL real do Render
+            url = "https://titan-cloud-dayz.onrender.com"
+            requests.get(url, timeout=10)
+        except:
+            pass
+        time.sleep(600) # Pinga o servidor a cada 10 minutos
+        
+# Inicia a thread de sobrevivência antes de carregar a interface
+threading.Thread(target=manter_vivo, daemon=True).start()
+
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
 
