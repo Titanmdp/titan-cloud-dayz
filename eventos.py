@@ -8,8 +8,26 @@ import secrets
 import string
 import requests
 import shutil
+# Removi o segundo import os que estava aqui
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
+
+# --- 1. DETECÇÃO DE AMBIENTE ---
+IS_DEV = os.environ.get("IS_DEV", "False") == "True"
+
+if IS_DEV:
+    DB_USERS = "users_db_dev.json"
+    DB_CLIENTS = "clients_data_dev.json"
+else:
+    DB_USERS = "users_db.json"
+    DB_CLIENTS = "clients_data.json"
+
+# --- 2. CONFIGURAÇÃO DA PÁGINA (Deve vir antes de qualquer comando st.sidebar) ---
+st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
+
+# Agora sim, o aviso visual aparece com segurança
+if IS_DEV:
+    st.sidebar.warning("⚠️ AMBIENTE DE DESENVOLVIMENTO (TESTES)")
 
 # --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASÍLIA) ---
 FUSO_BR = timezone(timedelta(hours=-3))
