@@ -384,99 +384,112 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     except Exception as e: st.error(f"❌ Erro: {e}")
 
     with tab_adm5:
-        st.subheader("📢 Enviar Comunicado Oficial")
-        col_c1, col_c2 = st.columns([1, 2])
+    st.subheader("📢 Enviar Comunicado Oficial")
+    col_c1, col_c2 = st.columns([1, 2])
+    
+    with col_c1:
+        # Seleção de Alvos
+        opcoes_clientes = {v['server']: k for k, v in st.session_state.db_users["keys"].items()}
+        alvos = st.multiselect("Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos")
         
-        with col_c1:
-            # Seleção de Alvos
-            opcoes_clientes = {v['server']: k for k, v in st.session_state.db_users["keys"].items()}
-            alvos = st.multiselect("Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos")
-            
-            st.write("**Enviar via:**")
-            send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
-            send_mail = st.checkbox("E-mail")
-            send_wa = st.checkbox("WhatsApp")
-            send_disc = st.checkbox("Discord (Webhook do Cliente)")
+        st.write("**Enviar via:**")
+        send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
+        send_mail = st.checkbox("E-mail")
+        send_wa = st.checkbox("WhatsApp")
+        send_disc = st.checkbox("Discord (Webhook do Cliente)")
 
-        with col_c2:
-            titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="tit_com")
-            corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="msg_com")
-            
-            if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
-                if titulo_com and corpo_com:
-                    destinatarios = []
-                    if "Todos" in alvos:
-                        destinatarios = list(st.session_state.db_users["keys"].keys())
-                    else:
-                        destinatarios = [opcoes_clientes[nome] for nome in alvos]
+    with col_c2:
+        titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="tit_com")
+        corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="msg_com")
+        
+        if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
+            if titulo_com and corpo_com:
+                # --- FORÇAR RECARGA DOS BANCOS ANTES DO DISPARO ---
+                # Isso garante que a lista de destinatários e dados reflitam o arquivo atual do disco
+                st.session_state.db_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
+                st.session_state.db_clients = load_db(DB_CLIENTS, {})
 
-                    comunicado_obj = {
-                        "id": str(time.time()),
-                        "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
-                        "titulo": titulo_com,
-                        "mensagem": corpo_com,
-                        "lido": False
-                    }
-                    
-                    # Contadores para o feedback final
-                    sucesso_ext = 0
-                    falha_ext = 0
-
-                    for d_id in destinatarios:
-                        # 1. Envio interno (Painel) - Sempre ocorre
-                        if "comunicados" not in st.session_state.db_clients[d_id]:
-                            st.session_state.db_clients[d_id]["comunicados"] = []
-                        st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
-                        
-                        # Pegamos os dados de contato do banco de usuários
-                        u_info = st.session_state.db_users["keys"].get(d_id, {})
-                        c_info = st.session_state.db_clients.get(d_id, {})
-
-                        # 2. Lógica de Envio para E-mail
-                        if send_mail:
-                            email_destino = u_info.get('email')
-                            if not email_destino:
-                                st.warning(f"⚠️ {u_info['server']}: Sem e-mail cadastrado.")
-                                falha_ext += 1
-
-                        # 3. Lógica de Envio para WhatsApp
-                        if send_wa:
-                            wa_destino = u_info.get('whatsapp')
-                            if not wa_destino:
-                                st.warning(f"⚠️ {u_info['server']}: Sem WhatsApp cadastrado.")
-                                falha_ext += 1
-
-                        # 4. Lógica de Envio para Discord (Funcional via Webhook)
-                        if send_disc:
-                            webhook_url = c_info.get("discord_webhook")
-                            if webhook_url:
-                                try:
-                                    payload = {
-                                        "embeds": [{
-                                            "title": f"📢 {titulo_com}",
-                                            "description": corpo_com,
-                                            "color": 16711680, # Vermelho Titan
-                                            "footer": {"text": "Titan Cloud PRO - Sistema de Avisos"}
-                                        }]
-                                    }
-                                    requests.post(webhook_url, json=payload, timeout=5)
-                                    sucesso_ext += 1
-                                except:
-                                    st.error(f"❌ Erro ao enviar para o Discord de {u_info['server']}")
-                                    falha_ext += 1
-                            else:
-                                st.warning(f"⚠️ {u_info['server']}: Webhook do Discord não configurado.")
-                                falha_ext += 1
-                    
-                    save_db(DB_CLIENTS, st.session_state.db_clients)
-                    st.success(f"✅ Comunicado disparado para {len(destinatarios)} painéis!")
-                    if send_disc or send_mail or send_wa:
-                        st.info(f"Retorno Externo: {sucesso_ext} Enviados | {falha_ext} Dados ausentes/erros.")
-                    
-                    time.sleep(2)
-                    st.rerun()
+                destinatarios = []
+                if "Todos" in alvos:
+                    destinatarios = list(st.session_state.db_users["keys"].keys())
                 else:
-                    st.error("Preencha o título e a mensagem.")
+                    destinatarios = [opcoes_clientes[nome] for nome in alvos]
+
+                comunicado_obj = {
+                    "id": str(time.time()),
+                    "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
+                    "titulo": titulo_com,
+                    "mensagem": corpo_com,
+                    "lido": False
+                }
+                
+                sucesso_ext = 0
+                falha_ext = 0
+
+                for d_id in destinatarios:
+                    # 1. GARANTIA DE ESTRUTURA (Evita erro de chave inexistente)
+                    if d_id not in st.session_state.db_clients:
+                        st.session_state.db_clients[d_id] = {
+                            "ftp": {"host": "", "user": "", "pass": "", "port": "21"}, 
+                            "agendas": [], "logs": [], "comunicados": []
+                        }
+
+                    # Envio interno (Painel)
+                    if "comunicados" not in st.session_state.db_clients[d_id]:
+                        st.session_state.db_clients[d_id]["comunicados"] = []
+                    
+                    st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
+                    
+                    # Dados para envios externos
+                    u_info = st.session_state.db_users["keys"].get(d_id, {})
+                    c_info = st.session_state.db_clients.get(d_id, {})
+
+                    # 2. Lógica de Envio para E-mail
+                    if send_mail:
+                        email_destino = u_info.get('email')
+                        if not email_destino:
+                            st.warning(f"⚠️ {u_info.get('server', d_id)}: Sem e-mail cadastrado.")
+                            falha_ext += 1
+
+                    # 3. Lógica de Envio para WhatsApp
+                    if send_wa:
+                        wa_destino = u_info.get('whatsapp')
+                        if not wa_destino:
+                            st.warning(f"⚠️ {u_info.get('server', d_id)}: Sem WhatsApp cadastrado.")
+                            falha_ext += 1
+
+                    # 4. Lógica de Envio para Discord
+                    if send_disc:
+                        webhook_url = c_info.get("discord_webhook")
+                        if webhook_url:
+                            try:
+                                payload = {
+                                    "embeds": [{
+                                        "title": f"📢 {titulo_com}",
+                                        "description": corpo_com,
+                                        "color": 16711680,
+                                        "footer": {"text": "Titan Cloud PRO - Sistema de Avisos"}
+                                    }]
+                                }
+                                requests.post(webhook_url, json=payload, timeout=5)
+                                sucesso_ext += 1
+                            except:
+                                falha_ext += 1
+                        else:
+                            st.warning(f"⚠️ {u_info.get('server', d_id)}: Webhook não configurado.")
+                            falha_ext += 1
+                
+                # --- SALVAMENTO CRÍTICO ---
+                save_db(DB_CLIENTS, st.session_state.db_clients)
+                
+                st.success(f"✅ Comunicado disparado para {len(destinatarios)} painéis!")
+                if send_disc or send_mail or send_wa:
+                    st.info(f"Retorno Externo: {sucesso_ext} Enviados | {falha_ext} Falhas/Dados ausentes.")
+                
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("Preencha o título e a mensagem.")
 
     # O st.stop() deve ficar aqui, fora das tabs, mas dentro do bloco admin
     st.stop()
