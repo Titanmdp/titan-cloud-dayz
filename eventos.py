@@ -203,8 +203,13 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
 
     st.title("🛡️ Painel de Controle - Administrador")
     
-    # Criando as 3 abas: Gerar, Gerenciar e a nova aba de Configurar Planos
-    tab_adm1, tab_adm2, tab_adm3 = st.tabs(["➕ Gerar Chaves", "👥 Gestão de Clientes", "⚙️ Configurar Planos"])
+    # 1. Definição das 4 abas no topo do bloco Admin
+    tab_adm1, tab_adm2, tab_adm3, tab_adm4 = st.tabs([
+        "➕ Gerar Chaves", 
+        "👥 Gestão de Clientes", 
+        "⚙️ Configurar Planos",
+        "💾 Backup/Restore"
+    ])
 
     with tab_adm1:
         with st.expander("Gerador de Chaves", expanded=True):
@@ -239,12 +244,10 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             st.info("Nenhum cliente cadastrado no momento.")
         
         for k, v in list(st.session_state.db_users["keys"].items()):
-            # --- TUDO ABAIXO DEVE ESTAR IDENTADO (RECUADO) ---
             dt_exp_check = datetime.strptime(v["expires"], "%d/%m/%Y").date()
             dias_rest = (dt_exp_check - get_hora_brasilia().date()).days
             cor_status = "🟢" if dias_rest > 0 else "🔴"
             
-            # Busca limites globais configurados ou usa o padrão inicial
             limites_globais = st.session_state.db_users.get('config_planos', PLANOS)
             uso_atual = len(st.session_state.db_clients.get(k, {}).get("agendas", []))
             limite_padrao = limites_globais.get(v.get('plano', 'Starter'), 2)
@@ -255,7 +258,6 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                 st.code(k) 
                 st.divider()
 
-                # --- MONITORAMENTO DE ACESSOS ---
                 st.markdown("#### 🌐 Monitoramento e Segurança")
                 col_mon1, col_mon2 = st.columns(2)
                 with col_mon1:
@@ -274,11 +276,11 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                 c_edit1, c_edit2 = st.columns(2)
                 with c_edit1:
                     st.markdown("#### 📝 Informações e Plano")
-                    new_n = st.text_input("Editar Nome do Servidor", value=v['server'], key=f"n_{k}")
+                    new_n = st.text_input("Editar Nome", value=v['server'], key=f"n_{k}")
                     new_p = st.selectbox("Trocar Plano", list(PLANOS.keys()), 
                                          index=list(PLANOS.keys()).index(v.get('plano', 'Starter')), 
                                          key=f"p_{k}")
-                    new_lim = st.number_input("Ajustar Limite de Eventos", min_value=1, value=int(limite_final), key=f"lim_{k}")
+                    new_lim = st.number_input("Ajustar Limite", min_value=1, value=int(limite_final), key=f"lim_{k}")
                     if st.button("💾 Salvar Alterações", key=f"bn_{k}", use_container_width=True):
                         st.session_state.db_users["keys"][k]['server'] = new_n
                         st.session_state.db_users["keys"][k]['plano'] = new_p
@@ -310,58 +312,31 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
 
     with tab_adm3:
         st.subheader("⚙️ Configuração Global de Limites")
-        st.info("Defina aqui quantos eventos cada plano oferece por padrão.")
-        
-        # Garante que a configuração exista no banco de dados
         if 'config_planos' not in st.session_state.db_users:
             st.session_state.db_users['config_planos'] = PLANOS.copy()
-
         conf_planos = st.session_state.db_users['config_planos']
-        
         col_p1, col_p2, col_p3 = st.columns(3)
         with col_p1:
-            st.metric("Plano", "Starter")
-            novo_starter = st.number_input("Qtd. Eventos", min_value=1, value=conf_planos.get('Starter', 2), key="conf_starter")
+            novo_starter = st.number_input("Starter", min_value=1, value=conf_planos.get('Starter', 2), key="conf_starter")
         with col_p2:
-            st.metric("Plano", "Pro")
-            novo_pro = st.number_input("Qtd. Eventos", min_value=1, value=conf_planos.get('Pro', 10), key="conf_pro")
+            novo_pro = st.number_input("Pro", min_value=1, value=conf_planos.get('Pro', 10), key="conf_pro")
         with col_p3:
-            st.metric("Plano", "Enterprise")
-            novo_ent = st.number_input("Qtd. Eventos", min_value=1, value=conf_planos.get('Enterprise', 999), key="conf_ent")
+            novo_ent = st.number_input("Enterprise", min_value=1, value=conf_planos.get('Enterprise', 999), key="conf_ent")
 
         if st.button("🚀 Aplicar Limites Globais", use_container_width=True):
-            st.session_state.db_users['config_planos'] = {
-                "Starter": novo_starter,
-                "Pro": novo_pro,
-                "Enterprise": novo_ent
-            }
+            st.session_state.db_users['config_planos'] = {"Starter": novo_starter, "Pro": novo_pro, "Enterprise": novo_ent}
             save_db(DB_USERS, st.session_state.db_users)
-            st.success("Limites globais atualizados com sucesso!")
-            time.sleep(1)
-            st.rerun()
+            st.success("Limites globais atualizados!")
+            time.sleep(1); st.rerun()
 
-    st.stop()
-    
-    # Adicione isso dentro do bloco 'if st.session_state.role == "admin":'
-# Sugestão: Crie uma tab_adm4 nas tabs do admin
-
-with tab_adm4:
+    with tab_adm4:
         st.subheader("📦 Central de Migração de Dados")
-        st.info("Use esta aba para salvar os dados antes de atualizar o código e restaurá-los logo após a atualização.")
-
+        st.info("Faça backup antes de atualizar e restaure logo após o deploy.")
         col_back, col_rest = st.columns(2)
-
         with col_back:
             st.markdown("### ⬇️ Exportar Backup")
-            st.write("Baixe o arquivo contendo todos os Clientes, Keys e Agendamentos atuais.")
-            
-            dados_totais = {
-                "users": st.session_state.db_users,
-                "clients": st.session_state.db_clients
-            }
-            
+            dados_totais = {"users": st.session_state.db_users, "clients": st.session_state.db_clients}
             json_string = json.dumps(dados_totais, indent=4, ensure_ascii=False)
-            
             st.download_button(
                 label="💾 Baixar Backup Geral (JSON)",
                 data=json_string,
@@ -369,13 +344,9 @@ with tab_adm4:
                 mime="application/json",
                 use_container_width=True
             )
-
         with col_rest:
             st.markdown("### ⬆️ Importar/Restaurar")
-            st.write("Suba um arquivo de backup para restaurar as informações no sistema.")
-            
             arquivo_upload = st.file_uploader("Selecione o arquivo de backup", type="json")
-            
             if st.button("🚀 Restaurar Dados Agora", use_container_width=True, type="primary"):
                 if arquivo_upload is not None:
                     try:
@@ -383,21 +354,14 @@ with tab_adm4:
                         if "users" in backup_data and "clients" in backup_data:
                             st.session_state.db_users = backup_data["users"]
                             st.session_state.db_clients = backup_data["clients"]
-                            
                             save_db(DB_USERS, st.session_state.db_users)
                             save_db(DB_CLIENTS, st.session_state.db_clients)
-                            
-                            st.success("✅ Restauração concluída com sucesso!")
-                            time.sleep(2)
-                            st.rerun()
-                        else:
-                            st.error("❌ Arquivo inválido!")
-                    except Exception as e:
-                        st.error(f"❌ Erro ao processar arquivo: {e}")
-                else:
-                    st.warning("⚠️ Selecione um arquivo primeiro.")
+                            st.success("✅ Restauração concluída!")
+                            time.sleep(2); st.rerun()
+                        else: st.error("❌ Arquivo inválido!")
+                    except Exception as e: st.error(f"❌ Erro: {e}")
 
-    # 3. AJUSTE: O st.stop() deve ficar por último, depois de todas as tabs
+    # O st.stop() deve ficar aqui, fora das tabs, mas dentro do bloco admin
     st.stop()
 
 # --- ÁREA DO CLIENTE ---
