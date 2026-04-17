@@ -296,10 +296,17 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                                          index=list(PLANOS.keys()).index(v.get('plano', 'Starter')), 
                                          key=f"p_{k}")
                     new_lim = st.number_input("Ajustar Limite", min_value=1, value=int(limite_final), key=f"lim_{k}")
+                    
+                    st.markdown("#### 📧 Contatos de Notificação")
+                    new_mail = st.text_input("E-mail do Cliente", value=v.get('email', ''), key=f"mail_{k}")
+                    new_wa = st.text_input("WhatsApp (com DDD)", value=v.get('whatsapp', ''), key=f"wa_{k}")
+
                     if st.button("💾 Salvar Alterações", key=f"bn_{k}", use_container_width=True):
                         st.session_state.db_users["keys"][k]['server'] = new_n
                         st.session_state.db_users["keys"][k]['plano'] = new_p
                         st.session_state.db_users["keys"][k]['limite_extra'] = new_lim
+                        st.session_state.db_users["keys"][k]['email'] = new_mail
+                        st.session_state.db_users["keys"][k]['whatsapp'] = new_wa
                         save_db(DB_USERS, st.session_state.db_users)
                         st.success("Dados atualizados!")
                         st.rerun()
@@ -411,14 +418,62 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         "lido": False
                     }
                     
+                    # Contadores para o feedback final
+                    sucesso_ext = 0
+                    falha_ext = 0
+
                     for d_id in destinatarios:
+                        # 1. Envio interno (Painel) - Sempre ocorre
                         if "comunicados" not in st.session_state.db_clients[d_id]:
                             st.session_state.db_clients[d_id]["comunicados"] = []
                         st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
+                        
+                        # Pegamos os dados de contato do banco de usuários
+                        u_info = st.session_state.db_users["keys"].get(d_id, {})
+                        c_info = st.session_state.db_clients.get(d_id, {})
+
+                        # 2. Lógica de Envio para E-mail
+                        if send_mail:
+                            email_destino = u_info.get('email')
+                            if not email_destino:
+                                st.warning(f"⚠️ {u_info['server']}: Sem e-mail cadastrado.")
+                                falha_ext += 1
+
+                        # 3. Lógica de Envio para WhatsApp
+                        if send_wa:
+                            wa_destino = u_info.get('whatsapp')
+                            if not wa_destino:
+                                st.warning(f"⚠️ {u_info['server']}: Sem WhatsApp cadastrado.")
+                                falha_ext += 1
+
+                        # 4. Lógica de Envio para Discord (Funcional via Webhook)
+                        if send_disc:
+                            webhook_url = c_info.get("discord_webhook")
+                            if webhook_url:
+                                try:
+                                    payload = {
+                                        "embeds": [{
+                                            "title": f"📢 {titulo_com}",
+                                            "description": corpo_com,
+                                            "color": 16711680, # Vermelho Titan
+                                            "footer": {"text": "Titan Cloud PRO - Sistema de Avisos"}
+                                        }]
+                                    }
+                                    requests.post(webhook_url, json=payload, timeout=5)
+                                    sucesso_ext += 1
+                                except:
+                                    st.error(f"❌ Erro ao enviar para o Discord de {u_info['server']}")
+                                    falha_ext += 1
+                            else:
+                                st.warning(f"⚠️ {u_info['server']}: Webhook do Discord não configurado.")
+                                falha_ext += 1
                     
                     save_db(DB_CLIENTS, st.session_state.db_clients)
-                    st.success(f"✅ Comunicado enviado para {len(destinatarios)} clientes!")
-                    time.sleep(1)
+                    st.success(f"✅ Comunicado disparado para {len(destinatarios)} painéis!")
+                    if send_disc or send_mail or send_wa:
+                        st.info(f"Retorno Externo: {sucesso_ext} Enviados | {falha_ext} Dados ausentes/erros.")
+                    
+                    time.sleep(2)
                     st.rerun()
                 else:
                     st.error("Preencha o título e a mensagem.")
@@ -426,71 +481,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
     # O st.stop() deve ficar aqui, fora das tabs, mas dentro do bloco admin
     st.stop()
 
-# --- ÁREA DO CLIENTE ---
-user_id = st.session_state.user_key
-
-# 1. SINCRONIZAÇÃO TOTAL (Evita perda de agendas e garante trava de sessão)
-db_disco_clients = load_db(DB_CLIENTS, {})
-db_disco_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
-
-st.session_state.db_clients = db_disco_clients
-st.session_state.db_users = db_disco_users
-
-# 2. Inicialização Segura
-if user_id not in st.session_state.db_clients:
-    st.session_state.db_clients[user_id] = {
-        "ftp": {"host": "", "user": "", "pass": "", "port": "21"}, 
-        "agendas": [],
-        "logs": [],
-        "comunicados": [] # Nova chave para os avisos do Admin
-    }
-    save_db(DB_CLIENTS, st.session_state.db_clients)
-
-client_data = st.session_state.db_clients[user_id]
-
-# Correções de estrutura para clientes antigos
-if "logs" not in client_data:
-    client_data["logs"] = []
-if "comunicados" not in client_data:
-    client_data["comunicados"] = []
-
-# 3. Busca informações de contrato
-user_info = st.session_state.db_users["keys"].get(user_id, {
-    "server": "Meu Servidor (Admin)", 
-    "plano": "Enterprise", 
-    "expires": "31/12/2099"
-})
-
-# --- TRAVA DE ACESSO SIMULTÂNEO ---
-if st.session_state.role == "client":
-    token_valido = user_info.get("last_session")
-    if st.session_state.get('session_token') != token_valido:
-        st.warning("⚠️ Sessão Finalizada")
-        st.error("Esta KeyUser foi conectada em outro dispositivo ou navegador.")
-        st.info("Para sua segurança, permitimos apenas um acesso simultâneo por conta.")
-        if st.button("Fazer Login Novamente", use_container_width=True):
-            st.session_state.authenticated = False
-            st.rerun()
-        st.stop()
-
-# --- LÓGICA DE LIMITES E EXPIRAÇÃO ---
-limites_globais = st.session_state.db_users.get('config_planos', PLANOS)
-plano_atual = user_info.get("plano", "Starter")
-limite_padrao_do_plano = limites_globais.get(plano_atual, 2)
-limite_agendas = int(user_info.get("limite_extra", limite_padrao_do_plano))
-total_agendas = len(client_data.get("agendas", []))
-
-if st.session_state.get('role') == "admin":
-    exp_status = "Ilimitado (Admin)"
-else:
-    try:
-        dt_exp_obj = datetime.strptime(user_info["expires"], "%d/%m/%Y").date()
-        dias_restantes = (dt_exp_obj - get_hora_brasilia().date()).days
-        exp_status = f"{max(0, dias_restantes)} dias"
-    except:
-        exp_status = "Erro na data"
-
-# --- ÁREA DO CLIENTE ---
+# --- ÁREA DO CLIENTE (VERSÃO FINAL CONSOLIDADA E CORRIGIDA) ---
 user_id = st.session_state.user_key
 
 # 1. SINCRONIZAÇÃO E INICIALIZAÇÃO SEGURA
@@ -509,12 +500,37 @@ if user_id not in st.session_state.db_clients:
 client_data = st.session_state.db_clients[user_id]
 user_info = st.session_state.db_users["keys"].get(user_id, {"server": "Servidor", "plano": "Starter", "expires": "01/01/2000"})
 
+# --- TRAVA DE ACESSO SIMULTÂNEO ---
+if st.session_state.role == "client":
+    token_valido = user_info.get("last_session")
+    if st.session_state.get('session_token') != token_valido:
+        st.error("⚠️ Sessão Finalizada: Esta conta foi conectada em outro local.")
+        if st.button("Fazer Login Novamente", use_container_width=True, key="relogin_btn"):
+            st.session_state.authenticated = False
+            st.rerun()
+        st.stop()
+
+# --- LÓGICA DE LIMITES E STATUS ---
+plano_atual = user_info.get("plano", "Starter")
+limite_agendas = int(user_info.get("limite_extra", st.session_state.db_users.get('config_planos', PLANOS).get(plano_atual, 2)))
+total_agendas = len(client_data.get("agendas", []))
+
+if st.session_state.role == "admin":
+    exp_status = "Ilimitado (Admin)"
+else:
+    try:
+        dt_exp_obj = datetime.strptime(user_info["expires"], "%d/%m/%Y").date()
+        dias_restantes = (dt_exp_obj - get_hora_brasilia().date()).days
+        exp_status = f"{max(0, dias_restantes)} dias"
+    except:
+        exp_status = "Erro na data"
+
 # --- BARRA LATERAL (SIDEBAR) ÚNICA ---
 with st.sidebar:
     st.title("👤 Minha Conta")
     
     if st.session_state.role == "admin":
-        if st.button("⚙️ VOLTAR AO PAINEL ADMIN", type="primary", use_container_width=True, key="back_to_admin_unique"):
+        if st.button("⚙️ VOLTAR AO PAINEL ADMIN", type="primary", use_container_width=True, key="back_to_adm_main"):
             st.session_state.view_mode = "admin"
             st.rerun()
             
@@ -526,40 +542,33 @@ with st.sidebar:
     st.progress(progresso, text=f"Uso: {total_agendas}/{limite_agendas}")
     
     st.divider()
-    with st.popover("ℹ️ Informações e Suporte", use_container_width=True):
-        st.markdown("### 📜 Regras de Uso")
-        st.write("- Proibido compartilhar KeyUser.\n- Respeite os limites do plano.")
-        st.divider()
-        with st.form("form_suporte_sidebar", clear_on_submit=True):
-            assunto_sup = st.text_input("Assunto", key="sidebar_sup_assunto")
-            mensagem_sup = st.text_area("Sua dúvida", key="sidebar_sup_msg")
-            if st.form_submit_button("Enviar Ticket", use_container_width=True):
-                registrar_log(user_id, f"SUPORTE: {assunto_sup}", "info")
-                st.success("Enviado!")
-
-    st.subheader("⚙️ Configurações FTP")
-    client_data["ftp"]["host"] = st.text_input("Host", value=client_data["ftp"]["host"], key="f_host")
-    client_data["ftp"]["user"] = st.text_input("Usuário", value=client_data["ftp"]["user"], key="f_user")
-    client_data["ftp"]["pass"] = st.text_input("Senha", type="password", value=client_data["ftp"]["pass"], key="f_pass")
-    client_data["ftp"]["port"] = st.text_input("Porta", value=client_data["ftp"]["port"], key="f_port")
     
-    col_btn1, col_btn2 = st.columns(2)
-    if col_btn1.button("Salvar Dados", use_container_width=True, key="f_save"):
+    st.subheader("⚙️ Configurações FTP")
+    client_data["ftp"]["host"] = st.text_input("Host", value=client_data["ftp"]["host"], key="f_host_main")
+    client_data["ftp"]["user"] = st.text_input("Usuário", value=client_data["ftp"]["user"], key="f_user_main")
+    client_data["ftp"]["pass"] = st.text_input("Senha", type="password", value=client_data["ftp"]["pass"], key="f_pass_main")
+    client_data["ftp"]["port"] = st.text_input("Porta", value=client_data["ftp"]["port"], key="f_port_main")
+    
+    col_f1, col_f2 = st.columns(2)
+    if col_f1.button("Salvar Dados", use_container_width=True, key="f_save_main"):
         save_db(DB_CLIENTS, st.session_state.db_clients)
         st.success("Salvo!")
-    if col_btn2.button("⚡ Testar", use_container_width=True, key="f_test"):
+        registrar_log(user_id, "Configurações FTP atualizadas.")
+
+    if col_f2.button("⚡ Testar", use_container_width=True, key="f_test_main"):
         try:
             ftp_t = ftplib.FTP()
             ftp_t.connect(client_data["ftp"]["host"], int(client_data["ftp"]["port"]), timeout=10)
             ftp_t.login(client_data["ftp"]["user"], client_data["ftp"]["pass"])
             ftp_t.quit()
-            registrar_log(user_id, "FTP OK", "sucesso")
+            registrar_log(user_id, "Teste FTP: Sucesso", "sucesso")
             st.success("Conexão OK!")
         except Exception as e:
+            registrar_log(user_id, f"Teste FTP: Falha ({str(e)})", "erro")
             st.error("Erro FTP")
 
     st.divider()
-    if st.button("🚪 Sair do Sistema", use_container_width=True, key="logout_final"):
+    if st.button("🚪 Sair do Sistema", use_container_width=True, key="logout_btn_final"):
         st.session_state.authenticated = False
         st.rerun()
 
@@ -574,53 +583,135 @@ tab1, tab2, tab3 = st.tabs(["📅 Agendamentos", "📜 Logs", "📢 Comunicados"
 
 with tab1:
     c1, c2 = st.columns([1, 1.5])
+    
     with c1:
         st.subheader("🚀 Novo Evento")
         if total_agendas >= limite_agendas:
-            st.error("Limite atingido.")
+            st.error(f"Limite do plano atingido ({limite_agendas}).")
         else:
-            up_file = st.file_uploader("Arquivo", type=["xml", "json"], key="up_main_client")
-            mapa = st.selectbox("Mapa", ["Chernarus", "Livonia"], key="map_main")
-            dt_ev = st.date_input("Data", min_value=get_hora_brasilia(), key="date_main")
-            h_in = st.text_input("Entrada", "19:55", key="in_main")
-            h_out = st.text_input("Saída", "21:55", key="out_main")
-            if st.button("Confirmar Agendamento", use_container_width=True, key="conf_main"):
+            if 'uploader_id' not in st.session_state: 
+                st.session_state.uploader_id = 0
+            
+            up_file = st.file_uploader("Arquivo", type=["xml", "json"], key=f"up_f_{st.session_state.uploader_id}")
+            mapa = st.selectbox("Mapa", ["Chernarus", "Livonia"], key="map_sel_main")
+            dt_ev = st.date_input("Data", min_value=get_hora_brasilia(), key="date_sel_main")
+            h_in = st.text_input("Entrada", "19:55", key="h_in_main")
+            h_out = st.text_input("Saída", "21:55", key="h_out_main")
+            rec = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key="rec_sel_main")
+            
+            if st.button("Confirmar Agendamento", use_container_width=True, key="conf_btn_main"):
                 if up_file:
                     safe_fn = f"{user_id[:5]}_{up_file.name}"
                     path = os.path.join(UPLOAD_DIR, safe_fn)
-                    with open(path, "wb") as f: f.write(up_file.getbuffer())
-                    client_data["agendas"].append({"id": str(time.time()), "file": up_file.name, "local_path": path, "mapa": mapa, "path": "/dayzxb_missions/dayzOffline.chernarusplus/custom" if mapa=="Chernarus" else "/dayzxb_missions/dayzOffline.enoch/custom", "data": dt_ev.strftime("%d/%m/%Y"), "in": h_in, "out": h_out, "rec": "Único", "status": "Aguardando"})
+                    with open(path, "wb") as f: 
+                        f.write(up_file.getbuffer())
+                    
+                    nova_agenda = {
+                        "id": str(time.time()), 
+                        "file": up_file.name, 
+                        "local_path": path, 
+                        "mapa": mapa,
+                        "path": "/dayzxb_missions/dayzOffline.chernarusplus/custom" if mapa=="Chernarus" else "/dayzxb_missions/dayzOffline.enoch/custom",
+                        "data": dt_ev.strftime("%d/%m/%Y"), 
+                        "in": h_in, 
+                        "out": h_out, 
+                        "rec": rec, 
+                        "status": "Aguardando"
+                    }
+                    client_data["agendas"].append(nova_agenda)
                     save_db(DB_CLIENTS, st.session_state.db_clients)
-                    registrar_log(user_id, f"Agendado: {up_file.name}", "info")
+                    registrar_log(user_id, f"Agendado: {up_file.name} ({mapa})", "info")
+                    st.session_state.uploader_id += 1
                     st.rerun()
+                else:
+                    st.warning("Selecione um arquivo antes de confirmar.")
 
     with c2:
         st.subheader("📋 Lista de Execução")
-        for agenda in client_data.get("agendas", []):
-            cor = {"Aguardando": "🔵", "Ativo": "🟢"}.get(agenda.get("status"), "🔴")
-            with st.expander(f"{cor} {agenda['file']}"):
-                st.write(f"Data: {agenda['data']} | Status: {agenda.get('status')}")
-                if st.button("Remover", key=f"rem_{agenda['id']}", use_container_width=True):
-                    client_data["agendas"] = [a for a in client_data["agendas"] if a["id"] != agenda["id"]]
-                    save_db(DB_CLIENTS, st.session_state.db_clients)
-                    st.rerun()
+        agendas_lista = client_data.get("agendas", [])
+        
+        if not agendas_lista:
+            st.info("Nenhum evento agendado.")
+        else:
+            for agenda in agendas_lista:
+                status_atual = agenda.get('status', 'Aguardando')
+                cor = {"Aguardando": "🔵", "Ativo": "🟢", "Finalizado": "⚪"}.get(status_atual, "🔴")
+                
+                # Título ajustado: Arquivo | Data | Mapa
+                titulo_expander = f"{cor} {agenda['file']} | 📅 {agenda['data']} | 🗺️ {agenda['mapa']}"
+                
+                with st.expander(titulo_expander):
+                    # Organização das informações em colunas dentro do expander
+                    inf1, inf2 = st.columns(2)
+                    with inf1:
+                        st.write(f"**📄 Arquivo:** `{agenda['file']}`")
+                        st.write(f"**🗺️ Mapa:** {agenda['mapa']}")
+                    with inf2:
+                        st.write(f"**⏰ Janela:** {agenda['in']} > {agenda['out']}")
+                        st.write(f"**📌 Status:** {status_atual}")
+                    
+                    st.divider()
+                    
+                    if st.button("Remover Agendamento", key=f"rem_main_{agenda['id']}", use_container_width=True, type="secondary"):
+                        nome_arquivo = agenda['file']
+                        client_data["agendas"] = [a for a in client_data["agendas"] if a["id"] != agenda["id"]]
+                        save_db(DB_CLIENTS, st.session_state.db_clients)
+                        registrar_log(user_id, f"Removido: {nome_arquivo}", "info")
+                        st.toast(f"Evento {nome_arquivo} removido!")
+                        st.rerun()
 
 with tab2:
     st.subheader("📜 Histórico de Atividades")
-    logs = load_db(DB_CLIENTS, {}).get(user_id, {}).get("logs", [])
-    if not logs: st.info("Sem logs.")
-    for log in logs:
-        if "🔴" in log: st.error(log)
-        elif "🟢" in log: st.success(log)
-        else: st.info(log)
+    db_fresco = load_db(DB_CLIENTS, {})
+    logs_frescos = db_fresco.get(user_id, {}).get("logs", [])
+    if not logs_frescos:
+        st.info("Sem logs registrados.")
+    else:
+        if st.button("Limpar Histórico", key="clear_logs_btn"):
+            db_fresco[user_id]["logs"] = []
+            save_db(DB_CLIENTS, db_fresco)
+            st.rerun()
+        for log in logs_frescos:
+            if "🔴" in log: st.error(log)
+            elif "🟢" in log: st.success(log)
+            elif "📡" in log: st.warning(log)
+            else: st.info(log)
 
 with tab3:
     st.subheader("📢 Comunicados Oficiais")
-    for m in client_data.get("comunicados", []):
-        with st.expander(f"📌 {m['titulo']} - {m['data']}"):
-            st.write(m['mensagem'])
+    
+    # 1. Busca os dados atualizados
+    comunicados = client_data.get("comunicados", [])
+    
+    if not comunicados:
+        st.info("Nenhum comunicado disponível.")
+    else:
+        # 2. Botão para Limpar Todo o Histórico
+        col_c, col_btn = st.columns([2.5, 1])
+        with col_btn:
+            if st.button("🗑️ Limpar Histórico", use_container_width=True, help="Apaga permanentemente todas as mensagens desta conta"):
+                client_data["comunicados"] = []
+                save_db(DB_CLIENTS, st.session_state.db_clients)
+                st.toast("Histórico limpo com sucesso!")
+                st.rerun()
+        
+        st.divider()
 
-# --- MOTOR DE AUTOMAÇÃO ---
+        # 3. Listagem das mensagens
+        # Usamos enumerate para gerar IDs únicos para os botões de remover individualmente
+        for idx, m in enumerate(comunicados):
+            # Título do expander com ícone e data
+            with st.expander(f"📌 {m['titulo']} - {m['data']}"):
+                st.write(m['mensagem'])
+                
+                st.divider()
+                # Botão para remover apenas esta mensagem específica
+                if st.button("Remover aviso", key=f"del_msg_{idx}", type="secondary"):
+                    client_data["comunicados"].pop(idx)
+                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                    st.rerun()
+
+# --- 4. MOTOR DE AUTOMAÇÃO (Deve ficar no fim para garantir que as funções existam) ---
 def disparar_ftp_pro(client_id, acao, filename, local_path, mapa_path):
     db_atual = load_db(DB_CLIENTS, {})
     if client_id not in db_atual: return False, "Erro"
@@ -637,214 +728,29 @@ def disparar_ftp_pro(client_id, acao, filename, local_path, mapa_path):
             except: pass
         ftp.quit()
         return True, "Sucesso"
-    except Exception as e: return False, str(e)
+    except: return False, "Erro"
 
 def pro_worker():
     while True:
-        now = get_hora_brasilia()
-        hoje, agora = now.strftime("%d/%m/%Y"), now.strftime("%H:%M")
-        db_all = load_db(DB_CLIENTS, {})
-        mudou = False
-        for c_id, c_info in db_all.items():
-            for ag in c_info["agendas"]:
-                if ag["data"] == hoje and ag["in"] == agora and ag.get("status") == "Aguardando":
-                    success, _ = disparar_ftp_pro(c_id, "UPLOAD", ag["file"], ag["local_path"], ag["path"])
-                    ag["status"] = "Ativo" if success else "Erro"
-                    mudou = True
-                if ag["data"] == hoje and ag["out"] == agora and ag.get("status") == "Ativo":
-                    disparar_ftp_pro(c_id, "DELETE", ag["file"], ag["local_path"], ag["path"])
-                    ag["status"] = "Finalizado"
-                    mudou = True
-        if mudou: save_db(DB_CLIENTS, db_all)
-        time.sleep(15)
+        try:
+            now = get_hora_brasilia()
+            hoje, agora = now.strftime("%d/%m/%Y"), now.strftime("%H:%M")
+            db_all = load_db(DB_CLIENTS, {})
+            mudou = False
+            for c_id, c_info in db_all.items():
+                for ag in c_info.get("agendas", []):
+                    if ag["data"] == hoje and ag["in"] == agora and ag.get("status") == "Aguardando":
+                        success, _ = disparar_ftp_pro(c_id, "UPLOAD", ag["file"], ag["local_path"], ag["path"])
+                        ag["status"] = "Ativo" if success else "Erro"
+                        mudou = True
+                    if ag["data"] == hoje and ag["out"] == agora and ag.get("status") == "Ativo":
+                        disparar_ftp_pro(c_id, "DELETE", ag["file"], ag["local_path"], ag["path"])
+                        ag["status"] = "Finalizado"
+                        mudou = True
+            if mudou: save_db(DB_CLIENTS, db_all)
+        except: pass
+        time.sleep(30)
 
 if 'worker_started' not in st.session_state:
     threading.Thread(target=pro_worker, daemon=True).start()
     st.session_state['worker_started'] = True
-
-# --- FIM DO MOTOR DE AUTOMAÇÃO ---
-
-with st.sidebar:
-    st.title("👤 Minha Conta")
-    
-    # Botão de retorno para o Admin (Modo Teste)
-    if st.session_state.role == "admin":
-        if st.button("⚙️ VOLTAR AO PAINEL ADMIN", type="primary", use_container_width=True):
-            st.session_state.view_mode = "admin"
-            st.rerun()
-            
-    st.write(f"Servidor: **{user_info['server']}**")
-    st.write(f"Plano: **{plano_atual}**")
-    st.markdown(f"Expira em: **{exp_status}**")
-    
-    # Barra de Progresso do Plano (Uso de slots)
-    progresso = min(total_agendas / limite_agendas, 1.0) if limite_agendas > 0 else 0
-    st.progress(progresso, text=f"Uso: {total_agendas}/{limite_agendas}")
-    
-    if st.button("🚪 Sair", use_container_width=True):
-        st.session_state.authenticated = False
-        st.rerun()
-        
-    st.divider()
-    
-    # --- CONFIGURAÇÕES FTP ---
-    st.subheader("⚙️ Configurações FTP")
-    client_data["ftp"]["host"] = st.text_input("Host", value=client_data["ftp"]["host"])
-    client_data["ftp"]["user"] = st.text_input("Usuário", value=client_data["ftp"]["user"])
-    client_data["ftp"]["pass"] = st.text_input("Senha", type="password", value=client_data["ftp"]["pass"])
-    client_data["ftp"]["port"] = st.text_input("Porta", value=client_data["ftp"]["port"])
-    
-    c_sv, c_ts = st.columns(2)
-    
-    # Botão Salvar
-    if c_sv.button("Salvar Dados", use_container_width=True):
-        save_db(DB_CLIENTS, st.session_state.db_clients)
-        st.success("Dados salvos!")
-        # Opcional: registrar log de alteração de dados
-        registrar_log(user_id, "Configurações FTP atualizadas pelo usuário.")
-
-    # Botão Testar (Com registro de Logs)
-    if c_ts.button("⚡ Testar", use_container_width=True):
-        try:
-            ftp_t = ftplib.FTP()
-            # Converte porta para int para evitar erros de conexão
-            ftp_t.connect(client_data["ftp"]["host"], int(client_data["ftp"]["port"]), timeout=10)
-            ftp_t.login(client_data["ftp"]["user"], client_data["ftp"]["pass"])
-            ftp_t.quit()
-            
-            # Registra o sucesso no histórico do cliente
-            registrar_log(user_id, "Conexão FTP testada com sucesso.", "sucesso")
-            st.success("Conexão OK!")
-            st.rerun() # Recarrega para o log aparecer na aba tab2
-            
-        except Exception as e:
-            # Registra a falha no histórico do cliente
-            registrar_log(user_id, f"Falha no teste de conexão: {str(e)}", "erro")
-            st.error(f"Erro: {str(e)}")
-            st.rerun()
-
-    st.divider()
-    
-    # Relógio em tempo real
-    @st.fragment(run_every="1s")
-    def sidebar_clock():
-        st.metric(label="🕒 Brasília", value=get_hora_brasilia().strftime("%H:%M:%S"))
-    sidebar_clock()
-
-# --- TÍTULO E ABAS ---
-st.title(f"🎮 {user_info['server']}")
-tab1, tab2 = st.tabs(["📅 Agendamentos", "📜 Logs"])
-
-with tab1:
-    c1, c2 = st.columns([1, 1.5])
-    
-    with c1:
-        st.subheader("🚀 Novo Evento")
-        if total_agendas >= limite_agendas:
-            st.error(f"Limite do plano {plano_atual} atingido ({limite_agendas}).")
-        else:
-            if 'uploader_id' not in st.session_state: st.session_state.uploader_id = 0
-            up_file = st.file_uploader("Arquivo", type=["xml", "json"], key=f"up_{st.session_state.uploader_id}")
-            mapa = st.selectbox("Mapa", ["Chernarus", "Livonia"])
-            caminhos = {
-                "Chernarus": "/dayzxb_missions/dayzOffline.chernarusplus/custom", 
-                "Livonia": "/dayzxb_missions/dayzOffline.enoch/custom"
-            }
-            dt_ev = st.date_input("Data", min_value=get_hora_brasilia())
-            h_in = st.text_input("Entrada", "19:55")
-            h_out = st.text_input("Saída", "21:55")
-            rec = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"])
-            
-            if st.button("Confirmar Agendamento", use_container_width=True):
-                if up_file:
-                    safe_filename = f"{user_id[:5]}_{up_file.name}"
-                    path = os.path.join(UPLOAD_DIR, safe_filename)
-                    with open(path, "wb") as f: 
-                        f.write(up_file.getbuffer())
-                    
-                    nova = {
-                        "id": str(time.time()), 
-                        "file": up_file.name, 
-                        "local_path": path, 
-                        "mapa": mapa, 
-                        "path": caminhos[mapa], 
-                        "data": dt_ev.strftime("%d/%m/%Y"), 
-                        "in": h_in, 
-                        "out": h_out, 
-                        "rec": rec, 
-                        "status": "Aguardando"
-                    }
-                    
-                    client_data["agendas"].append(nova)
-                    save_db(DB_CLIENTS, st.session_state.db_clients)
-                    
-                    # --- NOVO: LOG DE CRIAÇÃO ---
-                    registrar_log(user_id, f"Novo agendamento criado: {up_file.name} ({mapa})", "info")
-                    
-                    st.success("Evento agendado com sucesso!")
-                    st.session_state.uploader_id += 1
-                    st.rerun()
-                else:
-                    st.warning("Por favor, selecione um arquivo.")
-
-    with c2:
-        st.subheader("📋 Lista de Execução")
-        
-        # Verifica se existem agendas para evitar erros no loop
-        if not client_data.get("agendas"):
-            st.info("Nenhum evento agendado no momento.")
-        else:
-            for agenda in client_data["agendas"]:
-                # Define a cor do status
-                status_atual = agenda.get('status', 'Aguardando')
-                cor = {"Aguardando": "🔵", "Ativo": "🟢", "Finalizado": "⚪"}.get(status_atual, "🔴")
-                
-                with st.expander(f"{cor} {agenda['file']} - {agenda['mapa']}"):
-                    st.write(f"**Janela:** {agenda['in']} > {agenda['out']} | **Data:** {agenda['data']}")
-                    st.write(f"**Recorrência:** {agenda['rec']} | **Status:** {status_atual}")
-                    
-                    # Botão de Remoção
-                    if st.button("Remover Agendamento", key=f"del_{agenda['id']}", use_container_width=True, type="secondary"):
-                        
-                        # 1. Armazena o nome do arquivo antes de remover da memória
-                        nome_arquivo = agenda['file']
-                        
-                        # 2. Filtra a lista para remover o item da memória
-                        client_data["agendas"] = [a for a in client_data["agendas"] if a["id"] != agenda["id"]]
-                        
-                        # 3. Salva a lista de agendas atualizada no arquivo físico
-                        save_db(DB_CLIENTS, st.session_state.db_clients)
-                        
-                        # 4. Registra o LOG POR ÚLTIMO 
-                        # (A função registrar_log abre o arquivo, adiciona a linha e salva sozinha)
-                        registrar_log(user_id, f"Agendamento removido manualmente: {nome_arquivo}", "info")
-                        
-                        # 5. Feedback visual e recarregamento
-                        st.toast(f"Evento {nome_arquivo} removido!")
-                        st.rerun()
-                    
-with tab2:
-    st.subheader("📜 Histórico de Atividades")
-    
-    # FORÇAR RECARREGAMENTO: Lê o banco de dados do arquivo para pegar o que o robô escreveu
-    db_fresco = load_db(DB_CLIENTS, {})
-    logs_frescos = db_fresco.get(user_id, {}).get("logs", [])
-    
-    if not logs_frescos:
-        st.info("Nenhuma atividade registrada nos logs ainda.")
-    else:
-        # Botão para limpar logs (opcional, mas ajuda a testar)
-        if st.button("Limpar Histórico"):
-            db_fresco[user_id]["logs"] = []
-            save_db(DB_CLIENTS, db_fresco)
-            st.rerun()
-
-        for log in logs_frescos:
-            if "🔴" in log:
-                st.error(log)
-            elif "🟢" in log:
-                st.success(log)
-            elif "📡" in log:
-                st.warning(log)
-            else:
-                st.info(log)
