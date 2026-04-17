@@ -7,6 +7,7 @@ import threading
 import secrets
 import string
 import requests
+import shutil
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
 
@@ -50,16 +51,37 @@ if not os.path.exists(UPLOAD_DIR):
 def load_db(file, default_data):
     if os.path.exists(file):
         try:
-            with open(file, "r") as f:
-                return json.loads(f.read())
-        except: pass
+            with open(file, "r", encoding="utf-8") as f:
+                conteudo = f.read()
+                if not conteudo.strip(): # Se o arquivo existir mas estiver totalmente vazio
+                    return default_data
+                return json.loads(conteudo)
+        except Exception as e:
+            # Se der erro na leitura (ex: arquivo corrompido), ele tenta carregar o backup
+            backup = file + ".bak"
+            if os.path.exists(backup):
+                try:
+                    with open(backup, "r", encoding="utf-8") as f:
+                        return json.loads(f.read())
+                except: pass
+            print(f"Erro ao carregar {file}: {e}")
     return default_data
 
 def save_db(file, data):
-    if not data and os.path.exists(file): 
-        return # Proteção: não salva se os dados sumiram da memória
-    with open(file, "w") as f:
-        json.dump(data, f, indent=4)
+    # Proteção Crítica: Nunca salva se os dados estiverem vazios 
+    # (isso evita apagar o arquivo real por um erro de sessão do Streamlit)
+    if not data or (isinstance(data, dict) and "admin_key" not in data and file == DB_USERS):
+        return 
+
+    try:
+        # Cria um backup do arquivo atual antes de sobrescrever
+        if os.path.exists(file):
+            shutil.copy(file, file + ".bak")
+            
+        with open(file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+    except Exception as e:
+        st.error(f"Erro ao salvar banco de dados: {e}")
 
 # Inicialização dos dados
 if 'db_users' not in st.session_state:
@@ -318,6 +340,64 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             time.sleep(1)
             st.rerun()
 
+    st.stop()
+    
+    # Adicione isso dentro do bloco 'if st.session_state.role == "admin":'
+# Sugestão: Crie uma tab_adm4 nas tabs do admin
+
+with tab_adm4:
+        st.subheader("📦 Central de Migração de Dados")
+        st.info("Use esta aba para salvar os dados antes de atualizar o código e restaurá-los logo após a atualização.")
+
+        col_back, col_rest = st.columns(2)
+
+        with col_back:
+            st.markdown("### ⬇️ Exportar Backup")
+            st.write("Baixe o arquivo contendo todos os Clientes, Keys e Agendamentos atuais.")
+            
+            dados_totais = {
+                "users": st.session_state.db_users,
+                "clients": st.session_state.db_clients
+            }
+            
+            json_string = json.dumps(dados_totais, indent=4, ensure_ascii=False)
+            
+            st.download_button(
+                label="💾 Baixar Backup Geral (JSON)",
+                data=json_string,
+                file_name=f"backup_titan_{get_hora_brasilia().strftime('%d_%m_%Y')}.json",
+                mime="application/json",
+                use_container_width=True
+            )
+
+        with col_rest:
+            st.markdown("### ⬆️ Importar/Restaurar")
+            st.write("Suba um arquivo de backup para restaurar as informações no sistema.")
+            
+            arquivo_upload = st.file_uploader("Selecione o arquivo de backup", type="json")
+            
+            if st.button("🚀 Restaurar Dados Agora", use_container_width=True, type="primary"):
+                if arquivo_upload is not None:
+                    try:
+                        backup_data = json.load(arquivo_upload)
+                        if "users" in backup_data and "clients" in backup_data:
+                            st.session_state.db_users = backup_data["users"]
+                            st.session_state.db_clients = backup_data["clients"]
+                            
+                            save_db(DB_USERS, st.session_state.db_users)
+                            save_db(DB_CLIENTS, st.session_state.db_clients)
+                            
+                            st.success("✅ Restauração concluída com sucesso!")
+                            time.sleep(2)
+                            st.rerun()
+                        else:
+                            st.error("❌ Arquivo inválido!")
+                    except Exception as e:
+                        st.error(f"❌ Erro ao processar arquivo: {e}")
+                else:
+                    st.warning("⚠️ Selecione um arquivo primeiro.")
+
+    # 3. AJUSTE: O st.stop() deve ficar por último, depois de todas as tabs
     st.stop()
 
 # --- ÁREA DO CLIENTE ---
