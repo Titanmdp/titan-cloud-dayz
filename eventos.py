@@ -8,11 +8,26 @@ import secrets
 import string
 import requests
 from datetime import datetime, timedelta, timezone
+from streamlit_javascript import st_javascript
 
 # --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASÍLIA) ---
 FUSO_BR = timezone(timedelta(hours=-3))
 def get_hora_brasilia():
     return datetime.now(FUSO_BR)
+    
+def buscar_localizacao_cliente():
+    # Este script roda no navegador do seu cliente
+    url_api = "https://ipapi.co/json/"
+    js_code = f"await fetch('{url_api}').then(res => res.json())"
+    
+    result = st_javascript(js_code)
+    
+    if result:
+        return {
+            "cidade": result.get("city", "Desconhecido"),
+            "estado": result.get("region", "---")
+        }
+    return None
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
@@ -110,32 +125,42 @@ def get_user_location():
 # --- TELA DE LOGIN ---
 if not st.session_state.authenticated:
     st.title("🔑 Titan Cloud - Login")
+    
+    # 1. Inicia a captura da localização via JavaScript (Roda no navegador do cliente)
+    dados_geo = buscar_localizacao_cliente()
+    
     login_key = st.text_input("Insira sua KeyUser", type="password")
     
     if st.button("Entrar no Painel", use_container_width=True):
         ok, cargo = validar_acesso(login_key)
         
         if ok:
-            # 1. Gera um Token Único para esta sessão (Aba do navegador)
+            # 2. Gera um Token Único para esta sessão (Trava de acesso simultâneo)
             token_sessao = secrets.token_hex(8)
             
-            # 2. Captura os dados de quem está logando
-            dados_log = get_user_location()
+            # 3. Formata a localização capturada (ou define como "Não detectado" se o JS falhar/demorar)
+            if dados_geo:
+                local_final = f"{dados_geo['cidade']} - {dados_geo['estado']}"
+            else:
+                local_final = "Localização não capturada"
             
-            # 3. Se for cliente, atualiza o monitoramento no banco de dados
+            # 4. Se for cliente, atualiza o monitoramento no banco de dados (JSON)
             if cargo == "client":
                 st.session_state.db_users["keys"][login_key]["last_session"] = token_sessao
-                st.session_state.db_users["keys"][login_key]["last_ip"] = dados_log["ip"]
-                # Ajustado para usar as chaves corretas:
-                st.session_state.db_users["keys"][login_key]["local"] = f"{dados_log['cidade']} - {dados_log['estado']}"
+                # Nota: Mantemos o campo 'local' com os dados reais capturados pelo navegador
+                st.session_state.db_users["keys"][login_key]["local"] = local_final
                 st.session_state.db_users["keys"][login_key]["last_login"] = get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
+                
+                # Opcional: Se quiser guardar o IP do servidor (Oregon) apenas como registro técnico
+                # st.session_state.db_users["keys"][login_key]["last_ip"] = "IP_SERVIDOR" 
+                
                 save_db(DB_USERS, st.session_state.db_users)
 
-            # 4. Define as variáveis de estado
+            # 5. Define as variáveis de estado da sessão
             st.session_state.authenticated = True
             st.session_state.user_key = login_key
             st.session_state.role = cargo
-            st.session_state.session_token = token_sessao # Guarda o token no navegador
+            st.session_state.session_token = token_sessao # Guarda o token para validar a trava simultânea
             st.session_state.view_mode = "admin" if cargo == "admin" else "client"
             
             st.rerun()
