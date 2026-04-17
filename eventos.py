@@ -645,15 +645,15 @@ with tab1:
                 status_atual = agenda.get('status', 'Aguardando')
                 cor = {"Aguardando": "🔵", "Ativo": "🟢", "Finalizado": "⚪"}.get(status_atual, "🔴")
                 
-                # Título ajustado: Arquivo | Data | Mapa
                 titulo_expander = f"{cor} {agenda['file']} | 📅 {agenda['data']} | 🗺️ {agenda['mapa']}"
                 
                 with st.expander(titulo_expander):
-                    # Organização das informações em colunas dentro do expander
                     inf1, inf2 = st.columns(2)
                     with inf1:
                         st.write(f"**📄 Arquivo:** `{agenda['file']}`")
                         st.write(f"**🗺️ Mapa:** {agenda['mapa']}")
+                        st.write(f"**🔄 Recorrência:** {agenda.get('rec', 'Único')}")
+                        
                     with inf2:
                         st.write(f"**⏰ Janela:** {agenda['in']} > {agenda['out']}")
                         st.write(f"**📌 Status:** {status_atual}")
