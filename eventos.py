@@ -12,15 +12,24 @@ import shutil
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
 
-# --- 1. DETECÇÃO DE AMBIENTE ---
+# --- 1. DETECÇÃO DE AMBIENTE E PERSISTÊNCIA DE DADOS ---
 IS_DEV = os.environ.get("IS_DEV", "False") == "True"
 
 if IS_DEV:
+    # No ambiente de desenvolvimento, mantemos os arquivos locais para teste
     DB_USERS = "users_db_dev.json"
     DB_CLIENTS = "clients_data_dev.json"
+    st.sidebar.warning("🚧 AMBIENTE DE TESTES (DEV)")
 else:
-    DB_USERS = "users_db.json"
-    DB_CLIENTS = "clients_data.json"
+    # PARA PRODUÇÃO (STARTER COM DISCO):
+    # Verificamos se a pasta do disco persistente montada no Render existe
+    if os.path.exists("/data"):
+        DB_USERS = "/data/users_db.json"
+        DB_CLIENTS = "/data/clients_data.json"
+    else:
+        # Fallback caso o disco não esteja montado ou rode fora do Render
+        DB_USERS = "users_db.json"
+        DB_CLIENTS = "clients_data.json"
 
 # --- 2. CONFIGURAÇÃO DA PÁGINA (Deve vir antes de qualquer comando st.sidebar) ---
 st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
