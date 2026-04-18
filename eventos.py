@@ -601,46 +601,51 @@ with tab1:
     c1, c2 = st.columns([1, 1.5])
     
     with c1:
-        st.subheader("🚀 Novo Evento")
-        if total_agendas >= limite_agendas:
-            st.error(f"Limite do plano atingido ({limite_agendas}).")
-        else:
-            if 'uploader_id' not in st.session_state: 
-                st.session_state.uploader_id = 0
-            
-            up_file = st.file_uploader("Arquivo", type=["xml", "json"], key=f"up_f_{st.session_state.uploader_id}")
-            mapa = st.selectbox("Mapa", ["Chernarus", "Livonia"], key="map_sel_main")
-            dt_ev = st.date_input("Data", min_value=get_hora_brasilia(), key="date_sel_main")
-            h_in = st.text_input("Entrada", "19:55", key="h_in_main")
-            h_out = st.text_input("Saída", "21:55", key="h_out_main")
-            rec = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key="rec_sel_main")
-            
-            if st.button("Confirmar Agendamento", use_container_width=True, key="conf_btn_main"):
-                if up_file:
-                    safe_fn = f"{user_id[:5]}_{up_file.name}"
-                    path = os.path.join(UPLOAD_DIR, safe_fn)
-                    with open(path, "wb") as f: 
-                        f.write(up_file.getbuffer())
-                    
-                    nova_agenda = {
-                        "id": str(time.time()), 
-                        "file": up_file.name, 
-                        "local_path": path, 
-                        "mapa": mapa,
-                        "path": "/dayzxb_missions/dayzOffline.chernarusplus/custom" if mapa=="Chernarus" else "/dayzxb_missions/dayzOffline.enoch/custom",
-                        "data": dt_ev.strftime("%d/%m/%Y"), 
-                        "in": h_in, 
-                        "out": h_out, 
-                        "rec": rec, 
-                        "status": "Aguardando"
-                    }
-                    client_data["agendas"].append(nova_agenda)
-                    save_db(DB_CLIENTS, st.session_state.db_clients)
-                    registrar_log(user_id, f"Agendado: {up_file.name} ({mapa})", "info")
-                    st.session_state.uploader_id += 1
-                    st.rerun()
-                else:
-                    st.warning("Selecione um arquivo antes de confirmar.")
+            st.subheader("🚀 Novo Evento")
+            if total_agendas >= limite_agendas:
+                st.error(f"Limite do plano atingido ({limite_agendas}).")
+            else:
+                # Chave baseada no tempo atual para garantir unicidade absoluta
+                uploader_key = f"uploader_{time.time()}"
+                up_file = st.file_uploader("Arquivo", type=["xml", "json"], key=uploader_key)
+                
+                mapa = st.selectbox("Mapa", ["Chernarus", "Livonia"], key="map_sel_main")
+                dt_ev = st.date_input("Data", min_value=get_hora_brasilia(), key="date_sel_main")
+                h_in = st.text_input("Entrada", "19:55", key="h_in_main")
+                h_out = st.text_input("Saída", "21:55", key="h_out_main")
+                rec = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key="rec_sel_main")
+                
+                if st.button("Confirmar Agendamento", use_container_width=True, key="conf_btn_main"):
+                    if up_file:
+                        safe_fn = f"{user_id[:5]}_{up_file.name}"
+                        # UPLOAD_DIR deve apontar para /var/data/uploads no Render
+                        path = os.path.join(UPLOAD_DIR, safe_fn)
+                        
+                        with open(path, "wb") as f: 
+                            f.write(up_file.getbuffer())
+                        
+                        nova_agenda = {
+                            "id": str(time.time()), 
+                            "file": up_file.name, 
+                            "local_path": path, 
+                            "mapa": mapa,
+                            "path": "/dayzxb_missions/dayzOffline.chernarusplus/custom" if mapa=="Chernarus" else "/dayzxb_missions/dayzOffline.enoch/custom",
+                            "data": dt_ev.strftime("%d/%m/%Y"), 
+                            "in": h_in, 
+                            "out": h_out, 
+                            "rec": rec, 
+                            "status": "Aguardando"
+                        }
+                        client_data["agendas"].append(nova_agenda)
+                        save_db(DB_CLIENTS, st.session_state.db_clients)
+                        registrar_log(user_id, f"Agendado: {up_file.name} ({mapa})", "info")
+                        
+                        st.success("Evento agendado com sucesso!")
+                        # O rerun limpa o estado e força a recriação do widget com uma nova key
+                        time.sleep(0.5) 
+                        st.rerun()
+                    else:
+                        st.warning("Selecione um arquivo antes de confirmar.")
 
     with c2:
         st.subheader("📋 Lista de Execução")
