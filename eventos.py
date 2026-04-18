@@ -81,21 +81,13 @@ PLANOS = {
     "Enterprise": 999  # Mude o 999 para o valor desejado
 }
 
-# --- BANCO DE DADOS (JSON) COM AUTO-DETECÇÃO DE AMBIENTE ---
-# Se rodando no Render (que possui a variável de ambiente 'RENDER'), 
-# usa a pasta montada no disco (/var/data). Caso contrário, usa a pasta atual (.).
-if os.environ.get("RENDER"):
-    MOUNT_PATH = "/var/data"
-else:
-    MOUNT_PATH = "." 
+# --- BANCO DE DADOS (JSON) ---
+DB_USERS = "users_db.json"
+DB_CLIENTS = "clients_data.json"
+UPLOAD_DIR = "uploads"
 
-DB_USERS = os.path.join(MOUNT_PATH, "users_db.json")
-DB_CLIENTS = os.path.join(MOUNT_PATH, "clients_data.json")
-UPLOAD_DIR = os.path.join(MOUNT_PATH, "uploads")
-
-# Garante que as pastas existam em qualquer um dos ambientes
 if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    os.makedirs(UPLOAD_DIR)
 
 def load_db(file, default_data):
     if os.path.exists(file):
