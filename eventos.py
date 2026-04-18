@@ -44,18 +44,26 @@ def get_hora_brasilia():
     return datetime.now(FUSO_BR)
     
 def buscar_localizacao_cliente():
-    # Este script roda no navegador do seu cliente
-    url_api = "https://ipapi.co/json/"
-    js_code = f"await fetch('{url_api}').then(res => res.json())"
-    
-    result = st_javascript(js_code)
-    
-    if result:
+    try:
+        # Supondo que você usa uma requisição (requests.get)
+        # response = requests.get(...)
+        # result = response.json()
+        
+        # AQUI O TRATAMENTO:
+        # Se 'result' for None ou falhar, retornamos um dicionário padrão
+        if result is None:
+            return {"city": "Desconhecido", "region": "Desconhecido", "country": "Desconhecido"}
+            
+        # Caso tenha vindo o resultado, garantimos que é um dict
         return {
             "cidade": result.get("city", "Desconhecido"),
-            "estado": result.get("region", "---")
+            "regiao": result.get("region", "Desconhecido"),
+            "pais": result.get("country", "Desconhecido")
         }
-    return None
+    except Exception as e:
+        # Se ocorrer qualquer erro na rede, retorna valores padrão em vez de quebrar
+        print(f"Erro ao buscar geolocalização: {e}")
+        return {"cidade": "Desconhecido", "regiao": "Desconhecido", "pais": "Desconhecido"}
 
 # --- FUNÇÃO ANTI-SONO (MANTER VIVO) ---
 def manter_vivo():
