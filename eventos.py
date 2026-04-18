@@ -81,13 +81,21 @@ PLANOS = {
     "Enterprise": 999  # Mude o 999 para o valor desejado
 }
 
-# --- BANCO DE DADOS (JSON) ---
-DB_USERS = "users_db.json"
-DB_CLIENTS = "clients_data.json"
-UPLOAD_DIR = "uploads"
+# --- BANCO DE DADOS (JSON) COM AUTO-DETECÇÃO DE AMBIENTE ---
+# Se rodando no Render (que possui a variável de ambiente 'RENDER'), 
+# usa a pasta montada no disco (/var/data). Caso contrário, usa a pasta atual (.).
+if os.environ.get("RENDER"):
+    MOUNT_PATH = "/var/data"
+else:
+    MOUNT_PATH = "." 
 
+DB_USERS = os.path.join(MOUNT_PATH, "users_db.json")
+DB_CLIENTS = os.path.join(MOUNT_PATH, "clients_data.json")
+UPLOAD_DIR = os.path.join(MOUNT_PATH, "uploads")
+
+# Garante que as pastas existam em qualquer um dos ambientes
 if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def load_db(file, default_data):
     if os.path.exists(file):
@@ -645,15 +653,15 @@ with tab1:
                 status_atual = agenda.get('status', 'Aguardando')
                 cor = {"Aguardando": "🔵", "Ativo": "🟢", "Finalizado": "⚪"}.get(status_atual, "🔴")
                 
-                # Título ajustado: Arquivo | Data | Mapa
                 titulo_expander = f"{cor} {agenda['file']} | 📅 {agenda['data']} | 🗺️ {agenda['mapa']}"
                 
                 with st.expander(titulo_expander):
-                    # Organização das informações em colunas dentro do expander
                     inf1, inf2 = st.columns(2)
                     with inf1:
                         st.write(f"**📄 Arquivo:** `{agenda['file']}`")
                         st.write(f"**🗺️ Mapa:** {agenda['mapa']}")
+                        st.write(f"**🔄 Recorrência:** {agenda.get('rec', 'Único')}")
+                        
                     with inf2:
                         st.write(f"**⏰ Janela:** {agenda['in']} > {agenda['out']}")
                         st.write(f"**📌 Status:** {status_atual}")
