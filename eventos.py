@@ -730,8 +730,9 @@ with tab2:
 with tab3:
     st.subheader("📢 Comunicados Oficiais")
     
-    # 1. Busca os dados atualizados
-    comunicados = client_data.get("comunicados", [])
+    # 1. Busca os dados atualizados diretamente da estrutura do cliente logado
+    # Garantimos que estamos trabalhando com a referência correta do banco
+    comunicados = st.session_state.db_clients.get(user_id, {}).get("comunicados", [])
     
     if not comunicados:
         st.info("Nenhum comunicado disponível.")
@@ -740,7 +741,7 @@ with tab3:
         col_c, col_btn = st.columns([2.5, 1])
         with col_btn:
             if st.button("🗑️ Limpar Histórico", use_container_width=True, help="Apaga permanentemente todas as mensagens desta conta"):
-                client_data["comunicados"] = []
+                st.session_state.db_clients[user_id]["comunicados"] = []
                 save_db(DB_CLIENTS, st.session_state.db_clients)
                 st.toast("Histórico limpo com sucesso!")
                 st.rerun()
@@ -748,16 +749,17 @@ with tab3:
         st.divider()
 
         # 3. Listagem das mensagens
-        # Usamos enumerate para gerar IDs únicos para os botões de remover individualmente
+        # Usamos o ID do comunicado ou o índice como chave única para evitar conflitos
         for idx, m in enumerate(comunicados):
-            # Título do expander com ícone e data
-            with st.expander(f"📌 {m['titulo']} - {m['data']}"):
-                st.write(m['mensagem'])
+            with st.expander(f"📌 {m.get('titulo', 'Sem título')} - {m.get('data', 'Sem data')}"):
+                st.write(m.get('mensagem', ''))
                 
                 st.divider()
+                
                 # Botão para remover apenas esta mensagem específica
-                if st.button("Remover aviso", key=f"del_msg_{idx}", type="secondary"):
-                    client_data["comunicados"].pop(idx)
+                # O key é único baseado no ID do objeto para evitar conflitos de renderização
+                if st.button("Remover aviso", key=f"del_msg_{m.get('id', idx)}", type="secondary"):
+                    st.session_state.db_clients[user_id]["comunicados"].pop(idx)
                     save_db(DB_CLIENTS, st.session_state.db_clients)
                     st.rerun()
 
