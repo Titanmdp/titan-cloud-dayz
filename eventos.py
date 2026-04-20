@@ -31,9 +31,6 @@ else:
         DB_USERS = "users_db.json"
         DB_CLIENTS = "clients_data.json"
 
-# --- 2. CONFIGURAÇÃO DA PÁGINA (Deve vir antes de qualquer comando st.sidebar) ---
-st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
-
 # Agora sim, o aviso visual aparece com segurança
 if IS_DEV:
     st.sidebar.warning("⚠️ AMBIENTE DE DESENVOLVIMENTO (TESTES)")
