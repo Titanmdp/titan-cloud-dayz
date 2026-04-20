@@ -13,31 +13,35 @@ from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
 
 # --- 1. DETECÇÃO DE AMBIENTE E PERSISTÊNCIA DE DADOS ---
-# Verifica se está no Render (ambiente de produção)
 IS_RENDER = os.environ.get("RENDER") is not None
 IS_DEV = os.environ.get("IS_DEV", "False") == "True"
 
 if IS_RENDER:
-    # Em produção, usa o caminho absoluto do disco montado
-    MOUNT_PATH = "/data"
-elif IS_DEV:
-    # No PC, usa uma pasta 'data' dentro do projeto atual
-    MOUNT_PATH = os.path.join(os.getcwd(), "data")
-    st.sidebar.warning("🚧 AMBIENTE DE TESTES (DEV)")
+    # PRODUÇÃO: O disco está montado em /var/data
+    MOUNT_PATH = "/var/data"
 else:
-    # Fallback genérico para evitar erro caso não saiba o ambiente
+    # DESENVOLVIMENTO: Cria a pasta 'data' na pasta do projeto
     MOUNT_PATH = os.path.join(os.getcwd(), "data")
+    if IS_DEV: 
+        st.sidebar.warning("🚧 AMBIENTE DE TESTES (DEV)")
 
-# Define os caminhos dos arquivos baseados no MOUNT_PATH
+# Define os caminhos
 DB_USERS = os.path.join(MOUNT_PATH, "users_db.json")
 DB_CLIENTS = os.path.join(MOUNT_PATH, "clients_data.json")
 UPLOAD_DIR = os.path.join(MOUNT_PATH, "uploads")
 
-# Garante que a pasta de dados e de uploads existam
-if not os.path.exists(MOUNT_PATH):
+# --- CRIAÇÃO SEGURA ---
+# Só tentamos criar o MOUNT_PATH se NÃO estivermos no Render
+if not IS_RENDER and not os.path.exists(MOUNT_PATH):
     os.makedirs(MOUNT_PATH, exist_ok=True)
-if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Criamos o UPLOAD_DIR apenas se o pai (MOUNT_PATH) existir
+if os.path.exists(MOUNT_PATH):
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+    except Exception as e:
+        # Em produção, se falhar, apenas reportamos mas não paramos o app
+        print(f"Nota: A pasta de uploads não pôde ser criada automaticamente: {e}")
 
 # --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASÍLIA) ---
 FUSO_BR = timezone(timedelta(hours=-3))
