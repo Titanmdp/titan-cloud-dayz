@@ -17,33 +17,29 @@ IS_RENDER = os.environ.get("RENDER") is not None
 IS_DEV = os.environ.get("IS_DEV", "False") == "True"
 
 if IS_RENDER:
-    # Em produção no Render, usamos o caminho onde o seu disco foi montado
+    # Em produção, o /var/data JÁ EXISTE e é o seu disco.
     MOUNT_PATH = "/var/data"
-elif IS_DEV:
-    # No PC, usa uma pasta 'data' dentro do projeto atual
-    MOUNT_PATH = os.path.join(os.getcwd(), "data")
-    st.sidebar.warning("🚧 AMBIENTE DE TESTES (DEV)")
 else:
-    # Fallback genérico para evitar erro caso não saiba o ambiente
+    # No PC, usamos a pasta data local.
     MOUNT_PATH = os.path.join(os.getcwd(), "data")
+    if IS_DEV: st.sidebar.warning("🚧 AMBIENTE DE TESTES (DEV)")
 
-# Define os caminhos dos arquivos baseados no MOUNT_PATH
+# Define os caminhos
 DB_USERS = os.path.join(MOUNT_PATH, "users_db.json")
 DB_CLIENTS = os.path.join(MOUNT_PATH, "clients_data.json")
 UPLOAD_DIR = os.path.join(MOUNT_PATH, "uploads")
 
-# Garante que as pastas existam de forma segura
-try:
-    # Verifica e cria a pasta base apenas se não for o ponto de montagem do Render
-    if not IS_RENDER and not os.path.exists(MOUNT_PATH):
-        os.makedirs(MOUNT_PATH, exist_ok=True)
-    
-    # Cria a pasta de uploads se ela não existir
-    if not os.path.exists(UPLOAD_DIR):
+# --- CRIAÇÃO SEGURA ---
+# 1. Se não estiver no Render, criamos o MOUNT_PATH local
+if not IS_RENDER and not os.path.exists(MOUNT_PATH):
+    os.makedirs(MOUNT_PATH, exist_ok=True)
+
+# 2. Criamos o UPLOAD_DIR apenas se o pai existir (no Render, /var/data já existe)
+if os.path.exists(MOUNT_PATH):
+    try:
         os.makedirs(UPLOAD_DIR, exist_ok=True)
-except Exception as e:
-    # Logamos o erro de forma silenciosa para não quebrar a interface do usuário
-    print(f"Nota de infraestrutura: {e}")
+    except Exception as e:
+        print(f"Nota: A pasta de uploads já existe ou não pode ser criada: {e}")
 
 # --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASÍLIA) ---
 FUSO_BR = timezone(timedelta(hours=-3))
