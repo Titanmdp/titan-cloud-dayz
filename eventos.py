@@ -13,27 +13,31 @@ from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
 
 # --- 1. DETECÇÃO DE AMBIENTE E PERSISTÊNCIA DE DADOS ---
+# Verifica se está no Render (ambiente de produção)
+IS_RENDER = os.environ.get("RENDER") is not None
 IS_DEV = os.environ.get("IS_DEV", "False") == "True"
 
-if IS_DEV:
-    # No ambiente de desenvolvimento, mantemos os arquivos locais para teste
-    DB_USERS = "users_db_dev.json"
-    DB_CLIENTS = "clients_data_dev.json"
+if IS_RENDER:
+    # Em produção, usa o caminho absoluto do disco montado
+    MOUNT_PATH = "/data"
+elif IS_DEV:
+    # No PC, usa uma pasta 'data' dentro do projeto atual
+    MOUNT_PATH = os.path.join(os.getcwd(), "data")
     st.sidebar.warning("🚧 AMBIENTE DE TESTES (DEV)")
 else:
-    # PARA PRODUÇÃO (STARTER COM DISCO):
-    # Verificamos se a pasta do disco persistente montada no Render existe
-    if os.path.exists("/data"):
-        DB_USERS = "/data/users_db.json"
-        DB_CLIENTS = "/data/clients_data.json"
-    else:
-        # Fallback caso o disco não esteja montado ou rode fora do Render
-        DB_USERS = "users_db.json"
-        DB_CLIENTS = "clients_data.json"
+    # Fallback genérico para evitar erro caso não saiba o ambiente
+    MOUNT_PATH = os.path.join(os.getcwd(), "data")
 
-# Agora sim, o aviso visual aparece com segurança
-if IS_DEV:
-    st.sidebar.warning("⚠️ AMBIENTE DE DESENVOLVIMENTO (TESTES)")
+# Define os caminhos dos arquivos baseados no MOUNT_PATH
+DB_USERS = os.path.join(MOUNT_PATH, "users_db.json")
+DB_CLIENTS = os.path.join(MOUNT_PATH, "clients_data.json")
+UPLOAD_DIR = os.path.join(MOUNT_PATH, "uploads")
+
+# Garante que a pasta de dados e de uploads existam
+if not os.path.exists(MOUNT_PATH):
+    os.makedirs(MOUNT_PATH, exist_ok=True)
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASÍLIA) ---
 FUSO_BR = timezone(timedelta(hours=-3))
@@ -151,6 +155,8 @@ if 'user_key' not in st.session_state:
     st.session_state.user_key = None
 if 'view_mode' not in st.session_state:
     st.session_state.view_mode = "admin"
+if 'role' not in st.session_state:
+    st.session_state.role = None  # Inicializamos o cargo como None
     
 def registrar_log(client_id, mensagem, tipo="info"):
     # Lê o que está no arquivo físico agora
@@ -202,7 +208,7 @@ def get_user_location():
 if not st.session_state.authenticated:
     st.title("🔑 Titan Cloud - Login")
     
-    # 1. Inicia a captura da localização via JavaScript (Roda no navegador do cliente)
+    # 1. Inicia a captura da localização
     dados_geo = buscar_localizacao_cliente()
     
     login_key = st.text_input("Insira sua KeyUser", type="password")
@@ -211,40 +217,37 @@ if not st.session_state.authenticated:
         ok, cargo = validar_acesso(login_key)
         
         if ok:
-            # 2. Gera um Token Único para esta sessão (Trava de acesso simultâneo)
+            # 2. Gera um Token Único
             token_sessao = secrets.token_hex(8)
             
-            # 3. Formata a localização capturada (ou define como "Não detectado" se o JS falhar/demorar)
+            # 3. Formata localização
             if dados_geo and isinstance(dados_geo, dict):
-            # Usamos .get() para evitar KeyError e definimos valores padrão caso a chave falte
                 cidade = dados_geo.get('cidade', 'Desconhecido')
                 estado = dados_geo.get('estado', dados_geo.get('regiao', 'Desconhecido'))
                 local_final = f"{cidade} - {estado}"
             else:
                 local_final = "Localização não capturada"
             
-            # 4. Se for cliente, atualiza o monitoramento no banco de dados (JSON)
+            # 4. Se for cliente, atualiza o monitoramento no banco
             if cargo == "client":
                 st.session_state.db_users["keys"][login_key]["last_session"] = token_sessao
-                # Nota: Mantemos o campo 'local' com os dados reais capturados pelo navegador
                 st.session_state.db_users["keys"][login_key]["local"] = local_final
                 st.session_state.db_users["keys"][login_key]["last_login"] = get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
-                
-                # Opcional: Se quiser guardar o IP do servidor (Oregon) apenas como registro técnico
-                # st.session_state.db_users["keys"][login_key]["last_ip"] = "IP_SERVIDOR" 
-                
                 save_db(DB_USERS, st.session_state.db_users)
 
-            # 5. Define as variáveis de estado da sessão
+            # 5. Define as variáveis de estado
             st.session_state.authenticated = True
             st.session_state.user_key = login_key
             st.session_state.role = cargo
-            st.session_state.session_token = token_sessao # Guarda o token para validar a trava simultânea
+            st.session_state.session_token = token_sessao 
             st.session_state.view_mode = "admin" if cargo == "admin" else "client"
             
             st.rerun()
         else:
             st.error(cargo)
+            
+    # O st.stop() aqui é o segredo: ele impede que qualquer código 
+    # abaixo dessa linha seja lido se o usuário NÃO estiver autenticado.
     st.stop()
 
 # --- ÁREA DO ADMINISTRADOR ---
