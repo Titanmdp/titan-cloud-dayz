@@ -31,9 +31,6 @@ else:
         DB_USERS = "users_db.json"
         DB_CLIENTS = "clients_data.json"
 
-# --- 2. CONFIGURAÇÃO DA PÁGINA (Deve vir antes de qualquer comando st.sidebar) ---
-st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
-
 # Agora sim, o aviso visual aparece com segurança
 if IS_DEV:
     st.sidebar.warning("⚠️ AMBIENTE DE DESENVOLVIMENTO (TESTES)")
@@ -44,18 +41,26 @@ def get_hora_brasilia():
     return datetime.now(FUSO_BR)
     
 def buscar_localizacao_cliente():
-    # Este script roda no navegador do seu cliente
-    url_api = "https://ipapi.co/json/"
-    js_code = f"await fetch('{url_api}').then(res => res.json())"
-    
-    result = st_javascript(js_code)
-    
-    if result:
+    try:
+        # Supondo que você usa uma requisição (requests.get)
+        # response = requests.get(...)
+        # result = response.json()
+        
+        # AQUI O TRATAMENTO:
+        # Se 'result' for None ou falhar, retornamos um dicionário padrão
+        if result is None:
+            return {"city": "Desconhecido", "region": "Desconhecido", "country": "Desconhecido"}
+            
+        # Caso tenha vindo o resultado, garantimos que é um dict
         return {
             "cidade": result.get("city", "Desconhecido"),
-            "estado": result.get("region", "---")
+            "regiao": result.get("region", "Desconhecido"),
+            "pais": result.get("country", "Desconhecido")
         }
-    return None
+    except Exception as e:
+        # Se ocorrer qualquer erro na rede, retorna valores padrão em vez de quebrar
+        print(f"Erro ao buscar geolocalização: {e}")
+        return {"cidade": "Desconhecido", "regiao": "Desconhecido", "pais": "Desconhecido"}
 
 # --- FUNÇÃO ANTI-SONO (MANTER VIVO) ---
 def manter_vivo():
@@ -210,8 +215,11 @@ if not st.session_state.authenticated:
             token_sessao = secrets.token_hex(8)
             
             # 3. Formata a localização capturada (ou define como "Não detectado" se o JS falhar/demorar)
-            if dados_geo:
-                local_final = f"{dados_geo['cidade']} - {dados_geo['estado']}"
+            if dados_geo and isinstance(dados_geo, dict):
+            # Usamos .get() para evitar KeyError e definimos valores padrão caso a chave falte
+                cidade = dados_geo.get('cidade', 'Desconhecido')
+                estado = dados_geo.get('estado', dados_geo.get('regiao', 'Desconhecido'))
+                local_final = f"{cidade} - {estado}"
             else:
                 local_final = "Localização não capturada"
             
