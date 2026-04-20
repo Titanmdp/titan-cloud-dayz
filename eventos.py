@@ -8,32 +8,37 @@ import secrets
 import string
 import requests
 import shutil
-# Removi o segundo import os que estava aqui
+import smtplib
+from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
 
 # --- 1. DETECÇÃO DE AMBIENTE E PERSISTÊNCIA DE DADOS ---
+# Verifica se está no Render (ambiente de produção)
+IS_RENDER = os.environ.get("RENDER") is not None
 IS_DEV = os.environ.get("IS_DEV", "False") == "True"
 
-if IS_DEV:
-    # No ambiente de desenvolvimento, mantemos os arquivos locais para teste
-    DB_USERS = "users_db_dev.json"
-    DB_CLIENTS = "clients_data_dev.json"
+if IS_RENDER:
+    # Em produção, usa o caminho absoluto do disco montado
+    MOUNT_PATH = "/data"
+elif IS_DEV:
+    # No PC, usa uma pasta 'data' dentro do projeto atual
+    MOUNT_PATH = os.path.join(os.getcwd(), "data")
     st.sidebar.warning("🚧 AMBIENTE DE TESTES (DEV)")
 else:
-    # PARA PRODUÇÃO (STARTER COM DISCO):
-    # Verificamos se a pasta do disco persistente montada no Render existe
-    if os.path.exists("/data"):
-        DB_USERS = "/data/users_db.json"
-        DB_CLIENTS = "/data/clients_data.json"
-    else:
-        # Fallback caso o disco não esteja montado ou rode fora do Render
-        DB_USERS = "users_db.json"
-        DB_CLIENTS = "clients_data.json"
+    # Fallback genérico para evitar erro caso não saiba o ambiente
+    MOUNT_PATH = os.path.join(os.getcwd(), "data")
 
-# Agora sim, o aviso visual aparece com segurança
-if IS_DEV:
-    st.sidebar.warning("⚠️ AMBIENTE DE DESENVOLVIMENTO (TESTES)")
+# Define os caminhos dos arquivos baseados no MOUNT_PATH
+DB_USERS = os.path.join(MOUNT_PATH, "users_db.json")
+DB_CLIENTS = os.path.join(MOUNT_PATH, "clients_data.json")
+UPLOAD_DIR = os.path.join(MOUNT_PATH, "uploads")
+
+# Garante que a pasta de dados e de uploads existam
+if not os.path.exists(MOUNT_PATH):
+    os.makedirs(MOUNT_PATH, exist_ok=True)
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASÍLIA) ---
 FUSO_BR = timezone(timedelta(hours=-3))
@@ -136,6 +141,33 @@ def save_db(file, data):
             json.dump(data, f, indent=4, ensure_ascii=False)
     except Exception as e:
         st.error(f"Erro ao salvar banco de dados: {e}")
+
+# --- Enviar e-mail e whatsapp Comunicação ---
+
+def enviar_email(destino, assunto, mensagem):
+    # O Render injeta essas variáveis automaticamente
+    email_user = os.environ.get("EMAIL_USER")
+    email_pass = os.environ.get("EMAIL_PASS")
+    
+    if not email_user or not email_pass:
+        print("Erro: Credenciais de e-mail não configuradas no ambiente.")
+        return False
+
+    try:
+        msg = EmailMessage()
+        msg.set_content(mensagem)
+        msg['Subject'] = assunto
+        msg['To'] = destino
+        msg['From'] = email_user
+
+        # O SMTP do Gmail exige o servidor 'smtp.gmail.com' na porta 465
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(email_user, email_pass)
+            smtp.send_message(msg)
+        return True
+    except Exception as e:
+        print(f"Erro detalhado ao enviar e-mail: {e}")
+        return False
 
 # Inicialização dos dados
 if 'db_users' not in st.session_state:
@@ -442,8 +474,9 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             send_disc = st.checkbox("Discord (Webhook do Cliente)")
 
         with col_c2:
-            titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="tit_com")
-            corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="msg_com")
+            # Campos de entrada
+            titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="input_tit_com")
+            corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="input_msg_com")
             
             if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
                 if titulo_com and corpo_com:
@@ -465,37 +498,44 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         "lido": False
                     }
                     
-                    sucesso_ext = 0
-                    falha_ext = 0
-
                     for d_id in destinatarios:
-                        # Garantia de estrutura para o cliente
+                        # 1. Atualiza Banco Local
                         if d_id not in st.session_state.db_clients:
                             st.session_state.db_clients[d_id] = {
                                 "ftp": {"host": "", "user": "", "pass": "", "port": "21"}, 
                                 "agendas": [], "logs": [], "comunicados": []
                             }
-
                         if "comunicados" not in st.session_state.db_clients[d_id]:
                             st.session_state.db_clients[d_id]["comunicados"] = []
-                        
                         st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
                         
-                        u_info = st.session_state.db_users["keys"].get(d_id, {})
-                        c_info = st.session_state.db_clients.get(d_id, {})
-
-                        # Envio Discord (se configurado)
+                        # 2. Envio Discord
                         if send_disc:
-                            webhook_url = c_info.get("discord_webhook")
+                            webhook_url = st.session_state.db_clients.get(d_id, {}).get("discord_webhook")
                             if webhook_url:
                                 try:
                                     payload = {"embeds": [{"title": f"📢 {titulo_com}", "description": corpo_com, "color": 16711680}]}
                                     requests.post(webhook_url, json=payload, timeout=5)
-                                    sucesso_ext += 1
-                                except:
-                                    falha_ext += 1
+                                except: pass
+                        
+                        # 3. Envio E-mail
+                        if send_mail:
+                            email_cli = st.session_state.db_users["keys"].get(d_id, {}).get("email")
+                            if email_cli:
+                                enviar_email(email_cli, titulo_com, corpo_com)
+                        
+                        # 4. Envio WhatsApp
+                        if send_wa:
+                            wpp_cli = st.session_state.db_users["keys"].get(d_id, {}).get("whatsapp")
+                            if wpp_cli:
+                                enviar_whatsapp(wpp_cli, corpo_com)
                     
                     save_db(DB_CLIENTS, st.session_state.db_clients)
+                    
+                    # --- LIMPEZA DOS CAMPOS ---
+                    if "input_tit_com" in st.session_state: del st.session_state["input_tit_com"]
+                    if "input_msg_com" in st.session_state: del st.session_state["input_msg_com"]
+                    
                     st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
                     time.sleep(1)
                     st.rerun()
