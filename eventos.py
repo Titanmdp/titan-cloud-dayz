@@ -411,86 +411,84 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     except Exception as e: st.error(f"❌ Erro: {e}")
 
     with tab_adm5:
-        st.subheader("📢 Enviar Comunicado Oficial")
-        col_c1, col_c2 = st.columns([1, 2])
+    st.subheader("📢 Enviar Comunicado Oficial")
+    col_c1, col_c2 = st.columns([1, 2])
+    
+    # Inicializa a flag de limpeza se não existir
+    if "limpar_campos" not in st.session_state:
+        st.session_state.limpar_campos = False
+
+    with col_c1:
+        # Seleção de Alvos
+        opcoes_clientes = {v['server']: k for k, v in st.session_state.db_users["keys"].items()}
+        alvos = st.multiselect("Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos")
         
-        with col_c1:
-            # Seleção de Alvos
-            opcoes_clientes = {v['server']: k for k, v in st.session_state.db_users["keys"].items()}
-            alvos = st.multiselect("Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos")
-            
-            st.write("**Enviar via:**")
-            send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
-            send_mail = st.checkbox("E-mail")
-            send_wa = st.checkbox("WhatsApp")
-            send_disc = st.checkbox("Discord (Webhook do Cliente)")
+        st.write("**Enviar via:**")
+        send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
+        send_mail = st.checkbox("E-mail")
+        send_wa = st.checkbox("WhatsApp")
+        send_disc = st.checkbox("Discord (Webhook do Cliente)")
 
-        with col_c2:
-            # Definimos keys explícitas para podermos resetar depois
-            titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="input_tit_com")
-            corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="input_msg_com")
-            
-            if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
-                if titulo_com and corpo_com:
-                    # Forçar recarga para garantir que o Restore foi processado
-                    st.session_state.db_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
-                    st.session_state.db_clients = load_db(DB_CLIENTS, {})
+    with col_c2:
+        # Se a flag estiver ativa, forçamos os campos a serem vazios
+        val_tit = "" if st.session_state.limpar_campos else None
+        val_corpo = "" if st.session_state.limpar_campos else None
+        
+        titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="input_tit_com", value=val_tit)
+        corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="input_msg_com", value=val_corpo)
+        
+        if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
+            if titulo_com and corpo_com:
+                st.session_state.db_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
+                st.session_state.db_clients = load_db(DB_CLIENTS, {})
 
-                    destinatarios = []
-                    if "Todos" in alvos:
-                        destinatarios = list(st.session_state.db_users["keys"].keys())
-                    else:
-                        destinatarios = [opcoes_clientes[nome] for nome in alvos]
-
-                    comunicado_obj = {
-                        "id": str(time.time()),
-                        "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
-                        "titulo": titulo_com,
-                        "mensagem": corpo_com,
-                        "lido": False
-                    }
-                    
-                    sucesso_ext = 0
-                    falha_ext = 0
-
-                    for d_id in destinatarios:
-                        # Garantia de estrutura para o cliente
-                        if d_id not in st.session_state.db_clients:
-                            st.session_state.db_clients[d_id] = {
-                                "ftp": {"host": "", "user": "", "pass": "", "port": "21"}, 
-                                "agendas": [], "logs": [], "comunicados": []
-                            }
-
-                        if "comunicados" not in st.session_state.db_clients[d_id]:
-                            st.session_state.db_clients[d_id]["comunicados"] = []
-                        
-                        st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
-                        
-                        u_info = st.session_state.db_users["keys"].get(d_id, {})
-                        c_info = st.session_state.db_clients.get(d_id, {})
-
-                        # Envio Discord (se configurado)
-                        if send_disc:
-                            webhook_url = c_info.get("discord_webhook")
-                            if webhook_url:
-                                try:
-                                    payload = {"embeds": [{"title": f"📢 {titulo_com}", "description": corpo_com, "color": 16711680}]}
-                                    requests.post(webhook_url, json=payload, timeout=5)
-                                    sucesso_ext += 1
-                                except:
-                                    falha_ext += 1
-                    
-                    save_db(DB_CLIENTS, st.session_state.db_clients)
-                    
-                    # --- LIMPEZA DOS CAMPOS ---
-                    st.session_state["input_tit_com"] = ""
-                    st.session_state["input_msg_com"] = ""
-                    
-                    st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
-                    time.sleep(1)
-                    st.rerun()
+                destinatarios = []
+                if "Todos" in alvos:
+                    destinatarios = list(st.session_state.db_users["keys"].keys())
                 else:
-                    st.error("Preencha o título e a mensagem.")
+                    destinatarios = [opcoes_clientes[nome] for nome in alvos]
+
+                comunicado_obj = {
+                    "id": str(time.time()),
+                    "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
+                    "titulo": titulo_com,
+                    "mensagem": corpo_com,
+                    "lido": False
+                }
+                
+                for d_id in destinatarios:
+                    if d_id not in st.session_state.db_clients:
+                        st.session_state.db_clients[d_id] = {
+                            "ftp": {"host": "", "user": "", "pass": "", "port": "21"}, 
+                            "agendas": [], "logs": [], "comunicados": []
+                        }
+
+                    if "comunicados" not in st.session_state.db_clients[d_id]:
+                        st.session_state.db_clients[d_id]["comunicados"] = []
+                    
+                    st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
+                    
+                    if send_disc:
+                        webhook_url = st.session_state.db_clients.get(d_id, {}).get("discord_webhook")
+                        if webhook_url:
+                            try:
+                                payload = {"embeds": [{"title": f"📢 {titulo_com}", "description": corpo_com, "color": 16711680}]}
+                                requests.post(webhook_url, json=payload, timeout=5)
+                            except: pass
+                
+                save_db(DB_CLIENTS, st.session_state.db_clients)
+                
+                # --- LIMPEZA SEGURA ---
+                st.session_state.limpar_campos = True
+                st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("Preencha o título e a mensagem.")
+
+    # Resetamos a flag para que na próxima interação o usuário possa digitar novamente
+    if st.session_state.limpar_campos:
+        st.session_state.limpar_campos = False
 
     # O st.stop() deve ficar aqui, fora das tabs, mas dentro do bloco admin
     st.stop()
