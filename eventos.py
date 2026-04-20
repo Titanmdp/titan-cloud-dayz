@@ -13,35 +13,30 @@ from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
 
 # --- 1. DETECÇÃO DE AMBIENTE E PERSISTÊNCIA DE DADOS ---
-IS_RENDER = os.environ.get("RENDER") is not None
 IS_DEV = os.environ.get("IS_DEV", "False") == "True"
 
-if IS_RENDER:
-    # PRODUÇÃO: O disco está montado em /var/data
-    MOUNT_PATH = "/var/data"
+if IS_DEV:
+    # No ambiente de desenvolvimento, mantemos os arquivos locais para teste
+    DB_USERS = "users_db_dev.json"
+    DB_CLIENTS = "clients_data_dev.json"
+    st.sidebar.warning("🚧 AMBIENTE DE TESTES (DEV)")
 else:
-    # DESENVOLVIMENTO: Cria a pasta 'data' na pasta do projeto
-    MOUNT_PATH = os.path.join(os.getcwd(), "data")
-    if IS_DEV: 
-        st.sidebar.warning("🚧 AMBIENTE DE TESTES (DEV)")
+    # PARA PRODUÇÃO (STARTER COM DISCO):
+    # Verificamos se a pasta do disco persistente montada no Render existe
+    if os.path.exists("/data"):
+        DB_USERS = "/data/users_db.json"
+        DB_CLIENTS = "/data/clients_data.json"
+    else:
+        # Fallback caso o disco não esteja montado ou rode fora do Render
+        DB_USERS = "users_db.json"
+        DB_CLIENTS = "clients_data.json"
 
-# Define os caminhos
-DB_USERS = os.path.join(MOUNT_PATH, "users_db.json")
-DB_CLIENTS = os.path.join(MOUNT_PATH, "clients_data.json")
-UPLOAD_DIR = os.path.join(MOUNT_PATH, "uploads")
+# --- 2. CONFIGURAÇÃO DA PÁGINA (Deve vir antes de qualquer comando st.sidebar) ---
+st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
 
-# --- CRIAÇÃO SEGURA ---
-# Só tentamos criar o MOUNT_PATH se NÃO estivermos no Render
-if not IS_RENDER and not os.path.exists(MOUNT_PATH):
-    os.makedirs(MOUNT_PATH, exist_ok=True)
-
-# Criamos o UPLOAD_DIR apenas se o pai (MOUNT_PATH) existir
-if os.path.exists(MOUNT_PATH):
-    try:
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-    except Exception as e:
-        # Em produção, se falhar, apenas reportamos mas não paramos o app
-        print(f"Nota: A pasta de uploads não pôde ser criada automaticamente: {e}")
+# Agora sim, o aviso visual aparece com segurança
+if IS_DEV:
+    st.sidebar.warning("⚠️ AMBIENTE DE DESENVOLVIMENTO (TESTES)")
 
 # --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASÍLIA) ---
 FUSO_BR = timezone(timedelta(hours=-3))
@@ -49,26 +44,18 @@ def get_hora_brasilia():
     return datetime.now(FUSO_BR)
     
 def buscar_localizacao_cliente():
-    try:
-        # Supondo que você usa uma requisição (requests.get)
-        # response = requests.get(...)
-        # result = response.json()
-        
-        # AQUI O TRATAMENTO:
-        # Se 'result' for None ou falhar, retornamos um dicionário padrão
-        if result is None:
-            return {"city": "Desconhecido", "region": "Desconhecido", "country": "Desconhecido"}
-            
-        # Caso tenha vindo o resultado, garantimos que é um dict
+    # Este script roda no navegador do seu cliente
+    url_api = "https://ipapi.co/json/"
+    js_code = f"await fetch('{url_api}').then(res => res.json())"
+    
+    result = st_javascript(js_code)
+    
+    if result:
         return {
             "cidade": result.get("city", "Desconhecido"),
-            "regiao": result.get("region", "Desconhecido"),
-            "pais": result.get("country", "Desconhecido")
+            "estado": result.get("region", "---")
         }
-    except Exception as e:
-        # Se ocorrer qualquer erro na rede, retorna valores padrão em vez de quebrar
-        print(f"Erro ao buscar geolocalização: {e}")
-        return {"cidade": "Desconhecido", "regiao": "Desconhecido", "pais": "Desconhecido"}
+    return None
 
 # --- FUNÇÃO ANTI-SONO (MANTER VIVO) ---
 def manter_vivo():
@@ -223,11 +210,8 @@ if not st.session_state.authenticated:
             token_sessao = secrets.token_hex(8)
             
             # 3. Formata a localização capturada (ou define como "Não detectado" se o JS falhar/demorar)
-            if dados_geo and isinstance(dados_geo, dict):
-            # Usamos .get() para evitar KeyError e definimos valores padrão caso a chave falte
-                cidade = dados_geo.get('cidade', 'Desconhecido')
-                estado = dados_geo.get('estado', dados_geo.get('regiao', 'Desconhecido'))
-                local_final = f"{cidade} - {estado}"
+            if dados_geo:
+                local_final = f"{dados_geo['cidade']} - {dados_geo['estado']}"
             else:
                 local_final = "Localização não capturada"
             
@@ -450,9 +434,8 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             send_disc = st.checkbox("Discord (Webhook do Cliente)")
 
         with col_c2:
-            # Definimos keys explícitas para podermos resetar depois
-            titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="input_tit_com")
-            corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="input_msg_com")
+            titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="tit_com")
+            corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="msg_com")
             
             if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
                 if titulo_com and corpo_com:
@@ -505,11 +488,6 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                                     falha_ext += 1
                     
                     save_db(DB_CLIENTS, st.session_state.db_clients)
-                    
-                    # --- LIMPEZA DOS CAMPOS ---
-                    st.session_state["input_tit_com"] = ""
-                    st.session_state["input_msg_com"] = ""
-                    
                     st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
                     time.sleep(1)
                     st.rerun()
