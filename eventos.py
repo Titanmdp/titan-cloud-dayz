@@ -8,7 +8,8 @@ import secrets
 import string
 import requests
 import shutil
-# Removi o segundo import os que estava aqui
+import smtplib
+from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
 
@@ -123,6 +124,33 @@ def save_db(file, data):
             json.dump(data, f, indent=4, ensure_ascii=False)
     except Exception as e:
         st.error(f"Erro ao salvar banco de dados: {e}")
+        
+# --- Enviar e-mail e whatsapp Comunicação ---
+
+def enviar_email(destino, assunto, mensagem):
+    # O Render injeta essas variáveis automaticamente
+    email_user = os.environ.get("EMAIL_USER")
+    email_pass = os.environ.get("EMAIL_PASS")
+    
+    if not email_user or not email_pass:
+        print("Erro: Credenciais de e-mail não configuradas no ambiente.")
+        return False
+
+    try:
+        msg = EmailMessage()
+        msg.set_content(mensagem)
+        msg['Subject'] = assunto
+        msg['To'] = destino
+        msg['From'] = email_user
+
+        # O SMTP do Gmail exige o servidor 'smtp.gmail.com' na porta 465
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(email_user, email_pass)
+            smtp.send_message(msg)
+        return True
+    except Exception as e:
+        print(f"Erro detalhado ao enviar e-mail: {e}")
+        return False
 
 # Inicialização dos dados
 if 'db_users' not in st.session_state:
@@ -320,8 +348,8 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     st.markdown("#### 📝 Informações e Plano")
                     new_n = st.text_input("Editar Nome", value=v['server'], key=f"n_{k}")
                     new_p = st.selectbox("Trocar Plano", list(PLANOS.keys()), 
-                                         index=list(PLANOS.keys()).index(v.get('plano', 'Starter')), 
-                                         key=f"p_{k}")
+                                        index=list(PLANOS.keys()).index(v.get('plano', 'Starter')), 
+                                        key=f"p_{k}")
                     new_lim = st.number_input("Ajustar Limite", min_value=1, value=int(limite_final), key=f"lim_{k}")
                     
                     st.markdown("#### 📧 Contatos de Notificação")
@@ -426,11 +454,13 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             send_disc = st.checkbox("Discord (Webhook do Cliente)")
 
         with col_c2:
+            # Campos de entrada
             titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="input_tit_com")
             corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="input_msg_com")
             
             if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
                 if titulo_com and corpo_com:
+                    # Forçar recarga para garantir que o Restore foi processado
                     st.session_state.db_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
                     st.session_state.db_clients = load_db(DB_CLIENTS, {})
 
@@ -449,6 +479,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     }
                     
                     for d_id in destinatarios:
+                        # 1. Atualiza Banco Local
                         if d_id not in st.session_state.db_clients:
                             st.session_state.db_clients[d_id] = {
                                 "ftp": {"host": "", "user": "", "pass": "", "port": "21"}, 
@@ -456,9 +487,9 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                             }
                         if "comunicados" not in st.session_state.db_clients[d_id]:
                             st.session_state.db_clients[d_id]["comunicados"] = []
-                        
                         st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
                         
+                        # 2. Envio Discord
                         if send_disc:
                             webhook_url = st.session_state.db_clients.get(d_id, {}).get("discord_webhook")
                             if webhook_url:
@@ -466,10 +497,22 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                                     payload = {"embeds": [{"title": f"📢 {titulo_com}", "description": corpo_com, "color": 16711680}]}
                                     requests.post(webhook_url, json=payload, timeout=5)
                                 except: pass
+                        
+                        # 3. Envio E-mail
+                        if send_mail:
+                            email_cli = st.session_state.db_users["keys"].get(d_id, {}).get("email")
+                            if email_cli:
+                                enviar_email(email_cli, titulo_com, corpo_com)
+                        
+                        # 4. Envio WhatsApp
+                        if send_wa:
+                            wpp_cli = st.session_state.db_users["keys"].get(d_id, {}).get("whatsapp")
+                            if wpp_cli:
+                                enviar_whatsapp(wpp_cli, corpo_com)
                     
                     save_db(DB_CLIENTS, st.session_state.db_clients)
                     
-                    # --- LIMPEZA SEGURA ---
+                    # --- LIMPEZA DOS CAMPOS ---
                     if "input_tit_com" in st.session_state: del st.session_state["input_tit_com"]
                     if "input_msg_com" in st.session_state: del st.session_state["input_msg_com"]
                     
@@ -479,7 +522,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                 else:
                     st.error("Preencha o título e a mensagem.")
 
-    # O st.stop() finaliza a execução para o admin, impedindo que o cliente veja a parte admin
+    # O st.stop() deve ficar aqui, fora de todas as tabs, alinhado com o início do bloco do Admin
     st.stop()
 
 # --- ÁREA DO CLIENTE (VERSÃO FINAL CONSOLIDADA E CORRIGIDA) ---
