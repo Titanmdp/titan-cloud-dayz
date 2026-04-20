@@ -415,7 +415,6 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             col_c1, col_c2 = st.columns([1, 2])
             
             with col_c1:
-                # Seleção de Alvos
                 opcoes_clientes = {v['server']: k for k, v in st.session_state.db_users["keys"].items()}
                 alvos = st.multiselect("Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos")
                 
@@ -426,7 +425,6 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                 send_disc = st.checkbox("Discord (Webhook do Cliente)")
 
             with col_c2:
-                # Usamos os inputs sem forçar um valor inicial (deixamos o Streamlit gerenciar pelo key)
                 titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="input_tit_com")
                 corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="input_msg_com")
                 
@@ -471,10 +469,9 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         
                         save_db(DB_CLIENTS, st.session_state.db_clients)
                         
-                        # --- LIMPEZA SEGURA ---
-                        # Ao deletar a chave do session_state, o Streamlit limpa o widget associado
-                        del st.session_state["input_tit_com"]
-                        del st.session_state["input_msg_com"]
+                        # --- LIMPEZA SEGURA (FORA DO LOOP) ---
+                        if "input_tit_com" in st.session_state: del st.session_state["input_tit_com"]
+                        if "input_msg_com" in st.session_state: del st.session_state["input_msg_com"]
                         
                         st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
                         time.sleep(1)
@@ -482,7 +479,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     else:
                         st.error("Preencha o título e a mensagem.")
 
-        # O st.stop() deve ficar aqui, fora das tabs, mas dentro do bloco admin
+        # O st.stop() deve ficar fora das tabs, alinhado com o 'with tab_adm5' ou 'if' do admin
         st.stop()
 
 # --- ÁREA DO CLIENTE (VERSÃO FINAL CONSOLIDADA E CORRIGIDA) ---
