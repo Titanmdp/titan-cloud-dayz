@@ -286,13 +286,9 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
 
     st.title("🛡️ Painel de Controle - Administrador")
     
-    # 1. AJUSTE: Atualizada a lista para 5 abas
     tab_adm1, tab_adm2, tab_adm3, tab_adm4, tab_adm5 = st.tabs([
-        "➕ Gerar Chaves", 
-        "👥 Gestão de Clientes", 
-        "⚙️ Configurar Planos",
-        "💾 Backup/Restore",
-        "📢 Comunicados"
+        "➕ Gerar Chaves", "👥 Gestão de Clientes", "⚙️ Configurar Planos",
+        "💾 Backup/Restore", "📢 Comunicados"
     ])
 
     with tab_adm1:
@@ -473,12 +469,12 @@ with tab_adm5:
         send_disc = st.checkbox("Discord (Webhook do Cliente)")
 
     with col_c2:
-        # Vinculamos os inputs ao session_state para limpar depois
+        # Vinculamos os inputs ao session_state via chave
         titulo_com = st.text_input("Título do Comunicado", key="tit_com")
         corpo_com = st.text_area("Mensagem", height=200, key="msg_com")
         
         if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
-            if titulo_com and corpo_com:
+            if st.session_state.tit_com and st.session_state.msg_com:
                 st.session_state.db_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
                 st.session_state.db_clients = load_db(DB_CLIENTS, {})
 
@@ -487,29 +483,26 @@ with tab_adm5:
                 comunicado_obj = {
                     "id": str(time.time()),
                     "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
-                    "titulo": titulo_com,
-                    "mensagem": corpo_com,
+                    "titulo": st.session_state.tit_com,
+                    "mensagem": st.session_state.msg_com,
                     "lido": False
                 }
                 
                 for d_id in destinatarios:
-                    # Garantia de estrutura
                     if d_id not in st.session_state.db_clients:
                         st.session_state.db_clients[d_id] = {"ftp": {"host": "", "user": "", "pass": "", "port": "21"}, "agendas": [], "logs": [], "comunicados": []}
                     if "comunicados" not in st.session_state.db_clients[d_id]: st.session_state.db_clients[d_id]["comunicados"] = []
                     
                     st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
                     
-                    # Envio por E-mail
                     if send_mail:
                         email = st.session_state.db_users["keys"][d_id].get("email")
-                        if email: enviar_email(email, titulo_com, corpo_com)
+                        if email: enviar_email(email, st.session_state.tit_com, st.session_state.msg_com)
 
-                    # Envio Discord
                     if send_disc:
                         webhook = st.session_state.db_clients[d_id].get("discord_webhook")
                         if webhook:
-                            try: requests.post(webhook, json={"embeds": [{"title": f"📢 {titulo_com}", "description": corpo_com, "color": 16711680}]}, timeout=5)
+                            try: requests.post(webhook, json={"embeds": [{"title": f"📢 {st.session_state.tit_com}", "description": st.session_state.msg_com, "color": 16711680}]}, timeout=5)
                             except: pass
                 
                 save_db(DB_CLIENTS, st.session_state.db_clients)
