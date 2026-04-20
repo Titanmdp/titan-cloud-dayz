@@ -218,8 +218,11 @@ if not st.session_state.authenticated:
             token_sessao = secrets.token_hex(8)
             
             # 3. Formata a localização capturada (ou define como "Não detectado" se o JS falhar/demorar)
-            if dados_geo:
-                local_final = f"{dados_geo['cidade']} - {dados_geo['estado']}"
+            if dados_geo and isinstance(dados_geo, dict):
+            # Usamos .get() para evitar KeyError e definimos valores padrão caso a chave falte
+                cidade = dados_geo.get('cidade', 'Desconhecido')
+                estado = dados_geo.get('estado', dados_geo.get('regiao', 'Desconhecido'))
+                local_final = f"{cidade} - {estado}"
             else:
                 local_final = "Localização não capturada"
             
