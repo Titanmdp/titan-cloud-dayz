@@ -8,9 +8,7 @@ import secrets
 import string
 import requests
 import shutil
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+# Removi o segundo import os que estava aqui
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
 
@@ -139,30 +137,6 @@ def save_db(file, data):
     except Exception as e:
         st.error(f"Erro ao salvar banco de dados: {e}")
 
-# --- Função de apoio: Adicione no topo do seu arquivo ---
-def enviar_email(destinatario, assunto, corpo):
-    try:
-        # Acessando variáveis de ambiente definidas no Render
-        smtp_server = "smtp.gmail.com"
-        port = 587
-        sender_email = os.environ.get("EMAIL_USER")
-        password = os.environ.get("EMAIL_PASS")
-
-        msg = MIMEMultipart()
-        msg['From'] = sender_email
-        msg['To'] = destinatario
-        msg['Subject'] = assunto
-        msg.attach(MIMEText(corpo, 'plain'))
-
-        with smtplib.SMTP(smtp_server, port) as server:
-            server.starttls()
-            server.login(sender_email, password)
-            server.send_message(msg)
-        return True
-    except Exception as e:
-        print(f"Erro ao enviar e-mail: {e}")
-        return False
-
 # Inicialização dos dados
 if 'db_users' not in st.session_state:
     st.session_state.db_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
@@ -286,9 +260,13 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
 
     st.title("🛡️ Painel de Controle - Administrador")
     
+    # 1. AJUSTE: Atualizada a lista para 5 abas
     tab_adm1, tab_adm2, tab_adm3, tab_adm4, tab_adm5 = st.tabs([
-        "➕ Gerar Chaves", "👥 Gestão de Clientes", "⚙️ Configurar Planos",
-        "💾 Backup/Restore", "📢 Comunicados"
+        "➕ Gerar Chaves", 
+        "👥 Gestão de Clientes", 
+        "⚙️ Configurar Planos",
+        "💾 Backup/Restore",
+        "📢 Comunicados"
     ])
 
     with tab_adm1:
@@ -448,73 +426,81 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         else: st.error("❌ Arquivo inválido!")
                     except Exception as e: st.error(f"❌ Erro: {e}")
 
-    # --- Dentro da tab_adm5 ---
-with tab_adm5:
-    st.subheader("📢 Enviar Comunicado Oficial")
-    
-    # Inicializa estado para limpar campos
-    if 'tit_com' not in st.session_state: st.session_state.tit_com = ""
-    if 'msg_com' not in st.session_state: st.session_state.msg_com = ""
-
-    col_c1, col_c2 = st.columns([1, 2])
-    
-    with col_c1:
-        opcoes_clientes = {v['server']: k for k, v in st.session_state.db_users["keys"].items()}
-        alvos = st.multiselect("Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos")
+    with tab_adm5:
+        st.subheader("📢 Enviar Comunicado Oficial")
+        col_c1, col_c2 = st.columns([1, 2])
         
-        st.write("**Enviar via:**")
-        send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
-        send_mail = st.checkbox("E-mail")
-        send_wa = st.checkbox("WhatsApp")
-        send_disc = st.checkbox("Discord (Webhook do Cliente)")
+        with col_c1:
+            # Seleção de Alvos
+            opcoes_clientes = {v['server']: k for k, v in st.session_state.db_users["keys"].items()}
+            alvos = st.multiselect("Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos")
+            
+            st.write("**Enviar via:**")
+            send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
+            send_mail = st.checkbox("E-mail")
+            send_wa = st.checkbox("WhatsApp")
+            send_disc = st.checkbox("Discord (Webhook do Cliente)")
 
-    with col_c2:
-        # Vinculamos os inputs ao session_state via chave
-        titulo_com = st.text_input("Título do Comunicado", key="tit_com")
-        corpo_com = st.text_area("Mensagem", height=200, key="msg_com")
-        
-        if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
-            if st.session_state.tit_com and st.session_state.msg_com:
-                st.session_state.db_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
-                st.session_state.db_clients = load_db(DB_CLIENTS, {})
+        with col_c2:
+            titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="tit_com")
+            corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="msg_com")
+            
+            if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
+                if titulo_com and corpo_com:
+                    # Forçar recarga para garantir que o Restore foi processado
+                    st.session_state.db_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
+                    st.session_state.db_clients = load_db(DB_CLIENTS, {})
 
-                destinatarios = list(st.session_state.db_users["keys"].keys()) if "Todos" in alvos else [opcoes_clientes[nome] for nome in alvos]
+                    destinatarios = []
+                    if "Todos" in alvos:
+                        destinatarios = list(st.session_state.db_users["keys"].keys())
+                    else:
+                        destinatarios = [opcoes_clientes[nome] for nome in alvos]
 
-                comunicado_obj = {
-                    "id": str(time.time()),
-                    "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
-                    "titulo": st.session_state.tit_com,
-                    "mensagem": st.session_state.msg_com,
-                    "lido": False
-                }
-                
-                for d_id in destinatarios:
-                    if d_id not in st.session_state.db_clients:
-                        st.session_state.db_clients[d_id] = {"ftp": {"host": "", "user": "", "pass": "", "port": "21"}, "agendas": [], "logs": [], "comunicados": []}
-                    if "comunicados" not in st.session_state.db_clients[d_id]: st.session_state.db_clients[d_id]["comunicados"] = []
+                    comunicado_obj = {
+                        "id": str(time.time()),
+                        "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
+                        "titulo": titulo_com,
+                        "mensagem": corpo_com,
+                        "lido": False
+                    }
                     
-                    st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
-                    
-                    if send_mail:
-                        email = st.session_state.db_users["keys"][d_id].get("email")
-                        if email: enviar_email(email, st.session_state.tit_com, st.session_state.msg_com)
+                    sucesso_ext = 0
+                    falha_ext = 0
 
-                    if send_disc:
-                        webhook = st.session_state.db_clients[d_id].get("discord_webhook")
-                        if webhook:
-                            try: requests.post(webhook, json={"embeds": [{"title": f"📢 {st.session_state.tit_com}", "description": st.session_state.msg_com, "color": 16711680}]}, timeout=5)
-                            except: pass
-                
-                save_db(DB_CLIENTS, st.session_state.db_clients)
-                
-                # --- Limpeza e Reset ---
-                st.session_state.tit_com = ""
-                st.session_state.msg_com = ""
-                st.success(f"✅ Comunicado disparado para {len(destinatarios)} clientes!")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.error("Preencha o título e a mensagem.")
+                    for d_id in destinatarios:
+                        # Garantia de estrutura para o cliente
+                        if d_id not in st.session_state.db_clients:
+                            st.session_state.db_clients[d_id] = {
+                                "ftp": {"host": "", "user": "", "pass": "", "port": "21"}, 
+                                "agendas": [], "logs": [], "comunicados": []
+                            }
+
+                        if "comunicados" not in st.session_state.db_clients[d_id]:
+                            st.session_state.db_clients[d_id]["comunicados"] = []
+                        
+                        st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
+                        
+                        u_info = st.session_state.db_users["keys"].get(d_id, {})
+                        c_info = st.session_state.db_clients.get(d_id, {})
+
+                        # Envio Discord (se configurado)
+                        if send_disc:
+                            webhook_url = c_info.get("discord_webhook")
+                            if webhook_url:
+                                try:
+                                    payload = {"embeds": [{"title": f"📢 {titulo_com}", "description": corpo_com, "color": 16711680}]}
+                                    requests.post(webhook_url, json=payload, timeout=5)
+                                    sucesso_ext += 1
+                                except:
+                                    falha_ext += 1
+                    
+                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                    st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("Preencha o título e a mensagem.")
 
     # O st.stop() deve ficar aqui, fora das tabs, mas dentro do bloco admin
     st.stop()
@@ -723,9 +709,8 @@ with tab2:
 with tab3:
     st.subheader("📢 Comunicados Oficiais")
     
-    # 1. Busca os dados atualizados diretamente da estrutura do cliente logado
-    # Garantimos que estamos trabalhando com a referência correta do banco
-    comunicados = st.session_state.db_clients.get(user_id, {}).get("comunicados", [])
+    # 1. Busca os dados atualizados
+    comunicados = client_data.get("comunicados", [])
     
     if not comunicados:
         st.info("Nenhum comunicado disponível.")
@@ -734,7 +719,7 @@ with tab3:
         col_c, col_btn = st.columns([2.5, 1])
         with col_btn:
             if st.button("🗑️ Limpar Histórico", use_container_width=True, help="Apaga permanentemente todas as mensagens desta conta"):
-                st.session_state.db_clients[user_id]["comunicados"] = []
+                client_data["comunicados"] = []
                 save_db(DB_CLIENTS, st.session_state.db_clients)
                 st.toast("Histórico limpo com sucesso!")
                 st.rerun()
@@ -742,17 +727,16 @@ with tab3:
         st.divider()
 
         # 3. Listagem das mensagens
-        # Usamos o ID do comunicado ou o índice como chave única para evitar conflitos
+        # Usamos enumerate para gerar IDs únicos para os botões de remover individualmente
         for idx, m in enumerate(comunicados):
-            with st.expander(f"📌 {m.get('titulo', 'Sem título')} - {m.get('data', 'Sem data')}"):
-                st.write(m.get('mensagem', ''))
+            # Título do expander com ícone e data
+            with st.expander(f"📌 {m['titulo']} - {m['data']}"):
+                st.write(m['mensagem'])
                 
                 st.divider()
-                
                 # Botão para remover apenas esta mensagem específica
-                # O key é único baseado no ID do objeto para evitar conflitos de renderização
-                if st.button("Remover aviso", key=f"del_msg_{m.get('id', idx)}", type="secondary"):
-                    st.session_state.db_clients[user_id]["comunicados"].pop(idx)
+                if st.button("Remover aviso", key=f"del_msg_{idx}", type="secondary"):
+                    client_data["comunicados"].pop(idx)
                     save_db(DB_CLIENTS, st.session_state.db_clients)
                     st.rerun()
 
