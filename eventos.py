@@ -13,7 +13,6 @@ from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
 
 # --- 1. DETECÇÃO DE AMBIENTE E PERSISTÊNCIA DE DADOS ---
-# Verifica se está no Render (ambiente de produção)
 IS_RENDER = os.environ.get("RENDER") is not None
 IS_DEV = os.environ.get("IS_DEV", "False") == "True"
 
@@ -33,17 +32,18 @@ DB_USERS = os.path.join(MOUNT_PATH, "users_db.json")
 DB_CLIENTS = os.path.join(MOUNT_PATH, "clients_data.json")
 UPLOAD_DIR = os.path.join(MOUNT_PATH, "uploads")
 
-# Garante que as pastas existam. 
-# Usamos try/except para ignorar erros caso a pasta raiz já seja um ponto de montagem.
+# Garante que as pastas existam de forma segura
 try:
-    if not os.path.exists(MOUNT_PATH):
+    # Verifica e cria a pasta base apenas se não for o ponto de montagem do Render
+    if not IS_RENDER and not os.path.exists(MOUNT_PATH):
         os.makedirs(MOUNT_PATH, exist_ok=True)
+    
+    # Cria a pasta de uploads se ela não existir
     if not os.path.exists(UPLOAD_DIR):
         os.makedirs(UPLOAD_DIR, exist_ok=True)
-except PermissionError:
-    # Se o Render bloquear a criação da pasta na raiz, ignoramos
-    # pois o /var/data já é persistente pelo Disk.
-    pass
+except Exception as e:
+    # Logamos o erro de forma silenciosa para não quebrar a interface do usuário
+    print(f"Nota de infraestrutura: {e}")
 
 # --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASÍLIA) ---
 FUSO_BR = timezone(timedelta(hours=-3))
