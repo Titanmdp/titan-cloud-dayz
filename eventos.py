@@ -18,8 +18,8 @@ IS_RENDER = os.environ.get("RENDER") is not None
 IS_DEV = os.environ.get("IS_DEV", "False") == "True"
 
 if IS_RENDER:
-    # Em produção, usa o caminho absoluto do disco montado
-    MOUNT_PATH = "/data"
+    # Em produção no Render, usamos o caminho onde o seu disco foi montado
+    MOUNT_PATH = "/var/data"
 elif IS_DEV:
     # No PC, usa uma pasta 'data' dentro do projeto atual
     MOUNT_PATH = os.path.join(os.getcwd(), "data")
@@ -33,11 +33,17 @@ DB_USERS = os.path.join(MOUNT_PATH, "users_db.json")
 DB_CLIENTS = os.path.join(MOUNT_PATH, "clients_data.json")
 UPLOAD_DIR = os.path.join(MOUNT_PATH, "uploads")
 
-# Garante que a pasta de dados e de uploads existam
-if not os.path.exists(MOUNT_PATH):
-    os.makedirs(MOUNT_PATH, exist_ok=True)
-if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+# Garante que as pastas existam. 
+# Usamos try/except para ignorar erros caso a pasta raiz já seja um ponto de montagem.
+try:
+    if not os.path.exists(MOUNT_PATH):
+        os.makedirs(MOUNT_PATH, exist_ok=True)
+    if not os.path.exists(UPLOAD_DIR):
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+except PermissionError:
+    # Se o Render bloquear a criação da pasta na raiz, ignoramos
+    # pois o /var/data já é persistente pelo Disk.
+    pass
 
 # --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASÍLIA) ---
 FUSO_BR = timezone(timedelta(hours=-3))
