@@ -8,7 +8,9 @@ import secrets
 import string
 import requests
 import shutil
-# Removi o segundo import os que estava aqui
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
 
@@ -136,6 +138,30 @@ def save_db(file, data):
             json.dump(data, f, indent=4, ensure_ascii=False)
     except Exception as e:
         st.error(f"Erro ao salvar banco de dados: {e}")
+
+# --- Função de apoio: Adicione no topo do seu arquivo ---
+def enviar_email(destinatario, assunto, corpo):
+    try:
+        # Acessando variáveis de ambiente definidas no Render
+        smtp_server = "smtp.gmail.com"
+        port = 587
+        sender_email = os.environ.get("EMAIL_USER")
+        password = os.environ.get("EMAIL_PASS")
+
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = destinatario
+        msg['Subject'] = assunto
+        msg.attach(MIMEText(corpo, 'plain'))
+
+        with smtplib.SMTP(smtp_server, port) as server:
+            server.starttls()
+            server.login(sender_email, password)
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        print(f"Erro ao enviar e-mail: {e}")
+        return False
 
 # Inicialização dos dados
 if 'db_users' not in st.session_state:
@@ -426,81 +452,76 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         else: st.error("❌ Arquivo inválido!")
                     except Exception as e: st.error(f"❌ Erro: {e}")
 
-    with tab_adm5:
-        st.subheader("📢 Enviar Comunicado Oficial")
-        col_c1, col_c2 = st.columns([1, 2])
+    # --- Dentro da tab_adm5 ---
+with tab_adm5:
+    st.subheader("📢 Enviar Comunicado Oficial")
+    
+    # Inicializa estado para limpar campos
+    if 'tit_com' not in st.session_state: st.session_state.tit_com = ""
+    if 'msg_com' not in st.session_state: st.session_state.msg_com = ""
+
+    col_c1, col_c2 = st.columns([1, 2])
+    
+    with col_c1:
+        opcoes_clientes = {v['server']: k for k, v in st.session_state.db_users["keys"].items()}
+        alvos = st.multiselect("Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos")
         
-        with col_c1:
-            # Seleção de Alvos
-            opcoes_clientes = {v['server']: k for k, v in st.session_state.db_users["keys"].items()}
-            alvos = st.multiselect("Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos")
-            
-            st.write("**Enviar via:**")
-            send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
-            send_mail = st.checkbox("E-mail")
-            send_wa = st.checkbox("WhatsApp")
-            send_disc = st.checkbox("Discord (Webhook do Cliente)")
+        st.write("**Enviar via:**")
+        send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
+        send_mail = st.checkbox("E-mail")
+        send_wa = st.checkbox("WhatsApp")
+        send_disc = st.checkbox("Discord (Webhook do Cliente)")
 
-        with col_c2:
-            titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="tit_com")
-            corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="msg_com")
-            
-            if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
-                if titulo_com and corpo_com:
-                    # Forçar recarga para garantir que o Restore foi processado
-                    st.session_state.db_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
-                    st.session_state.db_clients = load_db(DB_CLIENTS, {})
+    with col_c2:
+        # Vinculamos os inputs ao session_state para limpar depois
+        titulo_com = st.text_input("Título do Comunicado", key="tit_com")
+        corpo_com = st.text_area("Mensagem", height=200, key="msg_com")
+        
+        if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
+            if titulo_com and corpo_com:
+                st.session_state.db_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
+                st.session_state.db_clients = load_db(DB_CLIENTS, {})
 
-                    destinatarios = []
-                    if "Todos" in alvos:
-                        destinatarios = list(st.session_state.db_users["keys"].keys())
-                    else:
-                        destinatarios = [opcoes_clientes[nome] for nome in alvos]
+                destinatarios = list(st.session_state.db_users["keys"].keys()) if "Todos" in alvos else [opcoes_clientes[nome] for nome in alvos]
 
-                    comunicado_obj = {
-                        "id": str(time.time()),
-                        "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
-                        "titulo": titulo_com,
-                        "mensagem": corpo_com,
-                        "lido": False
-                    }
+                comunicado_obj = {
+                    "id": str(time.time()),
+                    "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
+                    "titulo": titulo_com,
+                    "mensagem": corpo_com,
+                    "lido": False
+                }
+                
+                for d_id in destinatarios:
+                    # Garantia de estrutura
+                    if d_id not in st.session_state.db_clients:
+                        st.session_state.db_clients[d_id] = {"ftp": {"host": "", "user": "", "pass": "", "port": "21"}, "agendas": [], "logs": [], "comunicados": []}
+                    if "comunicados" not in st.session_state.db_clients[d_id]: st.session_state.db_clients[d_id]["comunicados"] = []
                     
-                    sucesso_ext = 0
-                    falha_ext = 0
-
-                    for d_id in destinatarios:
-                        # Garantia de estrutura para o cliente
-                        if d_id not in st.session_state.db_clients:
-                            st.session_state.db_clients[d_id] = {
-                                "ftp": {"host": "", "user": "", "pass": "", "port": "21"}, 
-                                "agendas": [], "logs": [], "comunicados": []
-                            }
-
-                        if "comunicados" not in st.session_state.db_clients[d_id]:
-                            st.session_state.db_clients[d_id]["comunicados"] = []
-                        
-                        st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
-                        
-                        u_info = st.session_state.db_users["keys"].get(d_id, {})
-                        c_info = st.session_state.db_clients.get(d_id, {})
-
-                        # Envio Discord (se configurado)
-                        if send_disc:
-                            webhook_url = c_info.get("discord_webhook")
-                            if webhook_url:
-                                try:
-                                    payload = {"embeds": [{"title": f"📢 {titulo_com}", "description": corpo_com, "color": 16711680}]}
-                                    requests.post(webhook_url, json=payload, timeout=5)
-                                    sucesso_ext += 1
-                                except:
-                                    falha_ext += 1
+                    st.session_state.db_clients[d_id]["comunicados"].insert(0, comunicado_obj)
                     
-                    save_db(DB_CLIENTS, st.session_state.db_clients)
-                    st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("Preencha o título e a mensagem.")
+                    # Envio por E-mail
+                    if send_mail:
+                        email = st.session_state.db_users["keys"][d_id].get("email")
+                        if email: enviar_email(email, titulo_com, corpo_com)
+
+                    # Envio Discord
+                    if send_disc:
+                        webhook = st.session_state.db_clients[d_id].get("discord_webhook")
+                        if webhook:
+                            try: requests.post(webhook, json={"embeds": [{"title": f"📢 {titulo_com}", "description": corpo_com, "color": 16711680}]}, timeout=5)
+                            except: pass
+                
+                save_db(DB_CLIENTS, st.session_state.db_clients)
+                
+                # --- Limpeza e Reset ---
+                st.session_state.tit_com = ""
+                st.session_state.msg_com = ""
+                st.success(f"✅ Comunicado disparado para {len(destinatarios)} clientes!")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("Preencha o título e a mensagem.")
 
     # O st.stop() deve ficar aqui, fora das tabs, mas dentro do bloco admin
     st.stop()
