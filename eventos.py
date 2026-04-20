@@ -426,8 +426,9 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             send_disc = st.checkbox("Discord (Webhook do Cliente)")
 
         with col_c2:
-            titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="tit_com")
-            corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="msg_com")
+            # Definimos keys explícitas para podermos resetar depois
+            titulo_com = st.text_input("Título do Comunicado", placeholder="Ex: Manutenção Programada", key="input_tit_com")
+            corpo_com = st.text_area("Mensagem", height=200, placeholder="Escreva aqui os detalhes...", key="input_msg_com")
             
             if st.button("🚀 Disparar Comunicado", use_container_width=True, type="primary"):
                 if titulo_com and corpo_com:
@@ -480,6 +481,11 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                                     falha_ext += 1
                     
                     save_db(DB_CLIENTS, st.session_state.db_clients)
+                    
+                    # --- LIMPEZA DOS CAMPOS ---
+                    st.session_state["input_tit_com"] = ""
+                    st.session_state["input_msg_com"] = ""
+                    
                     st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
                     time.sleep(1)
                     st.rerun()
