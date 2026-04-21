@@ -1844,6 +1844,10 @@ with tab7:
         "Esses dados serão usados pela Loja, Banco DzCoins e estatísticas."
     )
 
+    # Recarrega do disco para garantir que pegue vínculos feitos pelo portal
+    st.session_state.db_clients = load_db(DB_CLIENTS, {})
+    client_data = st.session_state.db_clients.get(user_id, {})
+
     # Garante estrutura de players no client_data
     players = load_players_for_client(client_data)
 
@@ -1871,7 +1875,7 @@ with tab7:
             "discord_id": "ID do Discord (opcional)",
             "observacoes": "Observações",
         },
-    )  # [web:67]
+    )  # [web:208]
 
     st.markdown("### 💾 Salvar vínculos")
 
@@ -1885,9 +1889,16 @@ with tab7:
     with col_p2:
         if st.button("Salvar Jogadores no Titan Cloud", use_container_width=True):
             players_atualizados = df_to_players(edited_df_players)
+
+            # Atualiza client_data e db_clients em memória
             client_data["players"] = players_atualizados
             st.session_state.db_clients[user_id] = client_data
+
+            # Salva em disco
             save_db(DB_CLIENTS, st.session_state.db_clients)
+
+            # Atualiza também o DataFrame da sessão para refletir o que foi salvo
+            st.session_state[df_players_key] = edited_df_players
 
             st.success("Vínculos de jogadores salvos com sucesso no Titan Cloud!")
 
