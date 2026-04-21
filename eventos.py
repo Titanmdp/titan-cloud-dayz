@@ -529,6 +529,58 @@ def df_to_loja_itens(df):
     itens.sort(key=lambda x: x["id"])
     return itens
 
+# ---------- HELPERS PLAYERS / VÍNCULOS ----------
+
+PLAYERS_DEFAULT = {}  # dict: {gamertag: {...dados...}}
+
+
+def load_players_for_client(client_data_obj):
+    """
+    Garante que exista a estrutura de players dentro do client_data.
+    """
+    if "players" not in client_data_obj:
+        client_data_obj["players"] = PLAYERS_DEFAULT.copy()
+    return client_data_obj["players"]
+
+
+def players_to_df(players_dict):
+    """
+    Converte dict de players para DataFrame editável.
+    """
+    import pandas as pd
+
+    rows = []
+    for gamertag, info in players_dict.items():
+        rows.append(
+            {
+                "gamertag": gamertag,
+                "apelido": info.get("apelido", ""),
+                "discord_id": info.get("discord_id", ""),
+                "observacoes": info.get("observacoes", ""),
+            }
+        )
+    if not rows:
+        return pd.DataFrame(columns=["gamertag", "apelido", "discord_id", "observacoes"])
+    return pd.DataFrame(rows)
+
+
+def df_to_players(df):
+    """
+    Converte DataFrame de volta para dict de players.
+    """
+    players = {}
+    for _, row in df.iterrows():
+        gamertag = str(row.get("gamertag", "")).strip()
+        if not gamertag:
+            continue
+        players[gamertag] = {
+            "gamertag": gamertag,
+            "apelido": str(row.get("apelido", "")).strip(),
+            "discord_id": str(row.get("discord_id", "")).strip(),
+            "observacoes": str(row.get("observacoes", "")).strip(),
+        }
+    return players
+
 # =========================================================
 # 3. INICIALIZAÇÃO DE ESTADO
 # =========================================================
@@ -1115,13 +1167,14 @@ with st.sidebar:
 
 # --- TABS PRINCIPAIS CLIENTE ---
 st.title(f"🎮 {user_info['server']}")
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📅 Agendamentos",
     "📜 Logs",
     "📢 Comunicados",
     "⚙️ Economia (types.xml)",
     "🌍 Ambiente (globals.xml)",
-    "🛒 Loja / Trader"
+    "🛒 Loja / Trader",
+    "👤 Jogadores / Vínculos"
 ])
 
 with tab1:
@@ -1783,6 +1836,60 @@ with tab6:
                 mime="application/json",
                 use_container_width=True,
             )
+
+with tab7:
+    st.subheader("👤 Jogadores / Vínculos")
+    st.info(
+        "Gerencie aqui o vínculo entre Gamertag dos jogadores e suas informações básicas. "
+        "Esses dados serão usados pela Loja, Banco DzCoins e estatísticas."
+    )
+
+    # Garante estrutura de players no client_data
+    players = load_players_for_client(client_data)
+
+    # Converte para DataFrame editável
+    df_players_key = f"df_players_{user_id}"
+    if df_players_key not in st.session_state:
+        st.session_state[df_players_key] = players_to_df(players)
+
+    df_players = st.session_state[df_players_key]
+
+    st.markdown("### 📋 Lista de jogadores vinculados")
+
+    st.info(
+        "Preencha a Gamertag (obrigatória) e, se quiser, apelido e ID do Discord. "
+        "Futuramente, esses vínculos serão usados para Loja, Banco e ranking."
+    )
+
+    edited_df_players = st.data_editor(
+        df_players,
+        num_rows="dynamic",
+        hide_index=True,
+        column_config={
+            "gamertag": "Gamertag (obrigatório)",
+            "apelido": "Apelido / Nome no Discord",
+            "discord_id": "ID do Discord (opcional)",
+            "observacoes": "Observações",
+        },
+    )  # [web:67]
+
+    st.markdown("### 💾 Salvar vínculos")
+
+    col_p1, col_p2 = st.columns(2)
+
+    with col_p1:
+        if st.button("Aplicar alterações na sessão (Jogadores)", use_container_width=True):
+            st.session_state[df_players_key] = edited_df_players
+            st.success("Alterações aplicadas na sessão de Jogadores.")
+
+    with col_p2:
+        if st.button("Salvar Jogadores no Titan Cloud", use_container_width=True):
+            players_atualizados = df_to_players(edited_df_players)
+            client_data["players"] = players_atualizados
+            st.session_state.db_clients[user_id] = client_data
+            save_db(DB_CLIENTS, st.session_state.db_clients)
+
+            st.success("Vínculos de jogadores salvos com sucesso no Titan Cloud!")
 
 # --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
 if "worker_started" not in st.session_state:
