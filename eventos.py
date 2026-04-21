@@ -341,6 +341,35 @@ def enviar_types_via_ftp(client_id, local_path, mapa):
     except Exception as e:
         return False, str(e)
 
+def enviar_globals_via_ftp(client_id, local_path, mapa):
+    """
+    Envia o arquivo globals.xml já salvo em local_path
+    para o caminho correto no servidor, de acordo com o mapa.
+    """
+    db_atual = load_db(DB_CLIENTS, {})
+    if client_id not in db_atual:
+        return False, "Cliente não encontrado"
+
+    conf = db_atual[client_id]["ftp"]
+    remote_dir = TYPES_REMOTE_PATHS.get(mapa)
+    if not remote_dir:
+        return False, f"Caminho remoto não configurado para o mapa {mapa}"
+
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(conf["host"], int(conf["port"]), timeout=15)
+        ftp.login(conf["user"], conf["pass"])
+        ftp.cwd(remote_dir)
+
+        filename = "globals.xml"  # nome padrão no servidor
+        with open(local_path, "rb") as f:
+            ftp.storbinary(f"STOR {filename}", f)
+
+        ftp.quit()
+        return True, "Sucesso"
+    except Exception as e:
+        return False, str(e)
+
 def pro_worker():
     while True:
         try:
@@ -1465,7 +1494,7 @@ with tab5:
 
         st.markdown("### 📝 Resumo do ambiente")
 
-        dia_aprox_horas = 24  # aqui poderíamos derivar de outros arquivos, por enquanto mantemos informativo
+        dia_aprox_horas = 24  # informativo
         idle_min = idle_mode // 60
         cleanup_min = cleanup_dead // 60
 
@@ -1519,6 +1548,58 @@ with tab5:
                     use_container_width=True,
                 )
                 st.success("globals.xml atualizado gerado com sucesso!")
+
+        st.markdown("### 🚀 Salvar e aplicar no servidor DayZ")
+
+        mapa_globals = st.selectbox(
+            "Mapa de destino (onde o globals.xml será aplicado)",
+            ["Chernarus", "Livonia"],
+            key="globals_mapa_dest",
+        )
+
+        if st.button("Salvar no Titan Cloud e enviar via FTP (globals)", use_container_width=True):
+            g_tree = st.session_state.get(f"globals_tree_{user_id}")
+            g_root = st.session_state.get(f"globals_root_{user_id}")
+            g_vars_full = st.session_state.get(key_gvars)
+
+            if g_tree is None or g_root is None or g_vars_full is None:
+                st.error("Dados do globals.xml não encontrados na sessão. Reenvie o arquivo.")
+            else:
+                # 1) Gerar XML em memória com as alterações
+                new_globals_bytes = apply_globals_changes(g_tree, g_root, g_vars_full)
+
+                # 2) Salvar em disco persistente do Titan Cloud
+                safe_name_g = f"{user_id[:5]}_globals_{mapa_globals.lower()}.xml"
+                local_globals_path = os.path.join(UPLOAD_DIR, safe_name_g)
+
+                try:
+                    with open(local_globals_path, "wb") as f:
+                        f.write(new_globals_bytes)
+
+                    # 3) Enviar via FTP para o servidor, no caminho correto
+                    ok_g, msg_g = enviar_globals_via_ftp(user_id, local_globals_path, mapa_globals)
+
+                    if ok_g:
+                        registrar_log(
+                            user_id,
+                            f"globals.xml atualizado e enviado via FTP para {mapa_globals}.",
+                            "sucesso",
+                        )
+                        st.success("globals.xml enviado e aplicado via FTP com sucesso!")
+                    else:
+                        registrar_log(
+                            user_id,
+                            f"Falha ao enviar globals.xml via FTP ({msg_g})",
+                            "erro",
+                        )
+                        st.error(f"Erro ao enviar via FTP: {msg_g}")
+                except Exception as e:
+                    registrar_log(
+                        user_id,
+                        f"Erro ao salvar/enviar globals.xml ({str(e)})",
+                        "erro",
+                    )
+                    st.error(f"Erro ao salvar/enviar globals.xml: {e}")
 
 # --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
 if "worker_started" not in st.session_state:
