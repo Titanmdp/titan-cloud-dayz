@@ -377,6 +377,64 @@ def pro_worker():
 
         time.sleep(30)
 
+# ---------- HELPERS GLOBALS.XML (AMBIENTE) ----------
+
+# Lista das variáveis que vamos expor na UI primeiro
+GLOBALS_KEYS_FOCO = [
+    "AnimalMaxCount",
+    "ZombieMaxCount",
+    "CleanupLifetimeDeadPlayer",
+    "IdleModeCountdown",
+    "TimeLogin",
+    "TimeLogout",
+    # Se quiser, podemos adicionar mais depois
+]
+
+
+def parse_globals_xml(xml_bytes):
+    """
+    Lê o globals.xml e devolve:
+    - tree, root (ElementTree)
+    - vars_dict: dicionário {nome_var: (type, valor)}
+    """
+    tree = ET.ElementTree(ET.fromstring(xml_bytes))
+    root = tree.getroot()
+    vars_dict = {}
+
+    for v in root.findall("var"):
+        name = v.get("name")
+        v_type = v.get("type")
+        value_raw = v.get("value")
+        if name is None:
+            continue
+        # Tentamos converter para int/float, mantendo string se falhar
+        try:
+            if "." in str(value_raw):
+                value = float(value_raw)
+            else:
+                value = int(value_raw)
+        except Exception:
+            value = value_raw
+        vars_dict[name] = {"type": v_type, "value": value, "elem": v}
+
+    return tree, root, vars_dict
+
+
+def apply_globals_changes(tree, root, vars_dict):
+    """
+    Aplica o dicionário vars_dict no XML e devolve bytes do novo globals.xml.
+    Espera vars_dict no formato {name: {"type": "0", "value": valor_num}}.
+    """
+    for v in root.findall("var"):
+        name = v.get("name")
+        if name in vars_dict:
+            info = vars_dict[name]
+            v.set("type", str(info.get("type", v.get("type", "0"))))
+            v.set("value", str(info.get("value")))
+
+    xml_bytes = ET.tostring(root, encoding="utf-8", method="xml")
+    header = b'<?xml version="1.0" encoding="utf-8"?>\n'
+    return header + xml_bytes
 
 # =========================================================
 # 3. INICIALIZAÇÃO DE ESTADO
@@ -964,11 +1022,12 @@ with st.sidebar:
 
 # --- TABS PRINCIPAIS CLIENTE ---
 st.title(f"🎮 {user_info['server']}")
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📅 Agendamentos",
     "📜 Logs",
     "📢 Comunicados",
-    "⚙️ Economia (types.xml)"
+    "⚙️ Economia (types.xml)",
+    "🌍 Ambiente (globals.xml)"
 ])
 
 with tab1:
@@ -1322,6 +1381,144 @@ with tab4:
             "- Lifetime é o tempo em segundos antes do item ser limpo; "
             "itens de base costumam ter lifetime mais alto que loot comum."
         )  # [web:65]
+
+with tab5:
+    st.subheader("🌍 Configuração de Ambiente (globals.xml)")
+    st.info("Ajuste limites de zumbis/animais, tempos de limpeza e timers de login/logout.")
+
+    # 1) Upload do globals.xml
+    up_globals = st.file_uploader("Enviar globals.xml", type=["xml"], key="up_globals_xml_client")
+
+    if up_globals is not None:
+        try:
+            xml_bytes = up_globals.read()
+            g_tree, g_root, g_vars = parse_globals_xml(xml_bytes)
+
+            st.session_state[f"globals_tree_{user_id}"] = g_tree
+            st.session_state[f"globals_root_{user_id}"] = g_root
+            st.session_state[f"globals_vars_{user_id}"] = g_vars
+
+            st.success(f"globals.xml carregado ({len(g_vars)} variáveis detectadas)")
+        except Exception as e:
+            st.error(f"Erro ao ler globals.xml: {e}")
+
+    key_gvars = f"globals_vars_{user_id}"
+    if key_gvars in st.session_state:
+        g_vars = st.session_state[key_gvars]
+
+        st.markdown("### 🧩 Parâmetros principais")
+
+        # Pega valores atuais com fallback
+        def get_val(name, default):
+            info = g_vars.get(name, None)
+            if info is None:
+                return default
+            return info.get("value", default)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            animal_max = st.slider(
+                "AnimalMaxCount (máx. animais no mapa)",
+                min_value=0,
+                max_value=1000,
+                value=int(get_val("AnimalMaxCount", 200)),
+                step=10,
+            )
+            zombie_max = st.slider(
+                "ZombieMaxCount (máx. zumbis no mapa)",
+                min_value=0,
+                max_value=5000,
+                value=int(get_val("ZombieMaxCount", 1000)),
+                step=50,
+            )
+            cleanup_dead = st.slider(
+                "CleanupLifetimeDeadPlayer (limpeza corpo jogador, em seg.)",
+                min_value=300,
+                max_value=6 * 3600,
+                value=int(get_val("CleanupLifetimeDeadPlayer", 3600)),
+                step=300,
+            )
+
+        with col2:
+            idle_mode = st.slider(
+                "IdleModeCountdown (segundos até modo idle em servidor vazio)",
+                min_value=0,
+                max_value=24 * 3600,
+                value=int(get_val("IdleModeCountdown", 60)),
+                step=60,
+            )
+            time_login = st.slider(
+                "TimeLogin (tempo de login, seg.)",
+                min_value=5,
+                max_value=120,
+                value=int(get_val("TimeLogin", 15)),
+                step=1,
+            )
+            time_logout = st.slider(
+                "TimeLogout (tempo de logout, seg.)",
+                min_value=5,
+                max_value=120,
+                value=int(get_val("TimeLogout", 15)),
+                step=1,
+            )
+
+        st.markdown("### 📝 Resumo do ambiente")
+
+        dia_aprox_horas = 24  # aqui poderíamos derivar de outros arquivos, por enquanto mantemos informativo
+        idle_min = idle_mode // 60
+        cleanup_min = cleanup_dead // 60
+
+        st.write(
+            f"- Máx. **{zombie_max}** zumbis e **{animal_max}** animais configurados no mapa."
+        )  # [web:91]
+        st.write(
+            f"- Corpos de jogadores ficam por ~**{cleanup_min} minutos** antes de serem limpos."
+        )  # [web:91]
+        st.write(
+            f"- Servidor entra em modo idle após **{idle_min} minutos** sem jogadores (IdleModeCountdown)."
+        )  # [web:90][web:103]
+        st.write(
+            f"- Tempo de login: **{time_login} s**, tempo de logout: **{time_logout} s**."
+        )  # [web:97]
+
+        st.markdown("### 💾 Salvar alterações no globals.xml")
+
+        if st.button("Aplicar alterações na sessão (globals.xml)", use_container_width=True):
+            # Atualiza o dicionário g_vars em memória
+            def set_val(name, value):
+                if name not in g_vars:
+                    g_vars[name] = {"type": "0", "value": value, "elem": None}
+                else:
+                    g_vars[name]["value"] = value
+
+            set_val("AnimalMaxCount", animal_max)
+            set_val("ZombieMaxCount", zombie_max)
+            set_val("CleanupLifetimeDeadPlayer", cleanup_dead)
+            set_val("IdleModeCountdown", idle_mode)
+            set_val("TimeLogin", time_login)
+            set_val("TimeLogout", time_logout)
+
+            st.session_state[key_gvars] = g_vars
+            st.success("Alterações aplicadas internamente ao globals.xml (sessão).")
+
+        if st.button("⬇️ Baixar globals.xml ajustado", use_container_width=True):
+            g_tree = st.session_state.get(f"globals_tree_{user_id}")
+            g_root = st.session_state.get(f"globals_root_{user_id}")
+            g_vars_full = st.session_state.get(key_gvars)
+
+            if g_tree is None or g_root is None or g_vars_full is None:
+                st.error("Dados do globals.xml não encontrados na sessão. Reenvie o arquivo.")
+            else:
+                new_globals_bytes = apply_globals_changes(g_tree, g_root, g_vars_full)
+                st.download_button(
+                    label="Baixar globals.xml",
+                    data=new_globals_bytes,
+                    file_name="globals_editado.xml",
+                    mime="application/xml",
+                    use_container_width=True,
+                )
+                st.success("globals.xml atualizado gerado com sucesso!")
 
 # --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
 if "worker_started" not in st.session_state:
