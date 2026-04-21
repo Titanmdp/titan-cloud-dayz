@@ -465,6 +465,70 @@ def apply_globals_changes(tree, root, vars_dict):
     header = b'<?xml version="1.0" encoding="utf-8"?>\n'
     return header + xml_bytes
 
+# ---------- HELPERS LOJA / TRADER (JSON) ----------
+
+LOJA_DEFAULT = {
+    "mapa_padrao": "Chernarus",
+    "posicao_padrao": "",
+    "itens": []  # cada item: {id, nome, classe, categoria, preco, quantidade, ativo}
+}
+
+
+def load_loja_for_client(client_data_obj):
+    """
+    Garante que exista a estrutura de loja dentro do client_data.
+    """
+    if "loja" not in client_data_obj:
+        client_data_obj["loja"] = LOJA_DEFAULT.copy()
+    else:
+        # Garante chaves básicas
+        if "mapa_padrao" not in client_data_obj["loja"]:
+            client_data_obj["loja"]["mapa_padrao"] = "Chernarus"
+        if "posicao_padrao" not in client_data_obj["loja"]:
+            client_data_obj["loja"]["posicao_padrao"] = ""
+        if "itens" not in client_data_obj["loja"]:
+            client_data_obj["loja"]["itens"] = []
+    return client_data_obj["loja"]
+
+
+def loja_itens_to_df(loja):
+    """
+    Converte a lista de itens da loja em DataFrame para edição no Streamlit.
+    """
+    import pandas as pd
+
+    rows = loja.get("itens", [])
+    if not rows:
+        return pd.DataFrame(
+            columns=["id", "nome", "classe", "categoria", "preco", "quantidade", "ativo"]
+        )
+    return pd.DataFrame(rows)
+
+
+def df_to_loja_itens(df):
+    """
+    Converte o DataFrame editado de volta para lista de dicts.
+    """
+    itens = []
+    for _, row in df.iterrows():
+        if not row.get("nome") and not row.get("classe"):
+            # ignora linhas totalmente vazias
+            continue
+        itens.append(
+            {
+                "id": int(row.get("id", 0)),
+                "nome": str(row.get("nome", "")),
+                "classe": str(row.get("classe", "")),
+                "categoria": str(row.get("categoria", "")),
+                "preco": int(row.get("preco", 0)),
+                "quantidade": int(row.get("quantidade", 1)),
+                "ativo": bool(row.get("ativo", True)),
+            }
+        )
+    # ordena por id para manter catálogo organizado
+    itens.sort(key=lambda x: x["id"])
+    return itens
+
 # =========================================================
 # 3. INICIALIZAÇÃO DE ESTADO
 # =========================================================
@@ -1051,12 +1115,13 @@ with st.sidebar:
 
 # --- TABS PRINCIPAIS CLIENTE ---
 st.title(f"🎮 {user_info['server']}")
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📅 Agendamentos",
     "📜 Logs",
     "📢 Comunicados",
     "⚙️ Economia (types.xml)",
-    "🌍 Ambiente (globals.xml)"
+    "🌍 Ambiente (globals.xml)",
+    "🛒 Loja / Trader"
 ])
 
 with tab1:
@@ -1600,6 +1665,120 @@ with tab5:
                         "erro",
                     )
                     st.error(f"Erro ao salvar/enviar globals.xml: {e}")
+
+with tab6:
+    st.subheader("🛒 Loja / Trader")
+    st.info("Configure aqui o catálogo de itens da loja do seu servidor.")
+
+    # Garante estrutura de loja no client_data
+    loja = load_loja_for_client(client_data)
+
+    st.markdown("### ⚙️ Configurações gerais da Loja")
+
+    col_conf1, col_conf2 = st.columns(2)
+    with col_conf1:
+        loja_mapa_padrao = st.selectbox(
+            "Mapa padrão da Loja",
+            ["Chernarus", "Livonia"],
+            index=["Chernarus", "Livonia"].index(loja.get("mapa_padrao", "Chernarus")),
+            key="loja_mapa_padrao",
+        )
+    with col_conf2:
+        loja_posicao_padrao = st.text_input(
+            "Posição padrão de entrega (texto livre)",
+            value=loja.get("posicao_padrao", ""),
+            help="Ex: 'Krasnostav Airfield', 'Safe Zone NW', etc.",
+            key="loja_posicao_padrao",
+        )
+
+    st.markdown("### 📦 Itens da Loja")
+
+    # Converte itens para DataFrame editável
+    df_loja_key = f"df_loja_{user_id}"
+    if df_loja_key not in st.session_state:
+        st.session_state[df_loja_key] = loja_itens_to_df(loja)
+
+    df_loja = st.session_state[df_loja_key]
+
+    st.info(
+        "Colunas: id (ordem de exibição), nome (visível para o player), "
+        "classe (nome do item no DayZ), categoria, preço (DzCoins), quantidade por compra, ativo."
+    )
+
+    edited_df_loja = st.data_editor(
+        df_loja,
+        num_rows="dynamic",
+        hide_index=True,
+        column_config={
+            "id": st.column_config.NumberColumn(
+                "ID (ordem)",
+                help="Ordem do item na lista / identificador para compras.",
+                min_value=1,
+                step=1,
+            ),
+            "nome": "Nome (exibido na loja)",
+            "classe": "Classe DayZ (ex: M4A1)",
+            "categoria": "Categoria (Armas, Kits, etc.)",
+            "preco": st.column_config.NumberColumn(
+                "Preço (DzCoins)",
+                min_value=0,
+                step=1,
+            ),
+            "quantidade": st.column_config.NumberColumn(
+                "Quantidade",
+                min_value=1,
+                step=1,
+            ),
+            "ativo": st.column_config.CheckboxColumn(
+                "Ativo",
+                default=True,
+                help="Se desmarcado, o item não aparece para os jogadores.",
+            ),
+        },
+    )  # [web:67]
+
+    st.markdown("### 💾 Salvar catálogo")
+
+    col_loja1, col_loja2, col_loja3 = st.columns(3)
+
+    with col_loja1:
+        if st.button("Aplicar alterações na sessão (Loja)", use_container_width=True):
+            # Atualiza o DataFrame na sessão
+            st.session_state[df_loja_key] = edited_df_loja
+            st.success("Alterações aplicadas na sessão da Loja.")
+
+    with col_loja2:
+        if st.button("Salvar Loja no Titan Cloud", use_container_width=True):
+            # Converte DF para lista de itens e salva em client_data + disco
+            itens_atualizados = df_to_loja_itens(edited_df_loja)
+            loja["mapa_padrao"] = loja_mapa_padrao
+            loja["posicao_padrao"] = loja_posicao_padrao
+            loja["itens"] = itens_atualizados
+
+            client_data["loja"] = loja
+            st.session_state.db_clients[user_id] = client_data
+            save_db(DB_CLIENTS, st.session_state.db_clients)
+
+            st.success("Catálogo da Loja salvo com sucesso no Titan Cloud!")
+
+    with col_loja3:
+        if st.button("⬇️ Baixar Loja (JSON)", use_container_width=True):
+            itens_atualizados = df_to_loja_itens(edited_df_loja)
+            loja_preview = {
+                "servidor": user_info.get("server", "Servidor"),
+                "mapa_padrao": loja_mapa_padrao,
+                "posicao_padrao": loja_posicao_padrao,
+                "itens": itens_atualizados,
+            }
+            loja_json = json.dumps(loja_preview, indent=4, ensure_ascii=False)
+
+            st.download_button(
+                label="Baixar arquivo Loja_Titan.json",
+                data=loja_json.encode("utf-8"),
+                file_name="Loja_Titan.json",
+                mime="application/json",
+                use_container_width=True,
+            )
 
 # --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
 if "worker_started" not in st.session_state:
