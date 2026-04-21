@@ -9,6 +9,8 @@ import string
 import requests
 import shutil
 import smtplib
+import xml.etree.ElementTree as ET
+import pandas as pd
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
@@ -205,6 +207,80 @@ def get_user_location():
         "pais": "---",
     }
 
+# ---------- HELPERS TYPES.XML (ECONOMIA) ----------
+
+def parse_types_xml(xml_bytes):
+    """
+    Recebe bytes de um types.xml e devolve:
+    - tree: objeto ET.ElementTree
+    - root: elemento raiz
+    - df: DataFrame com colunas principais para edição
+    """
+    tree = ET.ElementTree(ET.fromstring(xml_bytes))
+    root = tree.getroot()
+    rows = []
+
+    for t in root.findall("type"):
+        name = t.get("name", "")
+        cat = None
+        cat_elem = t.find("category")
+        if cat_elem is not None:
+            cat = cat_elem.get("name")
+
+        def _get_int(tag, default=None):
+            elem = t.find(tag)
+            if elem is not None and elem.text is not None and elem.text.strip() != "":
+                try:
+                    return int(elem.text.strip())
+                except:
+                    return default
+            return default
+
+        nominal = _get_int("nominal", 0)
+        min_v = _get_int("min", 0)
+        lifetime = _get_int("lifetime", 0)
+
+        rows.append(
+            {
+                "name": name,
+                "category": cat,
+                "nominal": nominal,
+                "min": min_v,
+                "lifetime": lifetime,
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    return tree, root, df  # [web:65]
+
+def apply_df_to_types_xml(tree, root, df):
+    """
+    Aplica as alterações do DataFrame de volta no XML
+    e devolve bytes do novo types.xml.
+    """
+    df_indexed = df.set_index("name")
+
+    for t in root.findall("type"):
+        name = t.get("name", "")
+        if name not in df_indexed.index:
+            continue
+        row = df_indexed.loc[name]
+
+        def _set_int(tag, value):
+            if pd.isna(value):
+                return
+            elem = t.find(tag)
+            if elem is None:
+                elem = ET.SubElement(t, tag)
+            elem.text = str(int(value))
+
+        _set_int("nominal", row.get("nominal"))
+        _set_int("min", row.get("min"))
+        _set_int("lifetime", row.get("lifetime"))
+
+    xml_bytes = ET.tostring(root, encoding="utf-8", method="xml")
+    header = b'<?xml version="1.0" encoding="utf-8"?>\n'
+    return header + xml_bytes
 
 def disparar_ftp_pro(client_id, acao, filename, local_path, mapa_path):
     db_atual = load_db(DB_CLIENTS, {})
@@ -854,7 +930,12 @@ with st.sidebar:
 
 # --- TABS PRINCIPAIS CLIENTE ---
 st.title(f"🎮 {user_info['server']}")
-tab1, tab2, tab3 = st.tabs(["📅 Agendamentos", "📜 Logs", "📢 Comunicados"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📅 Agendamentos",
+    "📜 Logs",
+    "📢 Comunicados",
+    "⚙️ Economia (types.xml)"
+])
 
 with tab1:
     c1, c2 = st.columns([1, 1.5])
@@ -1024,6 +1105,137 @@ with tab3:
                     client_data["comunicados"].pop(idx)
                     save_db(DB_CLIENTS, st.session_state.db_clients)
                     st.rerun()
+                    
+with tab4:
+    st.subheader("⚙️ Editor de Loot (types.xml)")
+    st.info("Faça upload do types.xml atual do seu servidor para analisar e ajustar o loot.")
+
+    # 1) Upload do arquivo
+    up_types = st.file_uploader("Enviar types.xml", type=["xml"], key="up_types_xml_client")
+
+    if up_types is not None:
+        try:
+            xml_bytes = up_types.read()
+            tree, root, df_types = parse_types_xml(xml_bytes)
+
+            # Guarda no session_state, separado por cliente
+            st.session_state[f"types_xml_tree_{user_id}"] = tree
+            st.session_state[f"types_xml_root_{user_id}"] = root
+            st.session_state[f"types_xml_df_{user_id}"] = df_types
+
+            st.success(f"Arquivo carregado: {up_types.name} ({len(df_types)} itens)")
+        except Exception as e:
+            st.error(f"Erro ao ler types.xml: {e}")
+
+    # 2) Se já temos algo carregado na sessão, mostra a interface
+    key_df = f"types_xml_df_{user_id}"
+    if key_df in st.session_state:
+        df_types = st.session_state[key_df]
+
+        st.markdown("### 🔍 Filtros rápidos")
+
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            categoria_sel = st.selectbox(
+                "Categoria",
+                options=["Todas"] + sorted(
+                    [c for c in df_types["category"].dropna().unique().tolist()]
+                ),
+                index=0,
+            )
+        with col_f2:
+            only_nom_zero = st.checkbox("Mostrar apenas itens sem spawn (nominal = 0)")
+        with col_f3:
+            nome_busca = st.text_input("Buscar por nome (contém)", "")
+
+        df_view = df_types.copy()
+
+        if categoria_sel != "Todas":
+            df_view = df_view[df_view["category"] == categoria_sel]
+
+        if only_nom_zero:
+            df_view = df_view[df_view["nominal"] == 0]
+
+        if nome_busca.strip():
+            df_view = df_view[df_view["name"].str.contains(nome_busca.strip(), case=False)]
+
+        st.markdown("### ✏️ Ajuste de parâmetros")
+
+        edited_df = st.data_editor(
+            df_view,
+            num_rows="fixed",
+            hide_index=True,
+            column_config={
+                "name": "Classe",
+                "category": "Categoria",
+                "nominal": st.column_config.NumberColumn(
+                    "Nominal",
+                    help="Quantidade alvo do item no mapa.",
+                    min_value=0,
+                    step=1,
+                ),
+                "min": st.column_config.NumberColumn(
+                    "Min",
+                    help="Quantidade mínima a manter.",
+                    min_value=0,
+                    step=1,
+                ),
+                "lifetime": st.column_config.NumberColumn(
+                    "Lifetime (s)",
+                    help="Tempo, em segundos, que o item fica no mundo.",
+                    min_value=0,
+                    step=60,
+                ),
+            },
+            disabled=["name", "category"],
+        )  # [web:67][web:61]
+
+        st.markdown("### 💾 Salvar alterações no types.xml")
+
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            if st.button("Aplicar alterações na sessão", use_container_width=True):
+                # Atualiza apenas as linhas filtradas, de volta no df original
+                df_merged = df_types.set_index("name")
+                edited_indexed = edited_df.set_index("name")
+
+                for idx in edited_indexed.index:
+                    if idx in df_merged.index:
+                        for col in ["nominal", "min", "lifetime"]:
+                            df_merged.loc[idx, col] = edited_indexed.loc[idx, col]
+
+                st.session_state[key_df] = df_merged.reset_index()
+                st.success("Alterações aplicadas internamente (ainda não gerou novo XML).")
+
+        with col_s2:
+            if st.button("⬇️ Baixar types.xml ajustado", use_container_width=True):
+                tree = st.session_state.get(f"types_xml_tree_{user_id}")
+                root = st.session_state.get(f"types_xml_root_{user_id}")
+                df_full = st.session_state.get(key_df)
+
+                if tree is None or root is None or df_full is None:
+                    st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
+                else:
+                    new_xml_bytes = apply_df_to_types_xml(tree, root, df_full)
+                    st.download_button(
+                        label="Baixar types.xml",
+                        data=new_xml_bytes,
+                        file_name="types_editado.xml",
+                        mime="application/xml",
+                        use_container_width=True,
+                    )
+                    st.success("types.xml atualizado gerado com sucesso!")
+
+        st.divider()
+        st.markdown("#### ℹ️ Dicas rápidas")
+        st.write(
+            "- Nominal define a **quantidade alvo** de cada item no mapa; "
+            "valores muito altos criam excesso de loot, muito baixos deixam o servidor vazio."
+        )  # [web:61][web:65]
+        st.write(
+            "- Lifetime é o tempo em segundos antes do item ser limpo; "
+            "itens de base costumam ter lifetime mais alto que loot comum."
+        )  # [web:65]
 
 # --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
 if "worker_started" not in st.session_state:
