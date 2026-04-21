@@ -1847,6 +1847,8 @@ with tab7:
     # Lê diretamente do arquivo para pegar vínculos feitos pelo portal
     db_clients = load_db(DB_CLIENTS, {})
 
+    st.write("DEBUG IDs:", list(db_clients.keys()))
+
     if not db_clients:
         st.warning("Nenhum cliente/servidor cadastrado.")
         st.stop()
