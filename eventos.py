@@ -1844,27 +1844,28 @@ with tab7:
         "Esses dados serão usados pela Loja, Banco DzCoins e estatísticas."
     )
 
-    # Recarrega do disco para pegar vínculos feitos pelo portal
-    st.session_state.db_clients = load_db(DB_CLIENTS, {})
+    # Lê diretamente do arquivo para pegar vínculos feitos pelo portal
+    db_clients = load_db(DB_CLIENTS, {})
 
-    if not st.session_state.db_clients:
+    if not db_clients:
         st.warning("Nenhum cliente/servidor cadastrado.")
         st.stop()
 
     # Escolher explicitamente qual servidor (ID) visualizar
     st.markdown("### 🧩 Selecione o servidor (ID)")
 
-    server_ids = list(st.session_state.db_clients.keys())
-    # Se quiser, pode pré‑selecionar user_id se ele corresponder a um desses IDs
+    server_ids = list(db_clients.keys())
+    # Se quiser, pode tentar pré‑selecionar o user_id, se fizer sentido
     default_index = server_ids.index(user_id) if "user_id" in locals() and user_id in server_ids else 0
+
     selected_server_id = st.selectbox(
         "Servidor (ID)", server_ids, index=default_index
     )
 
-    client_data = st.session_state.db_clients.get(selected_server_id, {})
+    client_data = db_clients.get(selected_server_id, {})
     players = load_players_for_client(client_data)
 
-    # Converte para DataFrame editável
+    # Converte para DataFrame editável (um DF por servidor)
     df_players_key = f"df_players_{selected_server_id}"
     if df_players_key not in st.session_state:
         st.session_state[df_players_key] = players_to_df(players)
@@ -1887,7 +1888,7 @@ with tab7:
             "discord_id": "ID do Discord (opcional)",
             "observacoes": "Observações",
         },
-    )
+    )  # [web:211]
 
     st.markdown("### 💾 Salvar vínculos")
 
@@ -1902,10 +1903,14 @@ with tab7:
         if st.button("Salvar Jogadores no Titan Cloud", use_container_width=True):
             players_atualizados = df_to_players(edited_df_players)
 
+            # Atualiza o client_data e o dicionário carregado do arquivo
             client_data["players"] = players_atualizados
-            st.session_state.db_clients[selected_server_id] = client_data
-            save_db(DB_CLIENTS, st.session_state.db_clients)
+            db_clients[selected_server_id] = client_data
 
+            # Salva em disco
+            save_db(DB_CLIENTS, db_clients)
+
+            # Mantém o DF da sessão sincronizado com o que foi salvo
             st.session_state[df_players_key] = edited_df_players
 
             st.success("Vínculos de jogadores salvos com sucesso no Titan Cloud!")
