@@ -1685,9 +1685,13 @@ with tab6:
         )
     with col_conf2:
         loja_posicao_padrao = st.text_input(
-            "Posição padrão de entrega (texto livre)",
+            "Coordenadas padrão de entrega (opcional)",
             value=loja.get("posicao_padrao", ""),
-            help="Ex: 'Krasnostav Airfield', 'Safe Zone NW', etc.",
+            help=(
+                "Opcional. Use um mapa como dayz.xam.nu ou iZurvive, clique no local desejado, "
+                "copie as coordenadas (ex: 2432.34/4353.87) ou a descrição e cole aqui. "
+                "O player poderá informar outra posição na página de compra."
+            ),
             key="loja_posicao_padrao",
         )
 
@@ -1702,7 +1706,7 @@ with tab6:
 
     st.info(
         "Colunas: id (ordem de exibição), nome (visível para o player), "
-        "classe (nome do item no DayZ), categoria, preço (DzCoins), quantidade por compra, ativo."
+        "classe (nome do item no DayZ, ex: M4A1), categoria, preço (DzCoins), quantidade por compra, ativo."
     )
 
     edited_df_loja = st.data_editor(
