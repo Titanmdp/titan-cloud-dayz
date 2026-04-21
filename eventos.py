@@ -622,14 +622,34 @@ if not st.session_state.authenticated:
             else:
                 local_final = "Localização não capturada"
 
+            # Se for cliente, atualiza informações de acesso no users_db
             if cargo == "client":
-                st.session_state.db_users["keys"][login_key]["last_session"] = token_sessao
-                st.session_state.db_users["keys"][login_key]["local"] = local_final
-                st.session_state.db_users["keys"][login_key]["last_login"] = (
+                # Garante que db_users está carregado
+                db_users = st.session_state.db_users
+
+                # Recupera dados da key e o server_id associado
+                key_data = db_users.get("keys", {}).get(login_key, {})
+                server_id = key_data.get("server_id")
+
+                if not server_id:
+                    st.error(
+                        "Esta KeyUser não possui um ID de servidor associado (server_id).\n"
+                        "Registre ou atualize o cliente pelo painel de administração."
+                    )
+                    st.stop()
+
+                # Atualiza logs de acesso
+                db_users["keys"][login_key]["last_session"] = token_sessao
+                db_users["keys"][login_key]["local"] = local_final
+                db_users["keys"][login_key]["last_login"] = (
                     get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
                 )
-                save_db(DB_USERS, st.session_state.db_users)
+                save_db(DB_USERS, db_users)
 
+                # Guarda server_id na sessão (ponte para clients_data.json)
+                st.session_state.server_id = server_id
+
+            # Para admin, pode não haver server_id direto
             st.session_state.authenticated = True
             st.session_state.user_key = login_key
             st.session_state.role = cargo
@@ -671,37 +691,80 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
 
     # --- TAB 1: GERAR CHAVES ---
     with tab_adm1:
-        with st.expander("Gerador de Chaves", expanded=True):
-            col_gen1, col_gen2 = st.columns([2, 1])
-            with col_gen1:
-                srv_name = st.text_input("Nome do Servidor / Cliente")
-                plano_sel = st.selectbox("Escolha o Plano", list(PLANOS.keys()))
-                if "temp_key" not in st.session_state:
-                    st.session_state.temp_key = ""
-                ck1, ck2 = st.columns([3, 1])
-                new_k = ck1.text_input("KeyUser", value=st.session_state.temp_key)
-                if ck2.button("🎲 Gerar"):
-                    st.session_state.temp_key = "".join(
+    with st.expander("Gerador de Chaves", expanded=True):
+        col_gen1, col_gen2 = st.columns([2, 1])
+
+        # Coluna esquerda: dados do cliente/servidor + KeyUser
+        with col_gen1:
+            srv_name = st.text_input("Nome do Servidor / Cliente")
+            plano_sel = st.selectbox("Escolha o Plano", list(PLANOS.keys()))
+
+            # Campo temporário para KeyUser (chave de acesso)
+            if "temp_key" not in st.session_state:
+                st.session_state.temp_key = ""
+            ck1, ck2 = st.columns([3, 1])
+            new_k = ck1.text_input("KeyUser (chave de acesso)", value=st.session_state.temp_key)
+
+            # Botão para gerar KeyUser aleatória (12 caracteres A-Z/0-9)
+            if ck2.button("🎲 Gerar"):
+                st.session_state.temp_key = "".join(
+                    secrets.choice(string.ascii_uppercase + string.digits)
+                    for _ in range(12)
+                )
+                st.rerun()
+
+        # Coluna direita: validade e gravação
+        with col_gen2:
+            dias_v = st.number_input("Dias de validade", min_value=1, value=30)
+
+            if st.button("🚀 Registrar e Ativar", use_container_width=True):
+                if not srv_name or not new_k:
+                    st.error("Preencha o nome do servidor/cliente e a KeyUser.")
+                else:
+                    # 1) Gerar ID interno do servidor (server_id) diferente da KeyUser
+                    server_id = "".join(
                         secrets.choice(string.ascii_uppercase + string.digits)
                         for _ in range(12)
                     )
-                    st.rerun()
-            with col_gen2:
-                dias_v = st.number_input("Dias de validade", min_value=1, value=30)
-                if st.button("🚀 Registrar e Ativar", use_container_width=True):
-                    if srv_name and new_k:
-                        data_exp = (
-                            get_hora_brasilia() + timedelta(days=dias_v)
-                        ).strftime("%d/%m/%Y")
-                        st.session_state.db_users["keys"][new_k] = {
-                            "server": srv_name,
-                            "expires": data_exp,
-                            "plano": plano_sel,
+
+                    # 2) Calcular data de expiração
+                    data_exp = (
+                        get_hora_brasilia() + timedelta(days=dias_v)
+                    ).strftime("%d/%m/%Y")
+
+                    # 3) Registrar no users_db: KeyUser -> dados + server_id
+                    st.session_state.db_users["keys"][new_k] = {
+                        "server": srv_name,
+                        "server_id": server_id,
+                        "expires": data_exp,
+                        "plano": plano_sel,
+                    }
+                    save_db(DB_USERS, st.session_state.db_users)
+
+                    # 4) Inicializar estrutura em db_clients para esse server_id
+                    if server_id not in st.session_state.db_clients:
+                        st.session_state.db_clients[server_id] = {
+                            "ftp": {
+                                "host": "",
+                                "user": "",
+                                "pass": "",
+                                "port": "21",
+                            },
+                            "agendas": [],
+                            "logs": [],
+                            "comunicados": [],
+                            "players": {},
                         }
-                        save_db(DB_USERS, st.session_state.db_users)
-                        st.session_state.temp_key = ""
-                        st.success(f"Chave para '{srv_name}' ativada!")
-                        st.rerun()
+                        save_db(DB_CLIENTS, st.session_state.db_clients)
+
+                    # 5) Limpar temp_key e avisar
+                    st.session_state.temp_key = ""
+                    st.success(
+                        f"Chave para '{srv_name}' ativada!\n\n"
+                        f"- KeyUser (login do cliente): {new_k}\n"
+                        f"- ID interno do servidor: {server_id}"
+                    )
+                    st.rerun()
 
     # --- TAB 2: GESTÃO DE CLIENTES ---
     with tab_adm2:
@@ -1844,31 +1907,45 @@ with tab7:
         "Esses dados serão usados pela Loja, Banco DzCoins e estatísticas."
     )
 
+    # Garante que o cliente está autenticado e possui um server_id vinculado
+    server_id = st.session_state.get("server_id")
+    if not server_id:
+        st.error(
+            "Nenhum servidor vinculado a este login.\n"
+            "Faça login com uma KeyUser válida (gerada no painel de administração)."
+        )
+        st.stop()
+
     # Lê diretamente do arquivo para pegar vínculos feitos pelo portal
     db_clients = load_db(DB_CLIENTS, {})
-
-    st.write("DEBUG IDs:", list(db_clients.keys()))
 
     if not db_clients:
         st.warning("Nenhum cliente/servidor cadastrado.")
         st.stop()
 
-    # Escolher explicitamente qual servidor (ID) visualizar
-    st.markdown("### 🧩 Selecione o servidor (ID)")
+    if server_id not in db_clients:
+        st.error(
+            f"O servidor com ID {server_id} não foi encontrado em clients_data.\n"
+            "Verifique se o server_id existe em clients_data.json."
+        )
+        st.stop()
 
-    server_ids = list(db_clients.keys())
-    # Se quiser, pode tentar pré‑selecionar o user_id, se fizer sentido
-    default_index = server_ids.index(user_id) if "user_id" in locals() and user_id in server_ids else 0
-
-    selected_server_id = st.selectbox(
-        "Servidor (ID)", server_ids, index=default_index
-    )
-
-    client_data = db_clients.get(selected_server_id, {})
+    client_data = db_clients[server_id]
     players = load_players_for_client(client_data)
 
+    # Nome amigável do servidor a partir do users_db (se estiver em sessão)
+    db_users = st.session_state.get("db_users", {"keys": {}})
+    keyuser = st.session_state.get("user_key", "")
+    nome_servidor = db_users.get("keys", {}).get(keyuser, {}).get("server", "Servidor sem nome")
+
+    st.markdown("### 🧩 Servidor vinculado a este cliente")
+    st.info(
+        f"Cliente logado com a KeyUser **{keyuser or '(desconhecida)'}**, "
+        f"servidor: **{nome_servidor}** (ID interno: **{server_id}**)"
+    )
+
     # Converte para DataFrame editável (um DF por servidor)
-    df_players_key = f"df_players_{selected_server_id}"
+    df_players_key = f"df_players_{server_id}"
     if df_players_key not in st.session_state:
         st.session_state[df_players_key] = players_to_df(players)
 
@@ -1890,7 +1967,7 @@ with tab7:
             "discord_id": "ID do Discord (opcional)",
             "observacoes": "Observações",
         },
-    )  # [web:211]
+    )
 
     st.markdown("### 💾 Salvar vínculos")
 
@@ -1907,7 +1984,7 @@ with tab7:
 
             # Atualiza o client_data e o dicionário carregado do arquivo
             client_data["players"] = players_atualizados
-            db_clients[selected_server_id] = client_data
+            db_clients[server_id] = client_data
 
             # Salva em disco
             save_db(DB_CLIENTS, db_clients)
