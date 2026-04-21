@@ -56,6 +56,12 @@ PLANOS = {
     "Enterprise": 999,
 }
 
+# Caminhos padrão do types.xml por mapa no servidor DayZ
+TYPES_REMOTE_PATHS = {
+    "Chernarus": "mpmissions/dayzOffline.chernarusplus/db",
+    "Livonia": "mpmissions/dayzOffline.enoch/db",
+}
+
 # --- BANCO DE DADOS (JSON) / UPLOADS ---
 UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
@@ -306,6 +312,34 @@ def disparar_ftp_pro(client_id, acao, filename, local_path, mapa_path):
     except Exception:
         return False, "Erro"
 
+def enviar_types_via_ftp(client_id, local_path, mapa):
+    """
+    Envia o arquivo types.xml já salvo em local_path
+    para o caminho correto no servidor, de acordo com o mapa.
+    """
+    db_atual = load_db(DB_CLIENTS, {})
+    if client_id not in db_atual:
+        return False, "Cliente não encontrado"
+
+    conf = db_atual[client_id]["ftp"]
+    remote_dir = TYPES_REMOTE_PATHS.get(mapa)
+    if not remote_dir:
+        return False, f"Caminho remoto não configurado para o mapa {mapa}"
+
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(conf["host"], int(conf["port"]), timeout=15)
+        ftp.login(conf["user"], conf["pass"])
+        ftp.cwd(remote_dir)
+
+        filename = "types.xml"  # nome padrão no servidor
+        with open(local_path, "rb") as f:
+            ftp.storbinary(f"STOR {filename}", f)
+
+        ftp.quit()
+        return True, "Sucesso"
+    except Exception as e:
+        return False, str(e)
 
 def pro_worker():
     while True:
@@ -1225,6 +1259,58 @@ with tab4:
                         use_container_width=True,
                     )
                     st.success("types.xml atualizado gerado com sucesso!")
+
+        # --- AÇÃO EXTRA: Salvar no Titan Cloud + aplicar via FTP ---
+        st.markdown("### 🚀 Salvar e aplicar no servidor DayZ")
+
+        mapa_dest = st.selectbox(
+            "Mapa de destino (onde o types.xml será aplicado)",
+            ["Chernarus", "Livonia"],
+            key="types_mapa_dest",
+        )
+
+        if st.button("Salvar no Titan Cloud e enviar via FTP", use_container_width=True):
+            tree = st.session_state.get(f"types_xml_tree_{user_id}")
+            root = st.session_state.get(f"types_xml_root_{user_id}")
+            df_full = st.session_state.get(key_df)
+
+            if tree is None or root is None or df_full is None:
+                st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
+            else:
+                # 1) Gerar XML em memória
+                new_xml_bytes = apply_df_to_types_xml(tree, root, df_full)
+
+                # 2) Salvar em disco persistente do Titan Cloud
+                safe_name = f"{user_id[:5]}_types_{mapa_dest.lower()}.xml"
+                local_types_path = os.path.join(UPLOAD_DIR, safe_name)
+                try:
+                    with open(local_types_path, "wb") as f:
+                        f.write(new_xml_bytes)
+
+                    # 3) Enviar via FTP para o servidor, no caminho correto
+                    ok, msg = enviar_types_via_ftp(user_id, local_types_path, mapa_dest)
+
+                    if ok:
+                        registrar_log(
+                            user_id,
+                            f"types.xml atualizado e enviado via FTP para {mapa_dest}.",
+                            "sucesso",
+                        )
+                        st.success("types.xml enviado e aplicado via FTP com sucesso!")
+                    else:
+                        registrar_log(
+                            user_id,
+                            f"Falha ao enviar types.xml via FTP ({msg})",
+                            "erro",
+                        )
+                        st.error(f"Erro ao enviar via FTP: {msg}")
+                except Exception as e:
+                    registrar_log(
+                        user_id,
+                        f"Erro ao salvar/enviar types.xml ({str(e)})",
+                        "erro",
+                    )
+                    st.error(f"Erro ao salvar/enviar types.xml: {e}")
 
         st.divider()
         st.markdown("#### ℹ️ Dicas rápidas")
