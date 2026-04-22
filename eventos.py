@@ -34,6 +34,10 @@ else:
         DB_USERS = "users_db.json"
         DB_CLIENTS = "clients_data.json"
 
+# DEBUG TEMPORÁRIO PARA VER OS ARQUIVOS USADOS
+st.write("DEBUG DB_USERS path:", DB_USERS)
+st.write("DEBUG DB_CLIENTS path:", DB_CLIENTS)
+
 # --- CONFIGURAÇÃO DA PÁGINA (antes de qualquer sidebar) ---
 st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
 
@@ -119,14 +123,12 @@ def load_db(file, default_data):
 
 
 def save_db(file, data):
-    if not data or (
-        isinstance(data, dict)
-        and "admin_key" not in data
-        and file == DB_USERS
-    ):
+    # Só bloqueia se data for None; dicionários vazios ainda podem ser salvos
+    if data is None:
         return
 
     try:
+        # Cria backup antes de sobrescrever, se existir
         if os.path.exists(file):
             shutil.copy(file, file + ".bak")
 
@@ -587,8 +589,16 @@ def df_to_players(df):
 
 if "db_users" not in st.session_state:
     st.session_state.db_users = load_db(
-        DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}}
+        DB_USERS,
+        {
+            "admin_key": "ALEX_ADMIN",
+            "keys": {},
+        },
     )
+
+# Garante estrutura mínima em db_users, sem duplicar config_planos
+st.session_state.db_users.setdefault("admin_key", "ALEX_ADMIN")
+st.session_state.db_users.setdefault("keys", {})
 
 if "db_clients" not in st.session_state:
     st.session_state.db_clients = load_db(DB_CLIENTS, {})
