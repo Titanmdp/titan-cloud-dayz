@@ -81,7 +81,7 @@ def main():
     )
 
     # --- PROCESSA RETORNO DO DISCORD (code) ---
-    query_params = st.experimental_get_query_params()
+    query_params = st.query_params  # novo API do Streamlit
     code_list = query_params.get("code", [])
 
     if code_list and DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET and DISCORD_REDIRECT_URI:
