@@ -23,16 +23,19 @@ from streamlit_javascript import st_javascript
 # --- DETECÇÃO DE AMBIENTE E PERSISTÊNCIA DE DADOS ---
 IS_DEV = os.environ.get("IS_DEV", "False") == "True"
 
-if IS_DEV:
-    DB_USERS = "users_db_dev.json"
-    DB_CLIENTS = "clients_data_dev.json"
+# Se existir um disk montado em /var/data (Render), usamos sempre ele
+if os.path.exists("/var/data"):
+    DB_USERS = "/var/data/users_db.json"
+    DB_CLIENTS = "/var/data/clients_data.json"
+# Senão, usamos arquivos locais na pasta do projeto (para rodar no seu PC)
 else:
-    if os.path.exists("/data"):
-        DB_USERS = "/data/users_db.json"
-        DB_CLIENTS = "/data/clients_data.json"
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    if IS_DEV:
+        DB_USERS = os.path.join(BASE_DIR, "users_db_dev.json")
+        DB_CLIENTS = os.path.join(BASE_DIR, "clients_data_dev.json")
     else:
-        DB_USERS = "users_db.json"
-        DB_CLIENTS = "clients_data.json"
+        DB_USERS = os.path.join(BASE_DIR, "users_db.json")
+        DB_CLIENTS = os.path.join(BASE_DIR, "clients_data.json")
 
 # DEBUG TEMPORÁRIO PARA VER OS ARQUIVOS USADOS
 st.write("DEBUG DB_USERS path:", DB_USERS)
