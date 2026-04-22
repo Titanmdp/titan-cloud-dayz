@@ -697,13 +697,20 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             # Coluna esquerda: dados do cliente/servidor + KeyUser
             with col_gen1:
                 srv_name = st.text_input("Nome do Servidor / Cliente")
+                nitrado_id = st.text_input(
+                    "ID do Servidor na Nitrado (opcional, ex.: 18927875)",
+                    placeholder="Se preencher, será usado como ID interno do servidor",
+                )
                 plano_sel = st.selectbox("Escolha o Plano", list(PLANOS.keys()))
 
                 # Campo temporário para KeyUser (chave de acesso)
                 if "temp_key" not in st.session_state:
                     st.session_state.temp_key = ""
                 ck1, ck2 = st.columns([3, 1])
-                new_k = ck1.text_input("KeyUser (chave de acesso)", value=st.session_state.temp_key)
+                new_k = ck1.text_input(
+                    "KeyUser (chave de acesso)",
+                    value=st.session_state.temp_key,
+                )
 
                 # Botão para gerar KeyUser aleatória (12 caracteres A-Z/0-9)
                 if ck2.button("🎲 Gerar"):
@@ -721,11 +728,15 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     if not srv_name or not new_k:
                         st.error("Preencha o nome do servidor/cliente e a KeyUser.")
                     else:
-                        # 1) Gerar ID interno do servidor (server_id) diferente da KeyUser
-                        server_id = "".join(
-                            secrets.choice(string.ascii_uppercase + string.digits)
-                            for _ in range(12)
-                        )
+                        # 1) Definir ID interno do servidor (server_id)
+                        #    Se tiver ID Nitrado, usa ele; senão gera aleatório
+                        if nitrado_id.strip():
+                            server_id = nitrado_id.strip()
+                        else:
+                            server_id = "".join(
+                                secrets.choice(string.ascii_uppercase + string.digits)
+                                for _ in range(12)
+                            )
 
                         # 2) Calcular data de expiração
                         data_exp = (
