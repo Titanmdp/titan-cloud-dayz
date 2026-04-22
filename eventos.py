@@ -1254,14 +1254,15 @@ with st.sidebar:
 
 # --- TABS PRINCIPAIS CLIENTE ---
 st.title(f"🎮 {user_info['server']}")
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📅 Agendamentos",
     "📜 Logs",
     "📢 Comunicados",
     "⚙️ Economia (types.xml)",
     "🌍 Ambiente (globals.xml)",
     "🛒 Loja / Trader",
-    "👤 Jogadores / Vínculos"
+    "👤 Jogadores / Vínculos",
+    "🏦 Banco & Carteira",
 ])
 
 with tab1:
@@ -2018,6 +2019,161 @@ with tab7:
             st.session_state[df_players_key] = edited_df_players
 
             st.success("Vínculos de jogadores salvos com sucesso no Titan Cloud!")
+
+with tab8:
+    st.subheader("🏦 Banco & Carteira")
+
+    st.info(
+        "Gerencie aqui o saldo de DzCoins dos jogadores: carteira (com o jogador) e banco (guardado). "
+        "Use esta tela para bônus de evento, correções e ajustes manuais."
+    )
+
+    # 1) Garante que há um servidor válido na sessão
+    server_id = st.session_state.get("server_id")
+    if not server_id:
+        st.error(
+            "Nenhum servidor vinculado a este login.\n"
+            "Faça login com uma KeyUser válida (gerada no painel de administração)."
+        )
+        st.stop()
+
+    # 2) Carrega dados do servidor
+    clients_data = load_db(DB_CLIENTS, {})
+    if not clients_data:
+        st.warning("Nenhum cliente/servidor cadastrado em clients_data.json.")
+        st.stop()
+
+    if server_id not in clients_data:
+        st.error(
+            f"O servidor com ID {server_id} não foi encontrado em clients_data.json.\n"
+            "Verifique se o server_id está correto."
+        )
+        st.stop()
+
+    client_data = clients_data[server_id]
+
+    # Garante estruturas básicas
+    players = client_data.get("players", {})
+    if "wallets" not in client_data:
+        client_data["wallets"] = {}
+    if "bank" not in client_data:
+        client_data["bank"] = {}
+
+    wallets = client_data["wallets"]
+    bank = client_data["bank"]
+
+    # 3) Selecionar jogador
+    st.markdown("### 👤 Selecionar jogador")
+
+    if not players:
+        st.warning("Nenhum jogador vinculado ainda. Use a aba 'Jogadores / Vínculos'.")
+        st.stop()
+
+    lista_gamertags = sorted(players.keys())
+    gamertag_sel = st.selectbox("Jogador", lista_gamertags)
+
+    # 4) Recuperar ou criar registros de carteira/banco
+    wallet_reg = wallets.get(gamertag_sel, {"balance": 0, "historico": []})
+    bank_reg = bank.get(gamertag_sel, {"balance": 0, "historico": []})
+
+    saldo_carteira = wallet_reg.get("balance", 0)
+    saldo_banco = bank_reg.get("balance", 0)
+
+    st.markdown("### 💰 Saldos atuais")
+    st.info(
+        f"Jogador **{gamertag_sel}**\n\n"
+        f"- Carteira: **{saldo_carteira} DzCoins**\n"
+        f"- Banco: **{saldo_banco} DzCoins**"
+    )
+
+    # 5) Ajustes manuais (admin do servidor)
+    st.markdown("### 🛠 Ajustes manuais (admin)")
+
+    col_aj_cart, col_aj_bank = st.columns(2)
+
+    with col_aj_cart:
+        st.markdown("#### Carteira")
+        val_aj_cart = st.number_input(
+            "Ajuste na carteira (+ crédito, - débito)",
+            key="ajuste_carteira",
+            step=100,
+            value=0,
+        )
+        motivo_cart = st.text_input(
+            "Motivo (ex.: bônus evento, correção)", key="motivo_carteira"
+        )
+        if st.button("Aplicar ajuste na carteira", use_container_width=True):
+            if val_aj_cart == 0:
+                st.error("Informe um valor diferente de zero para ajustar.")
+            else:
+                saldo_novo = saldo_carteira + val_aj_cart
+                wallet_reg["balance"] = saldo_novo
+
+                hora = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
+                if val_aj_cart > 0:
+                    msg = f"[{hora}] AJUSTE +{val_aj_cart} (CARTEIRA) - {motivo_cart or 'sem motivo'}"
+                else:
+                    msg = f"[{hora}] AJUSTE {val_aj_cart} (CARTEIRA) - {motivo_cart or 'sem motivo'}"
+
+                wallet_reg.setdefault("historico", []).append(msg)
+
+                wallets[gamertag_sel] = wallet_reg
+                client_data["wallets"] = wallets
+                clients_data[server_id] = client_data
+                save_db(DB_CLIENTS, clients_data)
+
+                st.success(f"Ajuste aplicado. Novo saldo em carteira: {saldo_novo} DzCoins.")
+                st.experimental_rerun()
+
+    with col_aj_bank:
+        st.markdown("#### Banco")
+        val_aj_bank = st.number_input(
+            "Ajuste no banco (+ crédito, - débito)",
+            key="ajuste_banco",
+            step=100,
+            value=0,
+        )
+        motivo_bank = st.text_input(
+            "Motivo (ex.: prêmio, correção)", key="motivo_banco"
+        )
+        if st.button("Aplicar ajuste no banco", use_container_width=True):
+            if val_aj_bank == 0:
+                st.error("Informe um valor diferente de zero para ajustar.")
+            else:
+                saldo_novo = saldo_banco + val_aj_bank
+                bank_reg["balance"] = saldo_novo
+
+                hora = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
+                if val_aj_bank > 0:
+                    msg = f"[{hora}] AJUSTE +{val_aj_bank} (BANCO) - {motivo_bank or 'sem motivo'}"
+                else:
+                    msg = f"[{hora}] AJUSTE {val_aj_bank} (BANCO) - {motivo_bank or 'sem motivo'}"
+
+                bank_reg.setdefault("historico", []).append(msg)
+
+                bank[gamertag_sel] = bank_reg
+                client_data["bank"] = bank
+                clients_data[server_id] = client_data
+                save_db(DB_CLIENTS, clients_data)
+
+                st.success(f"Ajuste aplicado. Novo saldo no banco: {saldo_novo} DzCoins.")
+                st.experimental_rerun()
+
+    # 6) Histórico consolidado
+    st.markdown("### 📜 Histórico de movimentações")
+
+    historico_comb = []
+
+    for linha in wallet_reg.get("historico", []):
+        historico_comb.append(f"[CARTEIRA] {linha}")
+    for linha in bank_reg.get("historico", []):
+        historico_comb.append(f"[BANCO] {linha}")
+
+    if historico_comb:
+        for linha in reversed(historico_comb[-50:]):
+            st.write(linha)
+    else:
+        st.info("Ainda não há movimentações registradas para este jogador.")
 
 # --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
 if "worker_started" not in st.session_state:
