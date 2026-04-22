@@ -691,80 +691,80 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
 
     # --- TAB 1: GERAR CHAVES ---
     with tab_adm1:
-    with st.expander("Gerador de Chaves", expanded=True):
-        col_gen1, col_gen2 = st.columns([2, 1])
+        with st.expander("Gerador de Chaves", expanded=True):
+            col_gen1, col_gen2 = st.columns([2, 1])
 
-        # Coluna esquerda: dados do cliente/servidor + KeyUser
-        with col_gen1:
-            srv_name = st.text_input("Nome do Servidor / Cliente")
-            plano_sel = st.selectbox("Escolha o Plano", list(PLANOS.keys()))
+            # Coluna esquerda: dados do cliente/servidor + KeyUser
+            with col_gen1:
+                srv_name = st.text_input("Nome do Servidor / Cliente")
+                plano_sel = st.selectbox("Escolha o Plano", list(PLANOS.keys()))
 
-            # Campo temporário para KeyUser (chave de acesso)
-            if "temp_key" not in st.session_state:
-                st.session_state.temp_key = ""
-            ck1, ck2 = st.columns([3, 1])
-            new_k = ck1.text_input("KeyUser (chave de acesso)", value=st.session_state.temp_key)
+                # Campo temporário para KeyUser (chave de acesso)
+                if "temp_key" not in st.session_state:
+                    st.session_state.temp_key = ""
+                ck1, ck2 = st.columns([3, 1])
+                new_k = ck1.text_input("KeyUser (chave de acesso)", value=st.session_state.temp_key)
 
-            # Botão para gerar KeyUser aleatória (12 caracteres A-Z/0-9)
-            if ck2.button("🎲 Gerar"):
-                st.session_state.temp_key = "".join(
-                    secrets.choice(string.ascii_uppercase + string.digits)
-                    for _ in range(12)
-                )
-                st.rerun()
-
-        # Coluna direita: validade e gravação
-        with col_gen2:
-            dias_v = st.number_input("Dias de validade", min_value=1, value=30)
-
-            if st.button("🚀 Registrar e Ativar", use_container_width=True):
-                if not srv_name or not new_k:
-                    st.error("Preencha o nome do servidor/cliente e a KeyUser.")
-                else:
-                    # 1) Gerar ID interno do servidor (server_id) diferente da KeyUser
-                    server_id = "".join(
+                # Botão para gerar KeyUser aleatória (12 caracteres A-Z/0-9)
+                if ck2.button("🎲 Gerar"):
+                    st.session_state.temp_key = "".join(
                         secrets.choice(string.ascii_uppercase + string.digits)
                         for _ in range(12)
                     )
-
-                    # 2) Calcular data de expiração
-                    data_exp = (
-                        get_hora_brasilia() + timedelta(days=dias_v)
-                    ).strftime("%d/%m/%Y")
-
-                    # 3) Registrar no users_db: KeyUser -> dados + server_id
-                    st.session_state.db_users["keys"][new_k] = {
-                        "server": srv_name,
-                        "server_id": server_id,
-                        "expires": data_exp,
-                        "plano": plano_sel,
-                    }
-                    save_db(DB_USERS, st.session_state.db_users)
-
-                    # 4) Inicializar estrutura em db_clients para esse server_id
-                    if server_id not in st.session_state.db_clients:
-                        st.session_state.db_clients[server_id] = {
-                            "ftp": {
-                                "host": "",
-                                "user": "",
-                                "pass": "",
-                                "port": "21",
-                            },
-                            "agendas": [],
-                            "logs": [],
-                            "comunicados": [],
-                            "players": {},
-                        }
-                        save_db(DB_CLIENTS, st.session_state.db_clients)
-
-                    # 5) Limpar temp_key e avisar
-                    st.session_state.temp_key = ""
-                    st.success(
-                        f"Chave para '{srv_name}' ativada!\n\n"
-                        f"- KeyUser (login do cliente): {new_k}\n"
-                        f"- ID interno do servidor: {server_id}"
-                    )
                     st.rerun()
+
+            # Coluna direita: validade e gravação
+            with col_gen2:
+                dias_v = st.number_input("Dias de validade", min_value=1, value=30)
+
+                if st.button("🚀 Registrar e Ativar", use_container_width=True):
+                    if not srv_name or not new_k:
+                        st.error("Preencha o nome do servidor/cliente e a KeyUser.")
+                    else:
+                        # 1) Gerar ID interno do servidor (server_id) diferente da KeyUser
+                        server_id = "".join(
+                            secrets.choice(string.ascii_uppercase + string.digits)
+                            for _ in range(12)
+                        )
+
+                        # 2) Calcular data de expiração
+                        data_exp = (
+                            get_hora_brasilia() + timedelta(days=dias_v)
+                        ).strftime("%d/%m/%Y")
+
+                        # 3) Registrar no users_db: KeyUser -> dados + server_id
+                        st.session_state.db_users["keys"][new_k] = {
+                            "server": srv_name,
+                            "server_id": server_id,
+                            "expires": data_exp,
+                            "plano": plano_sel,
+                        }
+                        save_db(DB_USERS, st.session_state.db_users)
+
+                        # 4) Inicializar estrutura em db_clients para esse server_id
+                        if server_id not in st.session_state.db_clients:
+                            st.session_state.db_clients[server_id] = {
+                                "ftp": {
+                                    "host": "",
+                                    "user": "",
+                                    "pass": "",
+                                    "port": "21",
+                                },
+                                "agendas": [],
+                                "logs": [],
+                                "comunicados": [],
+                                "players": {},
+                            }
+                            save_db(DB_CLIENTS, st.session_state.db_clients)
+
+                        # 5) Limpar temp_key e avisar
+                        st.session_state.temp_key = ""
+                        st.success(
+                            f"Chave para '{srv_name}' ativada!\n\n"
+                            f"- KeyUser (login do cliente): {new_k}\n"
+                            f"- ID interno do servidor: {server_id}"
+                        )
+                        st.rerun()
 
     # --- TAB 2: GESTÃO DE CLIENTES ---
     with tab_adm2:
