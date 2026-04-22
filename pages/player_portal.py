@@ -2,6 +2,8 @@ import streamlit as st
 import json
 import os
 from datetime import datetime
+import requests
+import urllib.parse
 
 # =========================================================
 # 1. CONFIG / AMBIENTE / CONSTANTES
@@ -20,6 +22,19 @@ else:
     else:
         DB_USERS = os.path.join(BASE_DIR, "users_db.json")
         DB_CLIENTS = os.path.join(BASE_DIR, "clients_data.json")
+
+# Discord OAuth2 config
+DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID", "")
+DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET", "")
+DISCORD_REDIRECT_URI = os.environ.get(
+    "DISCORD_REDIRECT_URI",
+    "https://titan-cloud-dayz-dev.onrender.com/player_portal",
+)
+
+DISCORD_AUTHORIZE_URL = "https://discord.com/api/oauth2/authorize"
+DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
+DISCORD_API_BASE = "https://discord.com/api"
+DISCORD_SCOPE = "identify guilds"
 
 
 # =========================================================
@@ -64,6 +79,82 @@ def main():
     st.write(
         "Vincule sua Gamertag ao servidor para liberar acesso à loja, banco e economia."
     )
+
+    # --- PROCESSA RETORNO DO DISCORD (code) ---
+    query_params = st.experimental_get_query_params()
+    code_list = query_params.get("code", [])
+
+    if code_list and DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET and DISCORD_REDIRECT_URI:
+        code = code_list[0]
+
+        data = {
+            "client_id": DISCORD_CLIENT_ID,
+            "client_secret": DISCORD_CLIENT_SECRET,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": DISCORD_REDIRECT_URI,
+            "scope": DISCORD_SCOPE,
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+        token_resp = requests.post(DISCORD_TOKEN_URL, data=data, headers=headers)
+        if token_resp.status_code == 200:
+            token_data = token_resp.json()
+            access_token = token_data["access_token"]
+
+            # /users/@me
+            user_resp = requests.get(
+                f"{DISCORD_API_BASE}/users/@me",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            # /users/@me/guilds
+            guilds_resp = requests.get(
+                f"{DISCORD_API_BASE}/users/@me/guilds",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+            if user_resp.status_code == 200:
+                user_info = user_resp.json()
+                st.session_state.portal_discord_id = user_info.get("id")
+                st.session_state.portal_discord_name = user_info.get("username")
+
+            if guilds_resp.status_code == 200:
+                st.session_state.portal_discord_guilds = guilds_resp.json()
+
+            st.success(
+                f"Conectado com Discord como "
+                f"{st.session_state.get('portal_discord_name', 'Usuário')}"
+            )
+        else:
+            st.error("Falha ao autenticar com o Discord. Tente novamente.")
+
+    # --- BOTÃO / LINK DE LOGIN COM DISCORD ---
+    if not st.session_state.get("portal_discord_id"):
+        st.markdown("### 🔑 Conecte-se com o Discord")
+
+        if not DISCORD_CLIENT_ID or not DISCORD_REDIRECT_URI:
+            st.warning(
+                "Login com Discord ainda não está configurado corretamente. "
+                "Contate o administrador."
+            )
+        else:
+            params = {
+                "client_id": DISCORD_CLIENT_ID,
+                "redirect_uri": DISCORD_REDIRECT_URI,
+                "response_type": "code",
+                "scope": DISCORD_SCOPE,
+                "prompt": "consent",
+            }
+            auth_url = DISCORD_AUTHORIZE_URL + "?" + urllib.parse.urlencode(params)
+            st.markdown(
+                f"[👉 Entrar com Discord]({auth_url})",
+                unsafe_allow_html=True,
+            )
+    else:
+        st.info(
+            f"Você está conectado como **{st.session_state.get('portal_discord_name', 'Usuário')}** "
+            f"(ID: `{st.session_state.get('portal_discord_id')}`)."
+        )
 
     # --- CARREGA BANCOS ---
     users_db = load_db(DB_USERS, {"keys": {}})
@@ -161,7 +252,7 @@ def main():
             players[gamertag_clean] = {
                 "gamertag": gamertag_clean,
                 "apelido": apelido.strip(),
-                "discord_id": "",
+                "discord_id": st.session_state.get("portal_discord_id", ""),
                 "observacoes": observacoes.strip(),
             }
 
