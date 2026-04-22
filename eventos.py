@@ -1957,6 +1957,9 @@ with tab7:
     client_data = db_clients[server_id]
     players = load_players_for_client(client_data)
 
+    # (Opcional) debug para ver o dict bruto de players
+    # st.write("DEBUG players raw:", players)
+
     # Nome amigável do servidor a partir do users_db (se estiver em sessão)
     db_users = st.session_state.get("db_users", {"keys": {}})
     keyuser = st.session_state.get("user_key", "")
@@ -1968,12 +1971,10 @@ with tab7:
         f"servidor: **{nome_servidor}** (ID interno: **{server_id}**)"
     )
 
-    # Converte para DataFrame editável (um DF por servidor)
+    # Converte SEMPRE a partir do JSON mais recente
+    df_players = players_to_df(players)
     df_players_key = f"df_players_{server_id}"
-    if df_players_key not in st.session_state:
-        st.session_state[df_players_key] = players_to_df(players)
-
-    df_players = st.session_state[df_players_key]
+    st.session_state[df_players_key] = df_players
 
     st.markdown("### 📋 Lista de jogadores vinculados")
     st.info(
