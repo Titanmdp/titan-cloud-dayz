@@ -2123,7 +2123,13 @@ with tab8:
                 save_db(DB_CLIENTS, clients_data)
 
                 st.success(f"Ajuste aplicado. Novo saldo em carteira: {saldo_novo} DzCoins.")
-                st.experimental_rerun()
+
+                # Atualiza variáveis locais para refletir o novo saldo
+                saldo_carteira = saldo_novo
+                wallet_reg["balance"] = saldo_novo
+                wallets[gamertag_sel] = wallet_reg
+                client_data["wallets"] = wallets
+                clients_data[server_id] = client_data
 
     with col_aj_bank:
         st.markdown("#### Banco")
@@ -2157,7 +2163,12 @@ with tab8:
                 save_db(DB_CLIENTS, clients_data)
 
                 st.success(f"Ajuste aplicado. Novo saldo no banco: {saldo_novo} DzCoins.")
-                st.experimental_rerun()
+
+                saldo_banco = saldo_novo
+                bank_reg["balance"] = saldo_novo
+                bank[gamertag_sel] = bank_reg
+                client_data["bank"] = bank
+                clients_data[server_id] = client_data
 
     # 6) Histórico consolidado
     st.markdown("### 📜 Histórico de movimentações")
