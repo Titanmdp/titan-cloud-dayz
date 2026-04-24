@@ -295,6 +295,66 @@ def parse_adm_sessions_and_pve(log_text: str):
                 pass
             break
 
+def parse_last_restart_from_adm(log_text: str):
+    """
+    Procura no ADM o último evento de reset/restart/shutdown do servidor.
+    Retorna datetime (timezone FUSO_BR) ou None.
+    Ajuste os padrões de texto conforme o formato real do seu ADM.
+    """
+    if not log_text:
+        return None
+
+    # Padrões comuns de restart/shutdown em logs DayZ (ajustável)
+    reset_keywords = [
+        "Server restart",          # exemplo genérico
+        "Server restarted",
+        "Server shutdown",
+        "Restarting server",
+        "scheduled restart",
+    ]
+
+    # Ex.: "18:00:01 | [XYZ] Server restart ..." -> captura HH:MM:SS
+    re_time_prefix = re.compile(r'^(\d{2}:\d{2}:\d{2})\s*\|')
+
+    # Tentamos inferir a data a partir da linha "AdminLog started on YYYY-MM-DD"
+    log_date = None
+    for line in log_text.splitlines():
+        if "AdminLog started on " in line:
+            try:
+                parte = line.split("AdminLog started on ")[1]
+                data_str = parte.split(" at ")[0].strip()
+                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
+            except Exception:
+                pass
+            break
+
+    if not log_date:
+        # fallback: hoje, se não achar a data no cabeçalho
+        log_date = datetime.now(FUSO_BR).date()
+
+    last_reset_dt = None
+
+    for line in log_text.splitlines():
+        if not any(k.lower() in line.lower() for k in reset_keywords):
+            continue
+
+        m = re_time_prefix.match(line)
+        if not m:
+            continue
+
+        hora_str = m.group(1)
+        try:
+            dt = datetime.strptime(f"{log_date} {hora_str}", "%Y-%m-%d %H:%M:%S")
+            dt = dt.replace(tzinfo=FUSO_BR)
+        except Exception:
+            continue
+
+        # Mantém sempre o mais recente
+        if (last_reset_dt is None) or (dt > last_reset_dt):
+            last_reset_dt = dt
+
+    return last_reset_dt
+
     def ensure_player(name: str):
         if name not in players:
             players[name] = {
@@ -429,10 +489,13 @@ def render_players_online(nitrado_id: str):
             unsafe_allow_html=True,
         )
 
-        if players:
+        if total > 0 and players:
             with st.expander(f"Ver jogadores ({total})", expanded=False):
                 for nome in players:
                     st.markdown(f"◆ `{nome}`")
+        elif total > 0 and not players:
+            # Temos contagem, mas não temos a lista nominal
+            st.caption(f"{total} jogador(es) online, lista de nomes indisponível.")
         else:
             st.caption("Nenhum jogador online no momento.")
 
@@ -440,10 +503,22 @@ def render_players_online(nitrado_id: str):
 
 def render_reset_info(client_data: dict):
     """
-    Mostra informações de reset configuradas pelo admin.
-    client_data deve ter campo 'resets': lista de dicts {dia, horario, descricao}
+    Mostra informações de reset do servidor.
+    - Último reset detectado no ADM (se conseguir ler o log).
+    - Próximo reset estimado pela regra: a cada 2h, em horas pares.
     """
-    resets = client_data.get("resets", [])
+    agora = datetime.now(FUSO_BR)
+
+    # Cálculo da próxima hora par (00, 02, 04, ..., 22)
+    proxima_hora_par = (agora.hour + 1) if (agora.hour % 2 == 1) else (agora.hour + 2)
+    proxima_hora_par = proxima_hora_par % 24
+    proximo_reset = agora.replace(
+        hour=proxima_hora_par, minute=0, second=0, microsecond=0
+    )
+    if proximo_reset <= agora:
+        proximo_reset = proximo_reset + timedelta(hours=2)
+
+    minutos_restantes = int((proximo_reset - agora).total_seconds() // 60)
 
     st.markdown(
         """
@@ -456,14 +531,46 @@ def render_reset_info(client_data: dict):
         unsafe_allow_html=True,
     )
 
-    if not resets:
-        st.caption("Resets não configurados pelo administrador.")
-    else:
-        for r in resets:
-            st.markdown(
-                f"**{r.get('dia', '---')}** às `{r.get('horario', '--:--')}` "
-                f"— {r.get('descricao', '')}",
+    # Tenta ler o último reset real a partir do ADM mais recente
+    ultimo_reset_texto = "Não foi possível detectar o último reset no log."
+    try:
+        ftp_cfg = get_client_ftp_config(client_data)
+        if ftp_cfg:
+            log_text, err = ftp_download_latest_adm(ftp_cfg)
+            if not err and log_text:
+                last_reset_dt = parse_last_restart_from_adm(log_text)
+                if last_reset_dt:
+                    ultimo_reset_texto = (
+                        f"Último reset detectado no log: "
+                        f"<b>{last_reset_dt.strftime('%d/%m/%Y %H:%M:%S')}</b>."
+                    )
+                else:
+                    ultimo_reset_texto = (
+                        "Ainda não encontramos um evento de reset no log mais recente."
+                    )
+        else:
+            ultimo_reset_texto = (
+                "FTP não configurado para este servidor, usando apenas regra de horário."
             )
+    except Exception:
+        # fallback silencioso
+        pass
+
+    st.markdown(
+        f"""
+        <div style="font-size:14px; color:#ddd; margin-bottom:6px;">
+            Próximo reset automático (regra 2h/horas pares):<br>
+            <b>{proximo_reset.strftime("%d/%m/%Y %H:%M")}</b>
+        </div>
+        <div style="font-size:12px; color:#999; margin-bottom:6px;">
+            Falta aproximadamente <b>{minutos_restantes} minuto(s)</b>.
+        </div>
+        <div style="font-size:12px; color:#aaa;">
+            {ultimo_reset_texto}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -679,6 +786,19 @@ def main():
         .stButton > button:hover {
             background-color: #2563eb !important;
             border-color: #2563eb !important;
+        }
+        /* Tabelas (Ranking/Banco) mais fortes no dark */
+        thead tr th {
+            color: #e5e7eb !important;
+            font-weight: 700 !important;
+            background-color: #111827 !important;
+        }
+        tbody tr td {
+            color: #e5e7eb !important;
+            background-color: #020617 !important;
+        }
+        tbody tr:nth-child(odd) td {
+            background-color: #030712 !important;
         }
         </style>
         """
