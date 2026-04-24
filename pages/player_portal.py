@@ -906,7 +906,7 @@ def main():
     st.session_state.portal_gamertag = gamertag_vinculada
 
     # ----------------------------------------------------------
-    # 7.7 HEADER DO JOGADOR
+    # 7.7 HEADER DO JOGADOR (botão Sair + seletor de tema)
     # ----------------------------------------------------------
     col_h1, col_h2, col_h3 = st.columns([3, 1, 1])
 
@@ -932,7 +932,7 @@ def main():
     with col_h2:
         render_relogio()
 
-        with col_h3:
+    with col_h3:
         if st.button("🚪 Sair", use_container_width=True):
             for k in ["portal_discord_id", "portal_discord_name", "portal_discord_guilds",
                       "portal_server_id", "portal_server_nome", "portal_gamertag",
@@ -942,7 +942,6 @@ def main():
 
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
-        # seletor de tema logo abaixo do botão sair
         tema_atual = st.session_state.portal_tema
         label_atual = "Escuro" if tema_atual == "dark" else "Claro"
         st.markdown(
@@ -956,11 +955,13 @@ def main():
             label_visibility="collapsed",
             key="select_tema_portal",
         )
-        mapa = {"Escuro": "dark", "Claro": "light"}
-        tema_novo = mapa.get(novo_tema_label, "dark")
+        mapa_tema = {"Escuro": "dark", "Claro": "light"}
+        tema_novo = mapa_tema.get(novo_tema_label, "dark")
         if tema_novo != tema_atual:
             st.session_state.portal_tema = tema_novo
             st.rerun()
+
+    st.divider()
 
     # ----------------------------------------------------------
     # 7.8 ABAS PRINCIPAIS
