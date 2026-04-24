@@ -856,10 +856,18 @@ with tab1:
         if total_agendas >= limite_agendas:
             st.error(f"Limite do plano atingido ({limite_agendas}).")
         else:
-            uploader_key = f"uploader_{time.time()}"
+            # Uploader com key fixa
             up_file = st.file_uploader(
-                "Arquivo", type=["xml", "json"], key=uploader_key
+                "Arquivo",
+                type=["xml", "json"],
+                key="file_agenda",
             )
+
+            # Mantém o arquivo no session_state entre reruns
+            if up_file is not None:
+                st.session_state["last_uploaded_file"] = up_file
+            elif "last_uploaded_file" in st.session_state:
+                up_file = st.session_state["last_uploaded_file"]
 
             mapa = st.selectbox(
                 "Mapa", ["Chernarus", "Livonia"], key="map_sel_main"
@@ -878,12 +886,19 @@ with tab1:
                 use_container_width=True,
                 key="conf_btn_main",
             ):
-                if up_file:
+                if up_file is None:
+                    st.warning("Selecione um arquivo antes de confirmar.")
+                else:
                     safe_fn = f"{user_id[:5]}_{up_file.name}"
                     path = os.path.join(UPLOAD_DIR, safe_fn)
 
-                    with open(path, "wb") as f:
-                        f.write(up_file.getbuffer())
+                    # Salva o arquivo em disco
+                    try:
+                        with open(path, "wb") as f:
+                            f.write(up_file.getbuffer())
+                    except Exception as e:
+                        st.error(f"Erro ao salvar arquivo em disco: {e}")
+                        st.stop()
 
                     nova_agenda = {
                         "id": str(time.time()),
@@ -905,11 +920,12 @@ with tab1:
                         user_id, f"Agendado: {up_file.name} ({mapa})", "info"
                     )
 
+                    # Limpa o arquivo da sessão para o próximo agendamento
+                    st.session_state.pop("last_uploaded_file", None)
+
                     st.success("Evento agendado com sucesso!")
                     time.sleep(0.5)
                     st.rerun()
-                else:
-                    st.warning("Selecione um arquivo antes de confirmar.")
 
     with c2:
         st.subheader("📋 Lista de Execução")
@@ -952,9 +968,7 @@ with tab1:
                     ):
                         nome_arquivo = agenda["file"]
                         client_data["agendas"] = [
-                            a
-                            for a in client_data["agendas"]
-                            if a["id"] != agenda["id"]
+                            a for a in client_data["agendas"] if a["id"] != agenda["id"]
                         ]
                         save_db(DB_CLIENTS, st.session_state.db_clients)
                         registrar_log(
