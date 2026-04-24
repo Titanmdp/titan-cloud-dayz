@@ -714,9 +714,17 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     "ID do Servidor na Nitrado (opcional, ex.: 18927875)",
                     placeholder="Se preencher, será usado como ID interno do servidor",
                 )
+                discord_guild_id_input = st.text_input(
+                    "ID do Servidor Discord (Guild ID)",
+                    placeholder="Ex.: 1234567890123456789",
+                    help=(
+                        "ID numérico do servidor Discord do administrador. "
+                        "Discord > Configurações > Avançado > Modo desenvolvedor > "
+                        "Botão direito no servidor > Copiar ID do servidor."
+                    ),
+                )
                 plano_sel = st.selectbox("Escolha o Plano", list(PLANOS.keys()))
 
-                # Campo temporário para KeyUser (chave de acesso)
                 if "temp_key" not in st.session_state:
                     st.session_state.temp_key = ""
                 ck1, ck2 = st.columns([3, 1])
@@ -725,7 +733,6 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     value=st.session_state.temp_key,
                 )
 
-                # Botão para gerar KeyUser aleatória (12 caracteres A-Z/0-9)
                 if ck2.button("🎲 Gerar"):
                     st.session_state.temp_key = "".join(
                         secrets.choice(string.ascii_uppercase + string.digits)
@@ -762,6 +769,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                             "server_id": server_id,
                             "expires": data_exp,
                             "plano": plano_sel,
+                            "discord_guild_id": discord_guild_id_input.strip(),
                         }
                         save_db(DB_USERS, st.session_state.db_users)
 
@@ -781,12 +789,12 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                             }
                             save_db(DB_CLIENTS, st.session_state.db_clients)
 
-                        # 5) Limpar temp_key e avisar
                         st.session_state.temp_key = ""
                         st.success(
                             f"Chave para '{srv_name}' ativada!\n\n"
                             f"- KeyUser (login do cliente): {new_k}\n"
-                            f"- ID interno do servidor: {server_id}"
+                            f"- ID interno do servidor: {server_id}\n"
+                            f"- Guild Discord: {discord_guild_id_input.strip() or '(não informado)'}"
                         )
                         st.rerun()
 
@@ -864,6 +872,18 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         key=f"wa_{k}",
                     )
 
+                    st.markdown("#### 🎮 Integração Discord")
+                    new_guild = st.text_input(
+                        "ID do Servidor Discord (Guild ID)",
+                        value=v.get("discord_guild_id", ""),
+                        key=f"guild_{k}",
+                        help=(
+                            "ID numérico do servidor Discord do administrador. "
+                            "Para obter: Discord > Configurações > Avançado > Modo desenvolvedor ativo. "
+                            "Depois clique com botão direito no servidor > Copiar ID do servidor."
+                        ),
+                    )
+
                     if st.button(
                         "💾 Salvar Alterações",
                         key=f"bn_{k}",
@@ -874,6 +894,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         st.session_state.db_users["keys"][k]["limite_extra"] = new_lim
                         st.session_state.db_users["keys"][k]["email"] = new_mail
                         st.session_state.db_users["keys"][k]["whatsapp"] = new_wa
+                        st.session_state.db_users["keys"][k]["discord_guild_id"] = new_guild.strip()
                         save_db(DB_USERS, st.session_state.db_users)
                         st.success("Dados atualizados!")
                         st.rerun()
