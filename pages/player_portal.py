@@ -5,6 +5,9 @@ import time
 import requests
 import urllib.parse
 from datetime import datetime, timezone, timedelta
+from ftplib import FTP
+import io
+import re
 
 # =========================================================
 # 1. CONFIG / AMBIENTE / CONSTANTES
@@ -39,6 +42,9 @@ NITRADO_TOKEN = os.environ.get("NITRADO_TOKEN", "")
 NITRADO_API = "https://api.nitrado.net"
 
 FUSO_BR = timezone(timedelta(hours=-3))
+
+# Pasta onde os logs .ADM ficam no FTP do servidor DayZ
+DAYZ_LOG_DIR = "dayzxb/config"
 
 # =========================================================
 # 2. FUNÇÕES DE PERSISTÊNCIA
@@ -179,6 +185,194 @@ def get_server_info(nitrado_id: str) -> dict:
     return {}
 
 # =========================================================
+# 4.1 FUNÇÕES FTP + LOG ADM (Ranking / Conexão / PvE)
+# =========================================================
+
+def get_client_ftp_config(client_data: dict):
+    """
+    Retorna dict {host, user, pass, port} a partir de client_data["ftp"].
+    """
+    ftp_cfg = client_data.get("ftp", {})
+    host = ftp_cfg.get("host", "")
+    user = ftp_cfg.get("user", "")
+    pwd = ftp_cfg.get("pass", "")
+    port = int(ftp_cfg.get("port", 21) or 21)
+    if not host or not user or not pwd:
+        return None
+    return {"host": host, "user": user, "pass": pwd, "port": port}
+
+def ftp_list_adm_files(ftp_cfg: dict):
+    """
+    Lista arquivos .ADM no diretório DAYZ_LOG_DIR via FTP.
+    Retorna lista de nomes de arquivo (str).
+    """
+    arquivos = []
+    try:
+        with FTP() as ftp:
+            ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=10)
+            ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
+            try:
+                ftp.cwd(DAYZ_LOG_DIR)
+            except Exception:
+                return []
+
+            arquivos = ftp.nlst()
+            arquivos = [a for a in arquivos if a.upper().endswith(".ADM")]
+            # Ordena por nome descendente (log mais recente geralmente tem nome maior)
+            arquivos.sort(reverse=True)
+            return arquivos
+    except Exception:
+        return []
+
+def ftp_download_latest_adm(ftp_cfg: dict):
+    """
+    Baixa o arquivo .ADM mais recente de DAYZ_LOG_DIR e retorna o conteúdo como string.
+    Se não encontrar, retorna None.
+    """
+    arquivos = ftp_list_adm_files(ftp_cfg)
+    if not arquivos:
+        return None, "Nenhum arquivo .ADM encontrado em dayzxb/config."
+
+    ultimo = arquivos[0]
+    buffer = io.BytesIO()
+    try:
+        with FTP() as ftp:
+            ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=10)
+            ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
+            ftp.cwd(DAYZ_LOG_DIR)
+            ftp.retrbinary(f"RETR {ultimo}", buffer.write)
+        texto = buffer.getvalue().decode("utf-8", errors="ignore")
+        return texto, None
+    except Exception as e:
+        return None, f"Erro ao baixar .ADM: {e}"
+
+def parse_adm_sessions_and_pve(log_text: str):
+    """
+    Parser simples do ADM baseado nos exemplos enviados.
+    Extrai:
+      - sessões (tempo de jogo total)
+      - mortes/suicídios (para sobrevência aproximada)
+      - hits por Infected (PvE básico)
+
+    Retorna dict:
+    {
+      "players": {
+        "Gamertag": {
+           "total_play_seconds": int,
+           "session_count": int,
+           "last_connect": datetime|None,
+           "last_disconnect": datetime|None,
+           "last_death_time": datetime|None,
+           "pve_hits": int,
+           "pve_suicides": int,
+        }, ...
+      }
+    }
+    """
+    players = {}
+
+    # expressões simples para extrair dados
+    # Ex: 11:08:04 | Player "Tailander5536" ...
+    re_player_line = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)"')
+    # Eventos chave
+    key_connecting = "is connecting"
+    key_connected = "is connected"
+    key_disconnected = "has been disconnected"
+    key_suicide_emote = "performed EmoteSuicide"
+    key_committed_suicide = "committed suicide"
+    key_hit_infected = "hit by Infected"
+
+    # Para datas, usamos a data do cabeçalho "AdminLog started on YYYY-MM-DD"
+    log_date = None
+    for line in log_text.splitlines():
+        if "AdminLog started on " in line:
+            # Example: AdminLog started on 2026-04-24 at 11:07:02
+            try:
+                parte = line.split("AdminLog started on ")[1]
+                data_str = parte.split(" at ")[0].strip()
+                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
+            except Exception:
+                pass
+            break
+
+    def ensure_player(name: str):
+        if name not in players:
+            players[name] = {
+                "total_play_seconds": 0,
+                "session_count": 0,
+                "last_connect": None,
+                "last_disconnect": None,
+                "last_death_time": None,
+                "pve_hits": 0,
+                "pve_suicides": 0,
+            }
+        return players[name]
+
+    def parse_datetime_from_time_str(tstr: str):
+        # Se não conseguir usar data do log, cai para hoje
+        base_date = log_date or datetime.now(FUSO_BR).date()
+        try:
+            dt = datetime.strptime(f"{base_date} {tstr}", "%Y-%m-%d %H:%M:%S")
+            return dt.replace(tzinfo=FUSO_BR)
+        except Exception:
+            return None
+
+    for line in log_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        m = re_player_line.match(line)
+        if not m:
+            continue
+
+        hora_str, nome = m.group(1), m.group(2)
+        dt_evento = parse_datetime_from_time_str(hora_str)
+        p = ensure_player(nome)
+
+        if key_connecting in line:
+            # Consideramos início de "sessão potencial"
+            pass
+
+        if key_connected in line:
+            # Marca início de sessão
+            p["last_connect"] = dt_evento
+
+        if key_disconnected in line:
+            # Fecha sessão, soma tempo
+            if p.get("last_connect") and dt_evento:
+                delta = (dt_evento - p["last_connect"]).total_seconds()
+                if delta > 0:
+                    p["total_play_seconds"] += int(delta)
+                    p["session_count"] += 1
+            p["last_disconnect"] = dt_evento
+            p["last_connect"] = None
+
+        if key_suicide_emote in line or key_committed_suicide in line:
+            # Consideramos suicídio como "morte" para sobrevivência
+            p["pve_suicides"] += 1
+            p["last_death_time"] = dt_evento
+
+        if key_hit_infected in line:
+            p["pve_hits"] += 1
+
+    # Se alguém estiver conectado sem disconnect até o final do log,
+    # podemos (opcionalmente) estimar tempo até a última linha; por enquanto não somamos.
+    return {"players": players}
+
+def format_seconds_hhmmss(segundos: int):
+    if segundos < 0:
+        segundos = 0
+    h = segundos // 3600
+    m = (segundos % 3600) // 60
+    s = segundos % 60
+    if h >= 24:
+        dias = h // 24
+        h_rest = h % 24
+        return f"{dias}d {h_rest:02d}:{m:02d}:{s:02d}"
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+# =========================================================
 # 5. COMPONENTES DE UI
 # =========================================================
 
@@ -272,7 +466,6 @@ def render_reset_info(client_data: dict):
             )
 
     st.markdown("</div>", unsafe_allow_html=True)
-
 
 # =========================================================
 # 6. ABA BANCO DZCOINS
@@ -433,7 +626,6 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
                 save_db(DB_CLIENTS, clients_db)
                 st.success(f"✅ {valor} DzCoins transferidos para **{destino}**!")
                 st.rerun()
-
 
 # =========================================================
 # 7. UI PRINCIPAL
@@ -601,14 +793,12 @@ def main():
     # ----------------------------------------------------------
     # 7.6 VERIFICA SE JOGADOR JÁ TEM GAMERTAG VINCULADA
     # ----------------------------------------------------------
-    # Busca gamertag vinculada ao discord_id do jogador logado
     gamertag_vinculada = None
     for gt, info in players.items():
         if str(info.get("discord_id", "")) == str(discord_id):
             gamertag_vinculada = gt
             break
 
-    # Se ainda não tem vínculo, mostra formulário
     if not gamertag_vinculada:
         st.markdown(
             f"""
@@ -645,7 +835,6 @@ def main():
                 st.rerun()
         st.stop()
 
-    # Salva gamertag na sessão
     st.session_state.portal_gamertag = gamertag_vinculada
 
     # ----------------------------------------------------------
@@ -688,9 +877,10 @@ def main():
     # ----------------------------------------------------------
     # 7.8 ABAS PRINCIPAIS
     # ----------------------------------------------------------
-    tab_inicio, tab_banco = st.tabs([
+    tab_inicio, tab_banco, tab_ranking = st.tabs([
         "🏠 Início",
         "🏦 Banco DzCoins",
+        "🏆 Ranking",
     ])
 
     # --- ABA INÍCIO ---
@@ -720,10 +910,105 @@ def main():
     # --- ABA BANCO ---
     with tab_banco:
         st.markdown(f"### 🏦 Banco DzCoins — {gamertag_vinculada}")
-        # Recarrega dados frescos do disco
         clients_db_fresh = load_db(DB_CLIENTS, {})
         client_data_fresh = clients_db_fresh.get(server_id, {})
         render_banco(client_data_fresh, clients_db_fresh, server_id, gamertag_vinculada)
+
+    # --- ABA RANKING ---
+    with tab_ranking:
+        st.markdown("### 🏆 Ranking — Tempo de Jogo & Sobrevivência")
+
+        ftp_cfg = get_client_ftp_config(client_data)
+        if not ftp_cfg:
+            st.warning("FTP do servidor não está configurado para este cliente. Peça ao admin para configurar no painel.")
+        else:
+            @st.fragment(run_every=300)
+            def _ranking_fragment():
+                with st.spinner("Carregando dados de ranking a partir dos logs do servidor..."):
+                    log_text, err = ftp_download_latest_adm(ftp_cfg)
+                if err or not log_text:
+                    st.error(f"Não foi possível ler o log .ADM: {err or 'conteúdo vazio'}")
+                    return
+
+                parsed = parse_adm_sessions_and_pve(log_text)
+                pstats = parsed.get("players", {})
+
+                if not pstats:
+                    st.info("Nenhuma estatística encontrada no log .ADM mais recente.")
+                    return
+
+                # Monta listas para ranking
+                ranking_play = []
+                ranking_surv = []
+
+                for nome, dados in pstats.items():
+                    total_play = dados.get("total_play_seconds", 0)
+                    # Sobrevivência: tempo entre primeira conexão e última morte (se existir)
+                    last_death = dados.get("last_death_time")
+                    first_connect = dados.get("last_connect")  # pode não ser ideal; simplificado
+                    # Como não guardamos first_connect, usamos total_play como principal métrica
+                    ranking_play.append({
+                        "Jogador": nome,
+                        "Tempo de jogo": format_seconds_hhmmss(total_play),
+                        "Tempo (segundos)": total_play,
+                        "Sessões": dados.get("session_count", 0),
+                        "Hits PvE": dados.get("pve_hits", 0),
+                        "Suicídios": dados.get("pve_suicides", 0),
+                    })
+
+                    # Para ranking de sobrevivência, ainda sem first_connect, usamos "total_play" como proxy
+                    ranking_surv.append({
+                        "Jogador": nome,
+                        "Tempo de sobrevivência": format_seconds_hhmmss(total_play),
+                        "Tempo (segundos)": total_play,
+                        "Suicídios": dados.get("pve_suicides", 0),
+                    })
+
+                ranking_play_sorted = sorted(ranking_play, key=lambda x: x["Tempo (segundos)"], reverse=True)[:10]
+                ranking_surv_sorted = sorted(ranking_surv, key=lambda x: x["Tempo (segundos)"], reverse=True)[:10]
+
+                col_r1, col_r2 = st.columns(2)
+
+                with col_r1:
+                    st.markdown("#### ⏱️ Tempo de jogo total — Top 10")
+                    if ranking_play_sorted:
+                        st.table([{
+                            "#": idx + 1,
+                            "Jogador": r["Jogador"],
+                            "Tempo de jogo": r["Tempo de jogo"],
+                            "Sessões": r["Sessões"],
+                            "Hits PvE": r["Hits PvE"],
+                            "Suicídios": r["Suicídios"],
+                        } for idx, r in enumerate(ranking_play_sorted)])
+                    else:
+                        st.info("Sem dados de tempo de jogo ainda neste log.")
+
+                with col_r2:
+                    st.markdown("#### 🧟 Tempo de sobrevivência (proxy) — Top 10")
+                    if ranking_surv_sorted:
+                        st.table([{
+                            "#": idx + 1,
+                            "Jogador": r["Jogador"],
+                            "Tempo de sobrevivência": r["Tempo de sobrevivência"],
+                            "Suicídios": r["Suicídios"],
+                        } for idx, r in enumerate(ranking_surv_sorted)])
+                    else:
+                        st.info("Sem dados de sobrevivência ainda neste log.")
+
+                # Destaque para o jogador logado
+                st.markdown("---")
+                st.markdown("#### 👤 Meu desempenho no log atual")
+
+                meu_reg = next((r for r in ranking_play if r["Jogador"] == gamertag_vinculada), None)
+                if not meu_reg:
+                    st.info("Ainda não há dados seus neste log (nenhuma sessão registrada).")
+                else:
+                    col_m1, col_m2, col_m3 = st.columns(3)
+                    col_m1.metric("⏱️ Tempo de jogo", meu_reg["Tempo de jogo"])
+                    col_m2.metric("🔁 Sessões", meu_reg["Sessões"])
+                    col_m3.metric("🧟 Hits PvE", meu_reg["Hits PvE"])
+
+            _ranking_fragment()
 
 
 if __name__ == "__main__":
