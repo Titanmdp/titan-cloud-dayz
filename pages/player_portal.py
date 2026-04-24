@@ -638,28 +638,78 @@ def main():
         layout="wide",
     )
 
-    # CSS global dark theme
-    st.markdown(
-        """
+    # ----------------------------------------------------------
+    # TEMA DINÂMICO (Claro / Escuro)
+    # ----------------------------------------------------------
+    if "portal_tema" not in st.session_state:
+        st.session_state.portal_tema = "dark"  # padrão inicial
+
+    tema_escolhido = st.session_state.portal_tema
+
+    col_theme_left, col_theme_right = st.columns([4, 1])
+    with col_theme_right:
+        novo_tema = st.selectbox(
+            "Tema",
+            ["Escuro", "Claro"],
+            index=0 if tema_escolhido == "dark" else 1,
+            label_visibility="collapsed",
+        )
+        tema_map = {"Escuro": "dark", "Claro": "light"}
+        tema_novo_cod = tema_map.get(novo_tema, "dark")
+        if tema_novo_cod != tema_escolhido:
+            st.session_state.portal_tema = tema_novo_cod
+            st.rerun()
+
+    tema_escolhido = st.session_state.portal_tema
+
+    if tema_escolhido == "dark":
+        # Dark: fundo escuro neutro, cartões azul petróleo, texto claro
+        css = """
         <style>
-        .stApp { background-color: #0d0d1a; color: #e0e0e0; }
+        .stApp { background-color: #050510; color: #f0f0f0; }
         .stTabs [data-baseweb="tab"] {
-            font-size: 15px; font-weight: bold; color: #aaa;
+            font-size: 15px; font-weight: bold; color: #bbbbbb;
         }
         .stTabs [aria-selected="true"] {
-            color: #00d4ff !important;
-            border-bottom: 2px solid #00d4ff !important;
+            color: #00e0ff !important;
+            border-bottom: 2px solid #00e0ff !important;
         }
         div[data-testid="metric-container"] {
-            background: #1a1a2e;
+            background: #111827;
             border-radius: 10px;
             padding: 12px;
-            border: 1px solid #333;
+            border: 1px solid #374151;
+        }
+        .block-container {
+            padding-top: 1rem;
         }
         </style>
-        """,
-        unsafe_allow_html=True,
-    )
+        """
+    else:
+        # Light: fundo claro, cartões brancos, texto escuro
+        css = """
+        <style>
+        .stApp { background-color: #f4f4f8; color: #202020; }
+        .stTabs [data-baseweb="tab"] {
+            font-size: 15px; font-weight: bold; color: #555555;
+        }
+        .stTabs [aria-selected="true"] {
+            color: #0f766e !important;
+            border-bottom: 2px solid #0f766e !important;
+        }
+        div[data-testid="metric-container"] {
+            background: #ffffff;
+            border-radius: 10px;
+            padding: 12px;
+            border: 1px solid #d1d5db;
+        }
+        .block-container {
+            padding-top: 1rem;
+        }
+        </style>
+        """
+
+    st.markdown(css, unsafe_allow_html=True)
 
     # ----------------------------------------------------------
     # 7.1 PROCESSAR RETORNO DISCORD (code na URL)
