@@ -62,6 +62,25 @@ def load_players_for_client(client_data_obj):
         client_data_obj["players"] = {}
     return client_data_obj["players"]
 
+# =========================================================
+# 3.1 VALIDAÇÃO DE MEMBERSHIP NO SERVIDOR DISCORD DO ADMIN
+# =========================================================
+
+def validar_membro_discord(portal_guilds: list, discord_guild_id: str) -> bool:
+    """
+    Verifica se o jogador autenticado está no servidor Discord
+    do administrador (cliente Titan Cloud).
+
+    Args:
+        portal_guilds: lista de guilds retornada pelo OAuth2 (/users/@me/guilds)
+        discord_guild_id: ID do servidor Discord cadastrado pelo admin (string)
+
+    Returns:
+        True se o jogador estiver no servidor, False caso contrário.
+    """
+    if not discord_guild_id or not portal_guilds:
+        return False
+    return any(str(g.get("id")) == str(discord_guild_id) for g in portal_guilds)
 
 # =========================================================
 # 4. UI PRINCIPAL DO PORTAL DO JOGADOR
@@ -223,15 +242,57 @@ def main():
     else:
         client_data = None
 
-    # -----------------------------------------------------
-    # 4.2 VÍNCULO DE GAMERTAG AO SERVIDOR
-    # -----------------------------------------------------
-    if server_id and client_data:
+    # --- SEÇÃO 4.2: VÍNCULO DE GAMERTAG ---
+    server_id = st.session_state.get("portal_server_id")
+
+    if server_id:
+        # Carrega dados do cliente/servidor selecionado
+        client_data = clients_db.get(server_id, {})
         players = load_players_for_client(client_data)
 
-        st.markdown("### 🔗 Vincular Gamertag")
-        st.info(
-            f"Servidor selecionado: **{st.session_state.portal_server_nome or server_id}**"
+        # Recupera o Guild ID do Discord cadastrado pelo admin
+        discord_guild_id = None
+        for key_data in users_db.get("keys", {}).values():
+            if str(key_data.get("server_id", "")) == str(server_id):
+                discord_guild_id = key_data.get("discord_guild_id", "")
+                break
+
+        # --- VALIDAÇÃO DE MEMBERSHIP ---
+        portal_guilds = st.session_state.get("portal_discord_guilds", [])
+        discord_id_jogador = st.session_state.get("portal_discord_id")
+
+        if discord_guild_id:
+            # Admin configurou um servidor Discord — validação obrigatória
+            if not discord_id_jogador:
+                st.warning(
+                    "⚠️ Este servidor exige que você esteja conectado com o Discord "
+                    "para vincular sua Gamertag. Faça login acima."
+                )
+                st.stop()
+
+            membro_validado = validar_membro_discord(portal_guilds, discord_guild_id)
+
+            if not membro_validado:
+                st.error(
+                    "❌ Seu Discord não está no servidor oficial deste administrador.\n\n"
+                    "Para vincular sua Gamertag, você precisa ser membro do servidor Discord "
+                    "informado pelo administrador. Entre no servidor e tente novamente."
+                )
+                st.stop()
+            else:
+                st.success("✅ Discord validado — você é membro do servidor oficial!")
+        else:
+            # Admin não configurou Guild ID — validação opcional (aviso informativo)
+            if not discord_id_jogador:
+                st.info(
+                    "ℹ️ Conectar seu Discord é opcional para este servidor, "
+                    "mas recomendado para acesso futuro à Loja e Banco."
+                )
+
+        # --- FORMULÁRIO DE VÍNCULO ---
+        st.markdown("### 🎮 Vincular sua Gamertag")
+        st.write(
+            "Preencha sua Gamertag exatamente como aparece no console para vincular ao servidor."
         )
 
         with st.form("form_vinculo"):
@@ -266,9 +327,11 @@ def main():
                 f"Gamertag **{gamertag_clean}** vinculada com sucesso ao servidor "
                 f"**{st.session_state.portal_server_nome or server_id}**!"
             )
-            st.info(
-                "No futuro, você poderá usar a Loja e o Banco deste servidor quando essas funções estiverem ativas."
-            )
+    else:
+        st.info(
+            "Nenhum servidor selecionado ainda. Informe o nome do servidor e clique em "
+            "'Confirmar servidor'."
+        )
 
         # -------------------------------------------------
         # 4.3 MEU BANCO (JOGADOR)
