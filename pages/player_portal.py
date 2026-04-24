@@ -1,9 +1,10 @@
 import streamlit as st
 import json
 import os
-from datetime import datetime
+import time
 import requests
 import urllib.parse
+from datetime import datetime, timezone, timedelta
 
 # =========================================================
 # 1. CONFIG / AMBIENTE / CONSTANTES
@@ -29,11 +30,15 @@ DISCORD_REDIRECT_URI = os.environ.get(
     "DISCORD_REDIRECT_URI",
     "https://titan-cloud-dayz-dev.onrender.com/player_portal",
 )
-
 DISCORD_AUTHORIZE_URL = "https://discord.com/api/oauth2/authorize"
 DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
 DISCORD_API_BASE = "https://discord.com/api"
 DISCORD_SCOPE = "identify guilds"
+
+NITRADO_TOKEN = os.environ.get("NITRADO_TOKEN", "")
+NITRADO_API = "https://api.nitrado.net"
+
+FUSO_BR = timezone(timedelta(hours=-3))
 
 # =========================================================
 # 2. FUNÇÕES DE PERSISTÊNCIA
@@ -64,18 +69,12 @@ def load_players_for_client(client_data_obj):
         client_data_obj["players"] = {}
     return client_data_obj["players"]
 
-
 def validar_membro_discord(portal_guilds: list, discord_guild_id: str) -> bool:
     if not discord_guild_id or not portal_guilds:
         return False
     return any(str(g.get("id")) == str(discord_guild_id) for g in portal_guilds)
 
-
-def trocar_code_por_token(code: str) -> dict | None:
-    """
-    Troca o code retornado pelo Discord pelo access_token.
-    Retorna o dict com user_info e guilds, ou None em caso de erro.
-    """
+def trocar_code_por_token(code: str):
     data = {
         "client_id": DISCORD_CLIENT_ID,
         "client_secret": DISCORD_CLIENT_SECRET,
@@ -85,262 +84,205 @@ def trocar_code_por_token(code: str) -> dict | None:
         "scope": DISCORD_SCOPE,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-
     try:
         token_resp = requests.post(DISCORD_TOKEN_URL, data=data, headers=headers, timeout=10)
     except Exception as e:
-        st.error(f"Erro de conexão com o Discord: {e}")
+        st.error(f"Erro de conexão com Discord: {e}")
         return None
 
     if token_resp.status_code != 200:
-        st.error(f"Erro ao autenticar com Discord (status {token_resp.status_code}): {token_resp.text}")
+        st.error(f"Erro Discord (status {token_resp.status_code})")
         return None
 
-    token_data = token_resp.json()
-    access_token = token_data.get("access_token")
+    access_token = token_resp.json().get("access_token")
     if not access_token:
-        st.error("Discord não retornou access_token.")
         return None
 
     auth_header = {"Authorization": f"Bearer {access_token}"}
-
     try:
         user_resp = requests.get(f"{DISCORD_API_BASE}/users/@me", headers=auth_header, timeout=10)
         guilds_resp = requests.get(f"{DISCORD_API_BASE}/users/@me/guilds", headers=auth_header, timeout=10)
     except Exception as e:
-        st.error(f"Erro ao buscar dados do Discord: {e}")
+        st.error(f"Erro ao buscar dados Discord: {e}")
         return None
 
     if user_resp.status_code != 200:
-        st.error("Não foi possível obter informações do usuário Discord.")
         return None
 
     user_info = user_resp.json()
     guilds = guilds_resp.json() if guilds_resp.status_code == 200 else []
-
     return {
         "discord_id": user_info.get("id"),
         "discord_name": user_info.get("username"),
+        "discord_avatar": user_info.get("avatar"),
         "guilds": guilds,
     }
 
 # =========================================================
-# 4. UI PRINCIPAL
+# 4. FUNÇÕES NITRADO API
 # =========================================================
 
-def main():
-    st.set_page_config(
-        page_title="Titan Cloud Pro - Portal do Jogador",
-        page_icon="🎮",
-        layout="centered",
-    )
+def nitrado_headers():
+    return {"Authorization": f"Bearer {NITRADO_TOKEN}"}
 
-    st.title("🎮 Titan Cloud Pro - Portal do Jogador")
-    st.markdown("Vincule sua Gamertag ao servidor para liberar acesso à loja, banco e economia.")
-
-    # ---------------------------------------------------------
-    # 4.1 PROCESSAR RETORNO DO DISCORD (code na URL)
-    # Isso precisa acontecer ANTES de qualquer st.stop()
-    # ---------------------------------------------------------
-    query_params = st.query_params
-
-    # No Streamlit atual, query_params.get() retorna string direta
-    code = query_params.get("code")
-
-    if code and not st.session_state.get("portal_discord_id"):
-        with st.spinner("Autenticando com o Discord..."):
-            resultado = trocar_code_por_token(code)
-
-        if resultado:
-            st.session_state.portal_discord_id = resultado["discord_id"]
-            st.session_state.portal_discord_name = resultado["discord_name"]
-            st.session_state.portal_discord_guilds = resultado["guilds"]
-
-            # Limpa o code da URL para não reprocessar no próximo rerun
-            st.query_params.clear()
-            st.rerun()
-        else:
-            # Limpa URL mesmo em caso de erro para não ficar em loop
-            st.query_params.clear()
-
-    # ---------------------------------------------------------
-    # 4.2 SEÇÃO DE LOGIN COM DISCORD
-    # ---------------------------------------------------------
-    st.markdown("### 🔑 Conecte-se com o Discord")
-
-    if not st.session_state.get("portal_discord_id"):
-        if not DISCORD_CLIENT_ID or not DISCORD_REDIRECT_URI:
-            st.warning("Login com Discord ainda não está configurado. Contate o administrador.")
-        else:
-            params = {
-                "client_id": DISCORD_CLIENT_ID,
-                "redirect_uri": DISCORD_REDIRECT_URI,
-                "response_type": "code",
-                "scope": DISCORD_SCOPE,
-                "prompt": "consent",
-            }
-            auth_url = DISCORD_AUTHORIZE_URL + "?" + urllib.parse.urlencode(params)
-            st.markdown(
-                f"""
-                <a href="{auth_url}" target="_self" style="
-                    display: inline-block;
-                    background-color: #5865F2;
-                    color: white;
-                    padding: 10px 20px;
-                    border-radius: 8px;
-                    text-decoration: none;
-                    font-weight: bold;
-                    font-size: 16px;
-                ">
-                👾 Entrar com Discord
-                </a>
-                """,
-                unsafe_allow_html=True,
-            )
-        st.stop()
-
-    else:
-        col_disc, col_logout = st.columns([3, 1])
-        with col_disc:
-            st.success(
-                f"✅ Conectado como **{st.session_state.get('portal_discord_name')}** "
-                f"(ID: `{st.session_state.get('portal_discord_id')}`)"
-            )
-        with col_logout:
-            if st.button("🚪 Sair", use_container_width=True):
-                for k in ["portal_discord_id", "portal_discord_name", "portal_discord_guilds",
-                          "portal_server_id", "portal_server_nome", "portal_gamertag"]:
-                    st.session_state.pop(k, None)
-                st.rerun()
-
-    # ---------------------------------------------------------
-    # 4.3 CARREGA BANCOS DE DADOS
-    # ---------------------------------------------------------
-    users_db = load_db(DB_USERS, {"keys": {}})
-    clients_db = load_db(DB_CLIENTS, {})
-
-    if not users_db.get("keys"):
-        st.error("Nenhum servidor disponível no momento.")
-        return
-
-    # ---------------------------------------------------------
-    # 4.4 SELEÇÃO DO SERVIDOR
-    # ---------------------------------------------------------
-    st.markdown("### 🏷️ Escolha o servidor")
-
-    nome_para_server_id = {}
-    for keyuser, data in users_db.get("keys", {}).items():
-        server_name = str(data.get("server", "")).strip()
-        server_id = str(data.get("server_id", "")).strip() or keyuser
-        if server_name and server_id:
-            nome_para_server_id[server_name.lower()] = server_id
-
-    if not nome_para_server_id:
-        st.error("Não há servidores configurados. Contate o administrador.")
-        return
-
-    nome_servidor_input = st.text_input("Nome do servidor (exatamente como informado pelo admin)", "")
-
-    if st.button("Confirmar servidor"):
-        nome_limpo = nome_servidor_input.strip().lower()
-        if not nome_limpo:
-            st.error("Preencha o nome do servidor.")
-        else:
-            sid = nome_para_server_id.get(nome_limpo)
-            if not sid:
-                st.error("Servidor não encontrado. Verifique o nome com o administrador.")
-            elif sid not in clients_db:
-                st.error("Servidor ainda não configurado no sistema. Avise o administrador.")
+def get_players_online(nitrado_id: str) -> dict:
+    """
+    Busca jogadores online via API Nitrado.
+    Retorna dict com 'players' (lista de nomes) e 'total'.
+    """
+    if not NITRADO_TOKEN:
+        return {"players": [], "total": 0, "erro": "Token não configurado"}
+    try:
+        url = f"{NITRADO_API}/services/{nitrado_id}/gameservers"
+        resp = requests.get(url, headers=nitrado_headers(), timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            gs = data.get("data", {}).get("gameserver", {})
+            query = gs.get("query", {})
+            players_raw = query.get("players", [])
+            # players_raw pode ser lista de dicts ou lista de strings dependendo do jogo
+            if players_raw and isinstance(players_raw[0], dict):
+                nomes = [p.get("name", "?") for p in players_raw]
             else:
-                st.session_state.portal_server_id = sid
-                st.session_state.portal_server_nome = nome_limpo.title()
-                st.success(f"Servidor encontrado: **{nome_limpo.title()}**")
-
-    server_id = st.session_state.get("portal_server_id")
-    if not server_id:
-        st.stop()
-
-    client_data = clients_db.get(server_id, {})
-    players = load_players_for_client(client_data)
-
-    # ---------------------------------------------------------
-    # 4.5 VALIDAÇÃO DE MEMBERSHIP NO DISCORD DO SERVIDOR
-    # ---------------------------------------------------------
-
-    # Busca o guild_id configurado pelo admin para este servidor
-    discord_guild_id = None
-    for key_data in users_db.get("keys", {}).values():
-        if str(key_data.get("server_id", "")) == str(server_id):
-            discord_guild_id = key_data.get("discord_guild_id", "")
-            break
-
-    portal_guilds = st.session_state.get("portal_discord_guilds", [])
-
-    if discord_guild_id:
-        membro_validado = validar_membro_discord(portal_guilds, discord_guild_id)
-        if not membro_validado:
-            st.error(
-                "❌ Seu Discord não está no servidor oficial deste administrador.\n\n"
-                "Entre no servidor Discord e tente novamente."
-            )
-            st.stop()
-        else:
-            st.success("✅ Discord validado — você é membro do servidor oficial!")
-    else:
-        st.info("ℹ️ Este servidor não exige validação de Discord, mas recomendamos conectar.")
-
-    # ---------------------------------------------------------
-    # 4.6 FORMULÁRIO DE VÍNCULO DE GAMERTAG
-    # ---------------------------------------------------------
-    st.markdown("### 🎮 Vincular sua Gamertag")
-    st.markdown("Preencha sua Gamertag exatamente como aparece no console.")
-
-    with st.form("form_vinculo"):
-        gamertag = st.text_input("Gamertag (exatamente como aparece no console)", "")
-        apelido = st.text_input("Apelido / Nome no Discord (opcional)", "")
-        observacoes = st.text_area("Observações (opcional)", "")
-        submitted = st.form_submit_button("Vincular")
-
-    if submitted:
-        gamertag_clean = gamertag.strip()
-        if not gamertag_clean:
-            st.error("Preencha a Gamertag.")
-        else:
-            players[gamertag_clean] = {
-                "gamertag": gamertag_clean,
-                "apelido": apelido.strip(),
-                "discord_id": st.session_state.get("portal_discord_id", ""),
-                "observacoes": observacoes.strip(),
+                nomes = [str(p) for p in players_raw]
+            return {
+                "players": nomes,
+                "total": query.get("player_current", len(nomes)),
+                "max": query.get("player_max", 0),
+                "status": gs.get("status", "unknown"),
             }
-            client_data["players"] = players
-            clients_db[server_id] = client_data
-            save_db(DB_CLIENTS, clients_db)
-            st.session_state.portal_gamertag = gamertag_clean
-            st.success(
-                f"✅ Gamertag **{gamertag_clean}** vinculada com sucesso ao servidor "
-                f"**{st.session_state.get('portal_server_nome', server_id)}**!"
+        else:
+            return {"players": [], "total": 0, "erro": f"API status {resp.status_code}"}
+    except Exception as e:
+        return {"players": [], "total": 0, "erro": str(e)}
+
+def get_server_info(nitrado_id: str) -> dict:
+    """
+    Busca informações gerais do servidor (nome, status, próximo restart).
+    """
+    if not NITRADO_TOKEN:
+        return {}
+    try:
+        url = f"{NITRADO_API}/services/{nitrado_id}/gameservers"
+        resp = requests.get(url, headers=nitrado_headers(), timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            gs = data.get("data", {}).get("gameserver", {})
+            return {
+                "nome": gs.get("query", {}).get("server_name", "Servidor DayZ"),
+                "status": gs.get("status", "unknown"),
+                "slots": gs.get("slots", 0),
+                "mapa": gs.get("query", {}).get("map", ""),
+            }
+    except Exception:
+        pass
+    return {}
+
+# =========================================================
+# 5. COMPONENTES DE UI
+# =========================================================
+
+def render_relogio():
+    """Relógio ao vivo de Brasília usando st.fragment."""
+    @st.fragment(run_every="1s")
+    def _clock():
+        agora = datetime.now(FUSO_BR)
+        st.markdown(
+            f"""
+            <div style="text-align:center; padding: 8px 16px;
+                        background: #1a1a2e; border-radius: 10px;
+                        border: 1px solid #444;">
+                <span style="font-size:13px; color:#aaa;">🕒 Horário Brasília</span><br>
+                <span style="font-size:22px; font-weight:bold; color:#00d4ff; font-family:monospace;">
+                    {agora.strftime("%H:%M:%S")}
+                </span><br>
+                <span style="font-size:12px; color:#888;">
+                    {agora.strftime("%d/%m/%Y")}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    _clock()
+
+def render_players_online(nitrado_id: str):
+    """Card de Players Online com auto-refresh a cada 60s."""
+    @st.fragment(run_every=60)
+    def _players():
+        dados = get_players_online(nitrado_id)
+
+        if "erro" in dados:
+            st.warning(f"⚠️ Players Online indisponível: {dados['erro']}")
+            return
+
+        total = dados.get("total", 0)
+        players = dados.get("players", [])
+        maximo = dados.get("max", 0)
+
+        st.markdown(
+            f"""
+            <div style="background:#1a1a2e; border-radius:10px; padding:14px;
+                        border:1px solid #444; margin-bottom:8px;">
+                <div style="font-size:13px; color:#aaa; margin-bottom:4px;">
+                    🌐 Players Online
+                </div>
+                <div style="font-size:28px; font-weight:bold; color:#00ff88;">
+                    {total}
+                    <span style="font-size:14px; color:#666;">/ {maximo}</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if players:
+            with st.expander(f"Ver jogadores ({total})", expanded=False):
+                for nome in players:
+                    st.markdown(f"◆ `{nome}`")
+        else:
+            st.caption("Nenhum jogador online no momento.")
+
+    _players()
+
+def render_reset_info(client_data: dict):
+    """
+    Mostra informações de reset configuradas pelo admin.
+    client_data deve ter campo 'resets': lista de dicts {dia, horario, descricao}
+    """
+    resets = client_data.get("resets", [])
+
+    st.markdown(
+        """
+        <div style="background:#1a1a2e; border-radius:10px; padding:14px;
+                    border:1px solid #444; margin-bottom:8px;">
+            <div style="font-size:13px; color:#aaa; margin-bottom:8px;">
+                🔄 Reset do Servidor
+            </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if not resets:
+        st.caption("Resets não configurados pelo administrador.")
+    else:
+        for r in resets:
+            st.markdown(
+                f"**{r.get('dia', '---')}** às `{r.get('horario', '--:--')}` "
+                f"— {r.get('descricao', '')}",
             )
 
-    # ---------------------------------------------------------
-    # 4.7 MEU BANCO
-    # ---------------------------------------------------------
-    st.markdown("---")
-    st.markdown("## 💼 Meu Banco")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    gamertag_banco = st.session_state.get("portal_gamertag", "")
-    gamertag_banco_input = st.text_input(
-        "Gamertag para acessar o banco",
-        value=gamertag_banco,
-        help="Deixe em branco para usar a Gamertag vinculada nesta sessão."
-    )
-    gamertag_banco_clean = gamertag_banco_input.strip()
 
-    if not gamertag_banco_clean:
-        st.info("Informe uma Gamertag vinculada para ver o banco.")
-        return
+# =========================================================
+# 6. ABA BANCO DZCOINS
+# =========================================================
 
-    if gamertag_banco_clean not in players:
-        st.warning("Esta Gamertag não está vinculada a este servidor. Faça o vínculo acima primeiro.")
+def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: str):
+    players = client_data.get("players", {})
+
+    if gamertag not in players:
+        st.warning("Gamertag não encontrada. Faça o vínculo primeiro.")
         return
 
     if "wallets" not in client_data:
@@ -351,77 +293,437 @@ def main():
     wallets = client_data["wallets"]
     bank = client_data["bank"]
 
-    wallet_reg = wallets.get(gamertag_banco_clean, {"balance": 0, "historico": []})
-    bank_reg = bank.get(gamertag_banco_clean, {"balance": 0, "historico": []})
+    wallet_reg = wallets.get(gamertag, {"balance": 0, "historico": []})
+    bank_reg = bank.get(gamertag, {"balance": 0, "historico": []})
 
     saldo_carteira = wallet_reg.get("balance", 0)
     saldo_banco = bank_reg.get("balance", 0)
 
-    col_w, col_b = st.columns(2)
-    col_w.metric("💰 Carteira", f"{saldo_carteira} DzCoins")
-    col_b.metric("🏦 Banco", f"{saldo_banco} DzCoins")
+    # --- Saldos ---
+    col1, col2 = st.columns(2)
+    col1.metric("💰 Carteira", f"{saldo_carteira} DzCoins")
+    col2.metric("🏦 Banco", f"{saldo_banco} DzCoins")
 
-    st.markdown("### 🔁 Transferência")
-    col_dep, col_saq = st.columns(2)
+    st.divider()
 
-    with col_dep:
-        st.markdown("#### ➡️ Carteira → Banco")
-        valor_dep = st.number_input("Valor", min_value=0, step=100, key="val_dep")
-        if st.button("Enviar para o banco", use_container_width=True):
-            if valor_dep <= 0:
+    # --- Operações ---
+    op = st.radio(
+        "Operação",
+        ["📋 Extrato", "➡️ Depositar (Carteira → Banco)",
+         "⬅️ Sacar (Banco → Carteira)", "🔁 Transferir para outro jogador"],
+        horizontal=False,
+        label_visibility="collapsed",
+    )
+
+    hora_br = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
+
+    if op == "📋 Extrato":
+        st.markdown("#### 📋 Extrato de movimentações")
+        historico_comb = []
+        for linha in wallet_reg.get("historico", []):
+            historico_comb.append(("CARTEIRA", linha))
+        for linha in bank_reg.get("historico", []):
+            historico_comb.append(("BANCO", linha))
+
+        if not historico_comb:
+            st.info("Nenhuma movimentação registrada ainda.")
+        else:
+            for origem, linha in reversed(historico_comb[-30:]):
+                icone = "💰" if origem == "CARTEIRA" else "🏦"
+                st.markdown(f"{icone} `[{origem}]` {linha}")
+
+    elif op == "➡️ Depositar (Carteira → Banco)":
+        st.markdown("#### ➡️ Depositar na conta bancária")
+        valor = st.number_input("Valor (DzCoins)", min_value=0, step=100, key="dep_val")
+        if st.button("Confirmar depósito", use_container_width=True):
+            if valor <= 0:
                 st.error("Informe um valor maior que zero.")
-            elif valor_dep > saldo_carteira:
-                st.error("Saldo insuficiente na carteira.")
+            elif valor > saldo_carteira:
+                st.error(f"Saldo insuficiente na carteira ({saldo_carteira} DzCoins).")
             else:
-                wallet_reg["balance"] = saldo_carteira - valor_dep
-                bank_reg["balance"] = saldo_banco + valor_dep
-                hora = datetime.now().strftime("%d/%m/%Y %H:%M")
-                wallet_reg.setdefault("historico", []).append(f"[{hora}] TRANSF. → BANCO -{valor_dep}")
-                bank_reg.setdefault("historico", []).append(f"[{hora}] TRANSF. ← CARTEIRA +{valor_dep}")
-                wallets[gamertag_banco_clean] = wallet_reg
-                bank[gamertag_banco_clean] = bank_reg
+                wallet_reg["balance"] = saldo_carteira - valor
+                bank_reg["balance"] = saldo_banco + valor
+                wallet_reg.setdefault("historico", []).append(
+                    f"[{hora_br}] DEPÓSITO → BANCO -{valor}"
+                )
+                bank_reg.setdefault("historico", []).append(
+                    f"[{hora_br}] DEPÓSITO ← CARTEIRA +{valor}"
+                )
+                wallets[gamertag] = wallet_reg
+                bank[gamertag] = bank_reg
                 client_data["wallets"] = wallets
                 client_data["bank"] = bank
                 clients_db[server_id] = client_data
                 save_db(DB_CLIENTS, clients_db)
-                st.success(f"Transferido {valor_dep} DzCoins para o banco!")
+                st.success(f"✅ {valor} DzCoins depositados no banco!")
                 st.rerun()
 
-    with col_saq:
-        st.markdown("#### ⬅️ Banco → Carteira")
-        valor_saq = st.number_input("Valor", min_value=0, step=100, key="val_saq")
-        if st.button("Trazer do banco", use_container_width=True):
-            if valor_saq <= 0:
+    elif op == "⬅️ Sacar (Banco → Carteira)":
+        st.markdown("#### ⬅️ Sacar do banco para a carteira")
+        valor = st.number_input("Valor (DzCoins)", min_value=0, step=100, key="saq_val")
+        if st.button("Confirmar saque", use_container_width=True):
+            if valor <= 0:
                 st.error("Informe um valor maior que zero.")
-            elif valor_saq > saldo_banco:
-                st.error("Saldo insuficiente no banco.")
+            elif valor > saldo_banco:
+                st.error(f"Saldo insuficiente no banco ({saldo_banco} DzCoins).")
             else:
-                wallet_reg["balance"] = saldo_carteira + valor_saq
-                bank_reg["balance"] = saldo_banco - valor_saq
-                hora = datetime.now().strftime("%d/%m/%Y %H:%M")
-                bank_reg.setdefault("historico", []).append(f"[{hora}] TRANSF. → CARTEIRA -{valor_saq}")
-                wallet_reg.setdefault("historico", []).append(f"[{hora}] TRANSF. ← BANCO +{valor_saq}")
-                wallets[gamertag_banco_clean] = wallet_reg
-                bank[gamertag_banco_clean] = bank_reg
+                wallet_reg["balance"] = saldo_carteira + valor
+                bank_reg["balance"] = saldo_banco - valor
+                bank_reg.setdefault("historico", []).append(
+                    f"[{hora_br}] SAQUE → CARTEIRA -{valor}"
+                )
+                wallet_reg.setdefault("historico", []).append(
+                    f"[{hora_br}] SAQUE ← BANCO +{valor}"
+                )
+                wallets[gamertag] = wallet_reg
+                bank[gamertag] = bank_reg
                 client_data["wallets"] = wallets
                 client_data["bank"] = bank
                 clients_db[server_id] = client_data
                 save_db(DB_CLIENTS, clients_db)
-                st.success(f"Transferido {valor_saq} DzCoins para a carteira!")
+                st.success(f"✅ {valor} DzCoins sacados para a carteira!")
                 st.rerun()
 
-    st.markdown("### 📜 Histórico")
-    historico_comb = []
-    for linha in wallet_reg.get("historico", []):
-        historico_comb.append(f"[CARTEIRA] {linha}")
-    for linha in bank_reg.get("historico", []):
-        historico_comb.append(f"[BANCO] {linha}")
+    elif op == "🔁 Transferir para outro jogador":
+        st.markdown("#### 🔁 Transferir DzCoins")
+        outros_players = [p for p in players.keys() if p != gamertag]
+        if not outros_players:
+            st.info("Nenhum outro jogador vinculado neste servidor ainda.")
+            return
 
-    if historico_comb:
-        for linha in reversed(historico_comb[-30:]):
-            st.write(linha)
-    else:
-        st.info("Ainda não há movimentações registradas.")
+        destino = st.selectbox("Jogador destino", outros_players)
+        origem_op = st.radio(
+            "Debitar de:", ["💰 Carteira", "🏦 Banco"], horizontal=True
+        )
+        valor = st.number_input("Valor (DzCoins)", min_value=0, step=100, key="transf_val")
+
+        saldo_origem = saldo_carteira if origem_op == "💰 Carteira" else saldo_banco
+
+        if st.button("Confirmar transferência", use_container_width=True):
+            if valor <= 0:
+                st.error("Informe um valor maior que zero.")
+            elif valor > saldo_origem:
+                st.error(f"Saldo insuficiente ({saldo_origem} DzCoins).")
+            else:
+                # Débito na origem
+                if origem_op == "💰 Carteira":
+                    wallet_reg["balance"] = saldo_carteira - valor
+                    wallet_reg.setdefault("historico", []).append(
+                        f"[{hora_br}] TRANSF. → {destino} -{valor} (carteira)"
+                    )
+                else:
+                    bank_reg["balance"] = saldo_banco - valor
+                    bank_reg.setdefault("historico", []).append(
+                        f"[{hora_br}] TRANSF. → {destino} -{valor} (banco)"
+                    )
+
+                # Crédito na carteira do destino
+                dest_wallet = wallets.get(destino, {"balance": 0, "historico": []})
+                dest_wallet["balance"] = dest_wallet.get("balance", 0) + valor
+                dest_wallet.setdefault("historico", []).append(
+                    f"[{hora_br}] RECEBIDO ← {gamertag} +{valor}"
+                )
+
+                wallets[gamertag] = wallet_reg
+                bank[gamertag] = bank_reg
+                wallets[destino] = dest_wallet
+                client_data["wallets"] = wallets
+                client_data["bank"] = bank
+                clients_db[server_id] = client_data
+                save_db(DB_CLIENTS, clients_db)
+                st.success(f"✅ {valor} DzCoins transferidos para **{destino}**!")
+                st.rerun()
+
+
+# =========================================================
+# 7. UI PRINCIPAL
+# =========================================================
+
+def main():
+    st.set_page_config(
+        page_title="Titan Cloud Pro - Portal do Jogador",
+        page_icon="🎮",
+        layout="wide",
+    )
+
+    # CSS global dark theme
+    st.markdown(
+        """
+        <style>
+        .stApp { background-color: #0d0d1a; color: #e0e0e0; }
+        .stTabs [data-baseweb="tab"] {
+            font-size: 15px; font-weight: bold; color: #aaa;
+        }
+        .stTabs [aria-selected="true"] {
+            color: #00d4ff !important;
+            border-bottom: 2px solid #00d4ff !important;
+        }
+        div[data-testid="metric-container"] {
+            background: #1a1a2e;
+            border-radius: 10px;
+            padding: 12px;
+            border: 1px solid #333;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ----------------------------------------------------------
+    # 7.1 PROCESSAR RETORNO DISCORD (code na URL)
+    # ----------------------------------------------------------
+    query_params = st.query_params
+    code = query_params.get("code")
+
+    if code and not st.session_state.get("portal_discord_id"):
+        with st.spinner("Autenticando com o Discord..."):
+            resultado = trocar_code_por_token(code)
+        if resultado:
+            st.session_state.portal_discord_id = resultado["discord_id"]
+            st.session_state.portal_discord_name = resultado["discord_name"]
+            st.session_state.portal_discord_avatar = resultado.get("discord_avatar")
+            st.session_state.portal_discord_guilds = resultado["guilds"]
+            st.query_params.clear()
+            st.rerun()
+        else:
+            st.query_params.clear()
+
+    # ----------------------------------------------------------
+    # 7.2 TELA DE LOGIN (se não autenticado)
+    # ----------------------------------------------------------
+    if not st.session_state.get("portal_discord_id"):
+        col_c, col_r = st.columns([1, 1])
+        with col_c:
+            st.markdown(
+                """
+                <div style="text-align:center; padding: 60px 20px;">
+                    <h1 style="color:#00d4ff;">🎮 Titan Cloud Pro</h1>
+                    <h3 style="color:#aaa;">Portal do Jogador</h3>
+                    <p style="color:#666; margin-bottom: 40px;">
+                        Vincule sua Gamertag, acompanhe rankings,<br>
+                        gerencie seus DzCoins e muito mais.
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            if not DISCORD_CLIENT_ID or not DISCORD_REDIRECT_URI:
+                st.warning("Login com Discord não configurado. Contate o administrador.")
+            else:
+                params = {
+                    "client_id": DISCORD_CLIENT_ID,
+                    "redirect_uri": DISCORD_REDIRECT_URI,
+                    "response_type": "code",
+                    "scope": DISCORD_SCOPE,
+                    "prompt": "consent",
+                }
+                auth_url = DISCORD_AUTHORIZE_URL + "?" + urllib.parse.urlencode(params)
+                st.markdown(
+                    f"""
+                    <div style="text-align:center;">
+                        <a href="{auth_url}" target="_self" style="
+                            display: inline-block;
+                            background: linear-gradient(135deg, #5865F2, #7289da);
+                            color: white; padding: 14px 32px;
+                            border-radius: 10px; text-decoration: none;
+                            font-weight: bold; font-size: 18px;
+                            box-shadow: 0 4px 15px rgba(88,101,242,0.4);
+                        ">
+                        👾 Entrar com Discord
+                        </a>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        st.stop()
+
+    # ----------------------------------------------------------
+    # 7.3 CARREGA DADOS
+    # ----------------------------------------------------------
+    users_db = load_db(DB_USERS, {"keys": {}})
+    clients_db = load_db(DB_CLIENTS, {})
+
+    discord_id = st.session_state.get("portal_discord_id")
+    discord_name = st.session_state.get("portal_discord_name", "Jogador")
+
+    # ----------------------------------------------------------
+    # 7.4 SELEÇÃO / CONFIRMAÇÃO DO SERVIDOR
+    # ----------------------------------------------------------
+    nome_para_server_id = {}
+    nitrado_id_map = {}
+    for keyuser, data in users_db.get("keys", {}).items():
+        server_name = str(data.get("server", "")).strip()
+        server_id = str(data.get("server_id", "")).strip() or keyuser
+        nid = str(data.get("server_id", "")).strip()
+        if server_name and server_id:
+            nome_para_server_id[server_name.lower()] = server_id
+            nitrado_id_map[server_id] = nid
+
+    server_id = st.session_state.get("portal_server_id")
+
+    if not server_id:
+        st.markdown("### 🏷️ Qual servidor você joga?")
+        nome_input = st.text_input("Nome do servidor", "")
+        if st.button("Confirmar servidor"):
+            nome_limpo = nome_input.strip().lower()
+            sid = nome_para_server_id.get(nome_limpo)
+            if not sid:
+                st.error("Servidor não encontrado. Verifique com o administrador.")
+            elif sid not in clients_db:
+                st.error("Servidor não configurado. Avise o administrador.")
+            else:
+                st.session_state.portal_server_id = sid
+                st.session_state.portal_server_nome = nome_limpo.title()
+                st.rerun()
+        st.stop()
+
+    client_data = clients_db.get(server_id, {})
+    players = load_players_for_client(client_data)
+    server_nome = st.session_state.get("portal_server_nome", "Servidor")
+    nitrado_id = nitrado_id_map.get(server_id, server_id)
+
+    # ----------------------------------------------------------
+    # 7.5 VALIDAÇÃO DISCORD GUILD
+    # ----------------------------------------------------------
+    discord_guild_id = None
+    for key_data in users_db.get("keys", {}).values():
+        if str(key_data.get("server_id", "")) == str(server_id):
+            discord_guild_id = key_data.get("discord_guild_id", "")
+            break
+
+    portal_guilds = st.session_state.get("portal_discord_guilds", [])
+    if discord_guild_id:
+        if not validar_membro_discord(portal_guilds, discord_guild_id):
+            st.error("❌ Você não é membro do servidor Discord oficial. Entre no servidor e tente novamente.")
+            st.stop()
+
+    # ----------------------------------------------------------
+    # 7.6 VERIFICA SE JOGADOR JÁ TEM GAMERTAG VINCULADA
+    # ----------------------------------------------------------
+    # Busca gamertag vinculada ao discord_id do jogador logado
+    gamertag_vinculada = None
+    for gt, info in players.items():
+        if str(info.get("discord_id", "")) == str(discord_id):
+            gamertag_vinculada = gt
+            break
+
+    # Se ainda não tem vínculo, mostra formulário
+    if not gamertag_vinculada:
+        st.markdown(
+            f"""
+            <div style="text-align:center; padding:30px 0 10px 0;">
+                <h2 style="color:#00d4ff;">Bem-vindo, {discord_name}! 👋</h2>
+                <p style="color:#aaa;">Para acessar o portal, vincule sua Gamertag primeiro.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        with st.form("form_vinculo"):
+            gamertag = st.text_input("🎮 Gamertag (exatamente como aparece no console)", "")
+            apelido = st.text_input("Apelido (opcional)", "")
+            observacoes = st.text_area("Observações (opcional)", "")
+            submitted = st.form_submit_button("✅ Vincular minha Gamertag", use_container_width=True)
+
+        if submitted:
+            gamertag_clean = gamertag.strip()
+            if not gamertag_clean:
+                st.error("Preencha a Gamertag.")
+            else:
+                players[gamertag_clean] = {
+                    "gamertag": gamertag_clean,
+                    "apelido": apelido.strip(),
+                    "discord_id": discord_id,
+                    "observacoes": observacoes.strip(),
+                }
+                client_data["players"] = players
+                clients_db[server_id] = client_data
+                save_db(DB_CLIENTS, clients_db)
+                st.session_state.portal_gamertag = gamertag_clean
+                st.success(f"✅ Gamertag **{gamertag_clean}** vinculada com sucesso!")
+                st.rerun()
+        st.stop()
+
+    # Salva gamertag na sessão
+    st.session_state.portal_gamertag = gamertag_vinculada
+
+    # ----------------------------------------------------------
+    # 7.7 HEADER DO JOGADOR
+    # ----------------------------------------------------------
+    col_h1, col_h2, col_h3 = st.columns([3, 1, 1])
+
+    with col_h1:
+        st.markdown(
+            f"""
+            <div style="padding: 10px 0;">
+                <span style="font-size:22px; font-weight:bold; color:#00d4ff;">
+                    🎮 {gamertag_vinculada}
+                </span>
+                <span style="font-size:14px; color:#888; margin-left:12px;">
+                    {server_nome}
+                </span>
+                <br>
+                <span style="font-size:13px; color:#666;">
+                    Discord: {discord_name}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with col_h2:
+        render_relogio()
+
+    with col_h3:
+        if st.button("🚪 Sair", use_container_width=True):
+            for k in ["portal_discord_id", "portal_discord_name", "portal_discord_guilds",
+                      "portal_server_id", "portal_server_nome", "portal_gamertag",
+                      "portal_discord_avatar"]:
+                st.session_state.pop(k, None)
+            st.rerun()
+
+    st.divider()
+
+    # ----------------------------------------------------------
+    # 7.8 ABAS PRINCIPAIS
+    # ----------------------------------------------------------
+    tab_inicio, tab_banco = st.tabs([
+        "🏠 Início",
+        "🏦 Banco DzCoins",
+    ])
+
+    # --- ABA INÍCIO ---
+    with tab_inicio:
+        col_a, col_b, col_c = st.columns(3)
+
+        with col_a:
+            st.markdown("#### 🌐 Players Online")
+            render_players_online(nitrado_id)
+
+        with col_b:
+            st.markdown("#### 🔄 Reset do Servidor")
+            render_reset_info(client_data)
+
+        with col_c:
+            st.markdown("#### 📊 Meu Resumo")
+            wallet_saldo = client_data.get("wallets", {}).get(
+                gamertag_vinculada, {}
+            ).get("balance", 0)
+            bank_saldo = client_data.get("bank", {}).get(
+                gamertag_vinculada, {}
+            ).get("balance", 0)
+            st.metric("💰 Carteira", f"{wallet_saldo} DzCoins")
+            st.metric("🏦 Banco", f"{bank_saldo} DzCoins")
+            st.metric("💎 Total", f"{wallet_saldo + bank_saldo} DzCoins")
+
+    # --- ABA BANCO ---
+    with tab_banco:
+        st.markdown(f"### 🏦 Banco DzCoins — {gamertag_vinculada}")
+        # Recarrega dados frescos do disco
+        clients_db_fresh = load_db(DB_CLIENTS, {})
+        client_data_fresh = clients_db_fresh.get(server_id, {})
+        render_banco(client_data_fresh, clients_db_fresh, server_id, gamertag_vinculada)
 
 
 if __name__ == "__main__":
