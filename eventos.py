@@ -1832,33 +1832,31 @@ with tab5:
 with tab_cfggameplay:
     st.subheader("🎮 Configuração de Gameplay (cfggameplay.json)")
     st.info(
-        "Ajuste parâmetros gerais de gameplay, stamina, choque, clima, mapa e veículos "
-        "para o seu servidor Chernarus."
+        "Faça upload do cfggameplay.json do seu servidor, ajuste os parâmetros de gameplay "
+        "e depois baixe o arquivo ou envie via FTP."
     )
 
-    # Descobre o root do servidor / missão Chernarus para este cliente.
-    # Se você já guarda esse path em client_data, ajuste aqui.
-    server_root = client_data.get(
-        "chernarus_root",
-        client_data.get("server_root", "/dayzxb_missions/dayzOffline.chernarusplus"),
+    # 1) Upload do cfggameplay.json (igual types/globals: baseado em upload + sessão)
+    up_cfg = st.file_uploader(
+        "Enviar cfggameplay.json",
+        type=["json"],
+        key=f"up_cfggameplay_{user_id}",
     )
-    cfggameplay_path = os.path.join(server_root, "cfggameplay.json")
 
-    st.code(cfggameplay_path, language="bash")
+    cfg_session_key = f"cfggameplay_cfg_{user_id}"
 
-    if not os.path.exists(cfggameplay_path):
-        st.error("Arquivo cfggameplay.json não encontrado no servidor neste caminho.")
-        st.info(
-            "Verifique se o caminho acima está correto na configuração do cliente "
-            "ou ajuste o campo server_root/chernarus_root no clients_data.json."
-        )
-    else:
+    if up_cfg is not None:
         try:
-            with open(cfggameplay_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
+            raw_bytes = up_cfg.read()
+            cfg = json.loads(raw_bytes.decode("utf-8"))
+            st.session_state[cfg_session_key] = cfg
+            st.success(f"Arquivo carregado: {up_cfg.name}")
         except Exception as e:
             st.error(f"Erro ao ler cfggameplay.json: {e}")
-            st.stop()
+
+    # 2) Se já temos cfg em sessão, mostra a interface
+    if cfg_session_key in st.session_state:
+        cfg = st.session_state[cfg_session_key]
 
         # Garante estruturas principais
         general = cfg.get("GeneralData", {})
@@ -2054,75 +2052,161 @@ with tab_cfggameplay:
             value=float(vehicle_data.get("boatDecayMultiplier", 1)),
         )
 
-        st.markdown("---")
-        if st.button("💾 Salvar cfggameplay.json", use_container_width=True):
-            # General
-            cfg["GeneralData"] = {
-                **general,
-                "disableBaseDamage": disable_base_damage,
-                "disableContainerDamage": disable_container_damage,
-                "disableRespawnDialog": disable_respawn_dialog,
-                "disableRespawnInUnconsciousness": disable_respawn_unconscious,
-            }
+        st.markdown("### 💾 Gerar cfggameplay.json ajustado")
 
-            # Stamina
-            stamina.update(
-                {
-                    "staminaMax": stamina_max,
-                    "staminaMinCap": stamina_min_cap,
-                    "staminaWeightLimitThreshold": stamina_weight_threshold,
-                    "staminaKgToStaminaPercentPenalty": stamina_penalty,
-                    "sprintStaminaModifierErc": sprint_sta_mod_erc,
-                    "sprintStaminaModifierCro": sprint_sta_mod_cro,
+        col_save1, col_save2 = st.columns(2)
+
+        # 3) Aplicar alterações na sessão (atualiza cfg em memória)
+        with col_save1:
+            if st.button(
+                "Aplicar alterações na sessão (cfggameplay)",
+                use_container_width=True,
+            ):
+                # General
+                cfg["GeneralData"] = {
+                    **general,
+                    "disableBaseDamage": disable_base_damage,
+                    "disableContainerDamage": disable_container_damage,
+                    "disableRespawnDialog": disable_respawn_dialog,
+                    "disableRespawnInUnconsciousness": disable_respawn_unconscious,
                 }
-            )
-            player["StaminaData"] = stamina
 
-            # Shock
-            shock.update(
-                {
-                    "shockRefillSpeedConscious": shock_refill_con,
-                    "shockRefillSpeedUnconscious": shock_refill_uncon,
-                    "allowRefillSpeedModifier": allow_refill_mod,
-                }
-            )
-            player["ShockHandlingData"] = shock
+                # Stamina
+                stamina.update(
+                    {
+                        "staminaMax": stamina_max,
+                        "staminaMinCap": stamina_min_cap,
+                        "staminaWeightLimitThreshold": stamina_weight_threshold,
+                        "staminaKgToStaminaPercentPenalty": stamina_penalty,
+                        "sprintStaminaModifierErc": sprint_sta_mod_erc,
+                        "sprintStaminaModifierCro": sprint_sta_mod_cro,
+                    }
+                )
+                player["StaminaData"] = stamina
 
-            # Movement
-            movement.update(
-                {
-                    "timeToSprint": time_to_sprint,
-                    "rotationSpeedJog": rot_speed_jog,
-                    "rotationSpeedSprint": rot_speed_sprint,
-                    "allowStaminaAffectInertia": allow_sta_inertia,
-                }
-            )
-            player["MovementData"] = movement
+                # Shock
+                shock.update(
+                    {
+                        "shockRefillSpeedConscious": shock_refill_con,
+                        "shockRefillSpeedUnconscious": shock_refill_uncon,
+                        "allowRefillSpeedModifier": allow_refill_mod,
+                    }
+                )
+                player["ShockHandlingData"] = shock
 
-            cfg["PlayerData"] = player
+                # Movement
+                movement.update(
+                    {
+                        "timeToSprint": time_to_sprint,
+                        "rotationSpeedJog": rot_speed_jog,
+                        "rotationSpeedSprint": rot_speed_sprint,
+                        "allowStaminaAffectInertia": allow_sta_inertia,
+                    }
+                )
+                player["MovementData"] = movement
 
-            # Mundo
-            worlds["lightingConfig"] = lighting_config
-            cfg["WorldsData"] = worlds
+                cfg["PlayerData"] = player
 
-            # Mapa / UI
-            map_data["displayPlayerPosition"] = display_player_pos
-            map_data["displayNavInfo"] = display_nav_info
-            cfg["MapData"] = map_data
+                # Mundo
+                worlds["lightingConfig"] = lighting_config
+                cfg["WorldsData"] = worlds
 
-            ui_data["use3DMap"] = use_3d_map
-            cfg["UIData"] = ui_data
+                # Mapa / UI
+                map_data["displayPlayerPosition"] = display_player_pos
+                map_data["displayNavInfo"] = display_nav_info
+                cfg["MapData"] = map_data
 
-            # Veículos
-            vehicle_data["boatDecayMultiplier"] = boat_decay_multiplier
-            cfg["VehicleData"] = vehicle_data
+                ui_data["use3DMap"] = use_3d_map
+                cfg["UIData"] = ui_data
+
+                # Veículos
+                vehicle_data["boatDecayMultiplier"] = boat_decay_multiplier
+                cfg["VehicleData"] = vehicle_data
+
+                st.session_state[cfg_session_key] = cfg
+                st.success("Alterações aplicadas internamente ao cfggameplay.json.")
+
+        # 4) Download do arquivo ajustado
+        with col_save2:
+            if st.button("⬇️ Baixar cfggameplay.json ajustado", use_container_width=True):
+                try:
+                    cfg_bytes = json.dumps(
+                        st.session_state[cfg_session_key],
+                        ensure_ascii=False,
+                        indent=4,
+                    ).encode("utf-8")
+
+                    st.download_button(
+                        label="Baixar cfggameplay.json",
+                        data=cfg_bytes,
+                        file_name="cfggameplay_editado.json",
+                        mime="application/json",
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.error(f"Erro ao gerar cfggameplay.json: {e}")
+
+        # (Opcional) 5) Salvar em disco + enviar via FTP
+        st.markdown("### 🚀 Salvar no Titan Cloud e enviar via FTP (opcional)")
+
+        mapa_cfggameplay = st.selectbox(
+            "Mapa de destino (onde o cfggameplay.json será aplicado)",
+            ["Chernarus", "Livonia"],
+            key="cfggameplay_mapa_dest",
+        )
+
+        if st.button(
+            "Salvar no Titan Cloud e enviar via FTP (cfggameplay)",
+            use_container_width=True,
+        ):
+            try:
+                cfg_bytes = json.dumps(
+                    st.session_state[cfg_session_key],
+                    ensure_ascii=False,
+                    indent=4,
+                ).encode("utf-8")
+            except Exception as e:
+                st.error(f"Erro ao serializar cfggameplay.json: {e}")
+                st.stop()
+
+            safe_name_cfg = f"{user_id[:5]}_cfggameplay_{mapa_cfggameplay.lower()}.json"
+            local_cfggameplay_path = os.path.join(UPLOAD_DIR, safe_name_cfg)
 
             try:
-                with open(cfggameplay_path, "w", encoding="utf-8") as f:
-                    json.dump(cfg, f, ensure_ascii=False, indent=4)
-                st.success("cfggameplay.json salvo com sucesso!")
+                with open(local_cfggameplay_path, "wb") as f:
+                    f.write(cfg_bytes)
             except Exception as e:
-                st.error(f"Erro ao salvar cfggameplay.json: {e}")
+                registrar_log(
+                    user_id,
+                    f"Erro ao salvar cfggameplay.json localmente ({str(e)})",
+                    "erro",
+                )
+                st.error(f"Erro ao salvar cfggameplay.json localmente: {e}")
+                st.stop()
+
+            # Você implementa essa função seguindo o padrão types/globals:
+            ok_cfg, msg_cfg = enviar_cfggameplay_via_ftp(
+                user_id,
+                local_cfggameplay_path,
+                mapa_cfggameplay,
+            )
+
+            if ok_cfg:
+                registrar_log(
+                    user_id,
+                    f"cfggameplay.json atualizado e enviado via FTP para {mapa_cfggameplay}.",
+                    "sucesso",
+                )
+                st.success("cfggameplay.json enviado e aplicado via FTP com sucesso!")
+            else:
+                registrar_log(
+                    user_id,
+                    f"Falha ao enviar cfggameplay.json via FTP ({msg_cfg})",
+                    "erro",
+                )
+                st.error(f"Erro ao enviar cfggameplay via FTP: {msg_cfg}")
+    else:
+        st.info("Envie o cfggameplay.json do seu servidor para começar a editar.")
 
 with tab6:
     st.subheader("🛒 Loja / Trader")
