@@ -665,7 +665,7 @@ def main():
             border: 1px solid #374151;
         }
         .block-container {
-            padding-top: 0.5rem;
+            padding-top: 3.5rem;
         }
         /* Botões no dark */
         button[kind="primary"],
@@ -701,7 +701,7 @@ def main():
             border: 1px solid #d1d5db;
         }
         .block-container {
-            padding-top: 0.5rem;
+            padding-top: 3.5rem;
         }
         /* Botões no light, para aparecer melhor */
         button[kind="primary"],
