@@ -1275,12 +1275,13 @@ with st.sidebar:
 
 # --- TABS PRINCIPAIS CLIENTE ---
 st.title(f"🎮 {user_info['server']}")
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab_cfggameplay, tab6, tab7, tab8 = st.tabs([
     "📅 Agendamentos",
     "📜 Logs",
     "📢 Comunicados",
     "⚙️ Economia (types.xml)",
     "🌍 Ambiente (globals.xml)",
+    "🎮 Gameplay (cfggameplay)",
     "🛒 Loja / Trader",
     "👤 Jogadores / Vínculos",
     "🏦 Banco & Carteira",
@@ -1827,6 +1828,301 @@ with tab5:
                         "erro",
                     )
                     st.error(f"Erro ao salvar/enviar globals.xml: {e}")
+                    
+with tab_cfggameplay:
+    st.subheader("🎮 Configuração de Gameplay (cfggameplay.json)")
+    st.info(
+        "Ajuste parâmetros gerais de gameplay, stamina, choque, clima, mapa e veículos "
+        "para o seu servidor Chernarus."
+    )
+
+    # Descobre o root do servidor / missão Chernarus para este cliente.
+    # Se você já guarda esse path em client_data, ajuste aqui.
+    server_root = client_data.get(
+        "chernarus_root",
+        client_data.get("server_root", "/dayzxb_missions/dayzOffline.chernarusplus"),
+    )
+    cfggameplay_path = os.path.join(server_root, "cfggameplay.json")
+
+    st.code(cfggameplay_path, language="bash")
+
+    if not os.path.exists(cfggameplay_path):
+        st.error("Arquivo cfggameplay.json não encontrado no servidor neste caminho.")
+        st.info(
+            "Verifique se o caminho acima está correto na configuração do cliente "
+            "ou ajuste o campo server_root/chernarus_root no clients_data.json."
+        )
+    else:
+        try:
+            with open(cfggameplay_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception as e:
+            st.error(f"Erro ao ler cfggameplay.json: {e}")
+            st.stop()
+
+        # Garante estruturas principais
+        general = cfg.get("GeneralData", {})
+        player = cfg.get("PlayerData", {})
+        stamina = player.get("StaminaData", {})
+        shock = player.get("ShockHandlingData", {})
+        movement = player.get("MovementData", {})
+        worlds = cfg.get("WorldsData", {})
+        map_data = cfg.get("MapData", {})
+        ui_data = cfg.get("UIData", {})
+        vehicle_data = cfg.get("VehicleData", {})
+
+        # -------------------------------
+        # Geral
+        # -------------------------------
+        st.markdown("### ⚙️ Geral")
+
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            disable_base_damage = st.checkbox(
+                "Desativar dano em bases (disableBaseDamage)",
+                value=general.get("disableBaseDamage", False),
+            )
+            disable_container_damage = st.checkbox(
+                "Desativar dano em containers (disableContainerDamage)",
+                value=general.get("disableContainerDamage", False),
+            )
+        with col_g2:
+            disable_respawn_dialog = st.checkbox(
+                "Desativar tela de respawn (disableRespawnDialog)",
+                value=general.get("disableRespawnDialog", False),
+            )
+            disable_respawn_unconscious = st.checkbox(
+                "Bloquear respawn inconsciente (disableRespawnInUnconsciousness)",
+                value=general.get("disableRespawnInUnconsciousness", False),
+            )
+
+        # -------------------------------
+        # Stamina
+        # -------------------------------
+        st.markdown("### 💪 Jogador - Stamina")
+
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            stamina_max = st.number_input(
+                "Stamina máxima (staminaMax)",
+                min_value=10.0,
+                max_value=500.0,
+                step=5.0,
+                value=float(stamina.get("staminaMax", 100.0)),
+            )
+            stamina_min_cap = st.number_input(
+                "Stamina mínima (staminaMinCap)",
+                min_value=0.0,
+                max_value=50.0,
+                step=1.0,
+                value=float(stamina.get("staminaMinCap", 5.0)),
+            )
+            stamina_weight_threshold = st.number_input(
+                "Peso limite stamina (staminaWeightLimitThreshold)",
+                min_value=0.0,
+                max_value=20000.0,
+                step=100.0,
+                value=float(stamina.get("staminaWeightLimitThreshold", 6000.0)),
+            )
+        with col_s2:
+            stamina_penalty = st.number_input(
+                "Penalidade kg → % (staminaKgToStaminaPercentPenalty)",
+                min_value=0.0,
+                max_value=10.0,
+                step=0.05,
+                value=float(stamina.get("staminaKgToStaminaPercentPenalty", 1.75)),
+            )
+            sprint_sta_mod_erc = st.number_input(
+                "Sprint em pé (sprintStaminaModifierErc)",
+                min_value=0.1,
+                max_value=5.0,
+                step=0.1,
+                value=float(stamina.get("sprintStaminaModifierErc", 1.0)),
+            )
+            sprint_sta_mod_cro = st.number_input(
+                "Sprint abaixado (sprintStaminaModifierCro)",
+                min_value=0.1,
+                max_value=5.0,
+                step=0.1,
+                value=float(stamina.get("sprintStaminaModifierCro", 1.0)),
+            )
+
+        # -------------------------------
+        # Shock / Movimento
+        # -------------------------------
+        st.markdown("### 🧠 Jogador - Shock e Movimento")
+
+        col_sh1, col_sh2 = st.columns(2)
+        with col_sh1:
+            shock_refill_con = st.number_input(
+                "Refill choque consciente (shockRefillSpeedConscious)",
+                min_value=0.1,
+                max_value=50.0,
+                step=0.5,
+                value=float(shock.get("shockRefillSpeedConscious", 5.0)),
+            )
+            shock_refill_uncon = st.number_input(
+                "Refill choque inconsciente (shockRefillSpeedUnconscious)",
+                min_value=0.1,
+                max_value=50.0,
+                step=0.5,
+                value=float(shock.get("shockRefillSpeedUnconscious", 1.0)),
+            )
+        with col_sh2:
+            allow_refill_mod = st.checkbox(
+                "Permitir modificador de refill (allowRefillSpeedModifier)",
+                value=shock.get("allowRefillSpeedModifier", True),
+            )
+
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            time_to_sprint = st.number_input(
+                "Tempo para sprint (timeToSprint)",
+                min_value=0.0,
+                max_value=5.0,
+                step=0.05,
+                value=float(movement.get("timeToSprint", 0.45)),
+            )
+            rot_speed_jog = st.number_input(
+                "Rotação correndo (rotationSpeedJog)",
+                min_value=0.0,
+                max_value=2.0,
+                step=0.05,
+                value=float(movement.get("rotationSpeedJog", 0.3)),
+            )
+        with col_m2:
+            rot_speed_sprint = st.number_input(
+                "Rotação sprint (rotationSpeedSprint)",
+                min_value=0.0,
+                max_value=2.0,
+                step=0.05,
+                value=float(movement.get("rotationSpeedSprint", 0.15)),
+            )
+            allow_sta_inertia = st.checkbox(
+                "Stamina afeta inércia (allowStaminaAffectInertia)",
+                value=movement.get("allowStaminaAffectInertia", True),
+            )
+
+        # -------------------------------
+        # Mundo / Clima
+        # -------------------------------
+        st.markdown("### 🌍 Mundo / Clima")
+
+        lighting_config = st.selectbox(
+            "Preset de iluminação (lightingConfig)",
+            options=[0, 1, 2],
+            index=[0, 1, 2].index(int(worlds.get("lightingConfig", 0))),
+            help="Controla presets de iluminação do servidor.",
+        )
+
+        st.info(
+            "As listas environmentMinTemps e environmentMaxTemps definem temperaturas por mês. "
+            "Manteremos edição avançada para uma próxima versão."
+        )
+
+        # -------------------------------
+        # Mapa / UI
+        # -------------------------------
+        st.markdown("### 🗺️ Mapa e Interface")
+
+        col_map1, col_map2 = st.columns(2)
+        with col_map1:
+            display_player_pos = st.checkbox(
+                "Mostrar posição do jogador no mapa (displayPlayerPosition)",
+                value=map_data.get("displayPlayerPosition", False),
+            )
+            display_nav_info = st.checkbox(
+                "Mostrar infos de navegação (displayNavInfo)",
+                value=map_data.get("displayNavInfo", True),
+            )
+        with col_map2:
+            use_3d_map = st.checkbox(
+                "Usar mapa 3D (use3DMap)",
+                value=ui_data.get("use3DMap", False),
+            )
+
+        # -------------------------------
+        # Veículos
+        # -------------------------------
+        st.markdown("### 🚗 Veículos")
+
+        boat_decay_multiplier = st.number_input(
+            "Multiplicador de decay de barcos (boatDecayMultiplier)",
+            min_value=0.0,
+            max_value=10.0,
+            step=0.1,
+            value=float(vehicle_data.get("boatDecayMultiplier", 1)),
+        )
+
+        st.markdown("---")
+        if st.button("💾 Salvar cfggameplay.json", use_container_width=True):
+            # General
+            cfg["GeneralData"] = {
+                **general,
+                "disableBaseDamage": disable_base_damage,
+                "disableContainerDamage": disable_container_damage,
+                "disableRespawnDialog": disable_respawn_dialog,
+                "disableRespawnInUnconsciousness": disable_respawn_unconscious,
+            }
+
+            # Stamina
+            stamina.update(
+                {
+                    "staminaMax": stamina_max,
+                    "staminaMinCap": stamina_min_cap,
+                    "staminaWeightLimitThreshold": stamina_weight_threshold,
+                    "staminaKgToStaminaPercentPenalty": stamina_penalty,
+                    "sprintStaminaModifierErc": sprint_sta_mod_erc,
+                    "sprintStaminaModifierCro": sprint_sta_mod_cro,
+                }
+            )
+            player["StaminaData"] = stamina
+
+            # Shock
+            shock.update(
+                {
+                    "shockRefillSpeedConscious": shock_refill_con,
+                    "shockRefillSpeedUnconscious": shock_refill_uncon,
+                    "allowRefillSpeedModifier": allow_refill_mod,
+                }
+            )
+            player["ShockHandlingData"] = shock
+
+            # Movement
+            movement.update(
+                {
+                    "timeToSprint": time_to_sprint,
+                    "rotationSpeedJog": rot_speed_jog,
+                    "rotationSpeedSprint": rot_speed_sprint,
+                    "allowStaminaAffectInertia": allow_sta_inertia,
+                }
+            )
+            player["MovementData"] = movement
+
+            cfg["PlayerData"] = player
+
+            # Mundo
+            worlds["lightingConfig"] = lighting_config
+            cfg["WorldsData"] = worlds
+
+            # Mapa / UI
+            map_data["displayPlayerPosition"] = display_player_pos
+            map_data["displayNavInfo"] = display_nav_info
+            cfg["MapData"] = map_data
+
+            ui_data["use3DMap"] = use_3d_map
+            cfg["UIData"] = ui_data
+
+            # Veículos
+            vehicle_data["boatDecayMultiplier"] = boat_decay_multiplier
+            cfg["VehicleData"] = vehicle_data
+
+            try:
+                with open(cfggameplay_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, ensure_ascii=False, indent=4)
+                st.success("cfggameplay.json salvo com sucesso!")
+            except Exception as e:
+                st.error(f"Erro ao salvar cfggameplay.json: {e}")
 
 with tab6:
     st.subheader("🛒 Loja / Trader")
