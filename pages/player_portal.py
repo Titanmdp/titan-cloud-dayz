@@ -193,9 +193,9 @@ def get_client_ftp_config(client_data: dict):
     Retorna dict {host, user, pass, port} a partir de client_data["ftp"].
     """
     ftp_cfg = client_data.get("ftp", {})
-    host = ftp_cfg.get("host", "")
-    user = ftp_cfg.get("user", "")
-    pwd = ftp_cfg.get("pass", "")
+    host = ftp_cfg.get("usmi220.gamedata.io", "")
+    user = ftp_cfg.get("ni11056582_1", "")
+    pwd = ftp_cfg.get("FJCyKXR3", "")
     port = int(ftp_cfg.get("port", 21) or 21)
     if not host or not user or not pwd:
         return None
