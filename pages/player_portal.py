@@ -638,7 +638,7 @@ def main():
         layout="wide",
     )
 
-    # ----------------------------------------------------------
+       # ----------------------------------------------------------
     # TEMA DINÂMICO (Claro / Escuro)
     # ----------------------------------------------------------
     if "portal_tema" not in st.session_state:
@@ -646,10 +646,15 @@ def main():
 
     tema_escolhido = st.session_state.portal_tema
 
-    col_theme_left, col_theme_right = st.columns([4, 1])
-    with col_theme_right:
+    # seletor de tema no topo, alinhado à direita
+    top_col_left, top_col_right = st.columns([4, 1])
+    with top_col_right:
+        st.markdown(
+            "<div style='text-align:right; font-size:12px; color:#888;'>Tema</div>",
+            unsafe_allow_html=True,
+        )
         novo_tema = st.selectbox(
-            "Tema",
+            "",
             ["Escuro", "Claro"],
             index=0 if tema_escolhido == "dark" else 1,
             label_visibility="collapsed",
@@ -681,17 +686,30 @@ def main():
             border: 1px solid #374151;
         }
         .block-container {
-            padding-top: 1rem;
+            padding-top: 0.5rem;
+        }
+        /* Botões no dark */
+        button[kind="primary"],
+        .stButton > button {
+            color: #ffffff !important;
+            background-color: #1d4ed8 !important;
+            border-radius: 8px !important;
+            border: 1px solid #1d4ed8 !important;
+        }
+        button[kind="primary"]:hover,
+        .stButton > button:hover {
+            background-color: #2563eb !important;
+            border-color: #2563eb !important;
         }
         </style>
         """
     else:
-        # Light: fundo claro, cartões brancos, texto escuro
+        # Light: fundo claro neutro, cartões brancos, texto escuro (sem azul forte)
         css = """
         <style>
-        .stApp { background-color: #f4f4f8; color: #202020; }
+        .stApp { background-color: #f3f4f6; color: #1f2933; }
         .stTabs [data-baseweb="tab"] {
-            font-size: 15px; font-weight: bold; color: #555555;
+            font-size: 15px; font-weight: bold; color: #4b5563;
         }
         .stTabs [aria-selected="true"] {
             color: #0f766e !important;
@@ -704,7 +722,28 @@ def main():
             border: 1px solid #d1d5db;
         }
         .block-container {
-            padding-top: 1rem;
+            padding-top: 0.5rem;
+        }
+        /* Botões no light, para aparecer melhor */
+        button[kind="primary"],
+        .stButton > button {
+            color: #ffffff !important;
+            background-color: #2563eb !important;
+            border-radius: 8px !important;
+            border: 1px solid #1d4ed8 !important;
+        }
+        button[kind="primary"]:hover,
+        .stButton > button:hover {
+            background-color: #1d4ed8 !important;
+            border-color: #1d4ed8 !important;
+        }
+        /* Títulos e textos em tabelas (Ranking/Banco) mais escuros */
+        thead tr th {
+            color: #111827 !important;
+            font-weight: 700 !important;
+        }
+        tbody tr td {
+            color: #374151 !important;
         }
         </style>
         """
