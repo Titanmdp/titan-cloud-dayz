@@ -638,32 +638,11 @@ def main():
         layout="wide",
     )
 
-       # ----------------------------------------------------------
-    # TEMA DINÂMICO (Claro / Escuro)
+    # ----------------------------------------------------------
+    # TEMA DINÂMICO (Claro / Escuro) - apenas estado + CSS
     # ----------------------------------------------------------
     if "portal_tema" not in st.session_state:
         st.session_state.portal_tema = "dark"  # padrão inicial
-
-    tema_escolhido = st.session_state.portal_tema
-
-    # seletor de tema no topo, alinhado à direita
-    top_col_left, top_col_right = st.columns([4, 1])
-    with top_col_right:
-        st.markdown(
-            "<div style='text-align:right; font-size:12px; color:#888;'>Tema</div>",
-            unsafe_allow_html=True,
-        )
-        novo_tema = st.selectbox(
-            "",
-            ["Escuro", "Claro"],
-            index=0 if tema_escolhido == "dark" else 1,
-            label_visibility="collapsed",
-        )
-        tema_map = {"Escuro": "dark", "Claro": "light"}
-        tema_novo_cod = tema_map.get(novo_tema, "dark")
-        if tema_novo_cod != tema_escolhido:
-            st.session_state.portal_tema = tema_novo_cod
-            st.rerun()
 
     tema_escolhido = st.session_state.portal_tema
 
@@ -953,7 +932,7 @@ def main():
     with col_h2:
         render_relogio()
 
-    with col_h3:
+        with col_h3:
         if st.button("🚪 Sair", use_container_width=True):
             for k in ["portal_discord_id", "portal_discord_name", "portal_discord_guilds",
                       "portal_server_id", "portal_server_nome", "portal_gamertag",
@@ -961,7 +940,27 @@ def main():
                 st.session_state.pop(k, None)
             st.rerun()
 
-    st.divider()
+        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+
+        # seletor de tema logo abaixo do botão sair
+        tema_atual = st.session_state.portal_tema
+        label_atual = "Escuro" if tema_atual == "dark" else "Claro"
+        st.markdown(
+            f"<div style='font-size:11px; color:#888;'>Tema atual: <b>{label_atual}</b></div>",
+            unsafe_allow_html=True,
+        )
+        novo_tema_label = st.selectbox(
+            "",
+            ["Escuro", "Claro"],
+            index=0 if tema_atual == "dark" else 1,
+            label_visibility="collapsed",
+            key="select_tema_portal",
+        )
+        mapa = {"Escuro": "dark", "Claro": "light"}
+        tema_novo = mapa.get(novo_tema_label, "dark")
+        if tema_novo != tema_atual:
+            st.session_state.portal_tema = tema_novo
+            st.rerun()
 
     # ----------------------------------------------------------
     # 7.8 ABAS PRINCIPAIS
