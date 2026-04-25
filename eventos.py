@@ -11,6 +11,7 @@ import shutil
 import smtplib
 import xml.etree.ElementTree as ET
 import pandas as pd
+from player_portal import main as player_portal_main
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
@@ -637,7 +638,6 @@ if not st.session_state.authenticated:
 
             # Se for cliente, atualiza informações de acesso no users_db
             if cargo == "client":
-                # Garante que db_users está carregado
                 db_users = st.session_state.db_users
 
                 # Recupera dados da key e o server_id associado
@@ -677,479 +677,497 @@ if not st.session_state.authenticated:
 
 
 # =========================================================
-# 5. ÁREA DO ADMINISTRADOR
+# 5. SELETOR DE PORTAL NA SIDEBAR
 # =========================================================
 
-if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
-    with st.sidebar:
-        st.subheader("🛡️ Menu Admin")
-        if st.button("🚀 Usar Sistema (Modo Teste)", use_container_width=True):
-            st.session_state.view_mode = "client"
-            st.rerun()
-        if st.button("🔴 Logout (Admin)", use_container_width=True):
-            st.session_state.authenticated = False
-            st.rerun()
-
-    st.title("🛡️ Painel de Controle - Administrador")
-
-    tab_adm1, tab_adm2, tab_adm3, tab_adm4, tab_adm5 = st.tabs(
-        [
-            "➕ Gerar Chaves",
-            "👥 Gestão de Clientes",
-            "⚙️ Configurar Planos",
-            "💾 Backup/Restore",
-            "📢 Comunicados",
-        ]
+with st.sidebar:
+    st.subheader("Titan Cloud Pro")
+    portal = st.radio(
+        "Selecione o portal:",
+        ["Portal do Administrador", "Portal do Jogador"],
+        index=0,              # mude para 1 se quiser abrir direto no Jogador
+        key="portal_principal",
     )
 
-    # --- TAB 1: GERAR CHAVES ---
-    with tab_adm1:
-        with st.expander("Gerador de Chaves", expanded=True):
-            col_gen1, col_gen2 = st.columns([2, 1])
 
-            # Coluna esquerda: dados do cliente/servidor + KeyUser
-            with col_gen1:
-                srv_name = st.text_input("Nome do Servidor / Cliente")
-                nitrado_id = st.text_input(
-                    "ID do Servidor na Nitrado (opcional, ex.: 18927875)",
-                    placeholder="Se preencher, será usado como ID interno do servidor",
-                )
-                discord_guild_id_input = st.text_input(
-                    "ID do Servidor Discord (Guild ID)",
-                    placeholder="Ex.: 1234567890123456789",
-                    help=(
-                        "ID numérico do servidor Discord do administrador. "
-                        "Discord > Configurações > Avançado > Modo desenvolvedor > "
-                        "Botão direito no servidor > Copiar ID do servidor."
-                    ),
-                )
-                plano_sel = st.selectbox("Escolha o Plano", list(PLANOS.keys()))
+# =========================================================
+# 6. ROTEAMENTO ENTRE PORTAIS
+# =========================================================
 
-                if "temp_key" not in st.session_state:
-                    st.session_state.temp_key = ""
-                ck1, ck2 = st.columns([3, 1])
-                new_k = ck1.text_input(
-                    "KeyUser (chave de acesso)",
-                    value=st.session_state.temp_key,
-                )
+if portal == "Portal do Administrador":
+    # ============================
+    # ÁREA DO ADMINISTRADOR
+    # ============================
+    if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
+        with st.sidebar:
+            st.subheader("🛡️ Menu Admin")
+            if st.button("🚀 Usar Sistema (Modo Teste)", use_container_width=True):
+                st.session_state.view_mode = "client"
+                st.rerun()
+            if st.button("🔴 Logout (Admin)", use_container_width=True):
+                st.session_state.authenticated = False
+                st.rerun()
 
-                if ck2.button("🎲 Gerar"):
-                    st.session_state.temp_key = "".join(
-                        secrets.choice(string.ascii_uppercase + string.digits)
-                        for _ in range(12)
+        st.title("🛡️ Painel de Controle - Administrador")
+
+        tab_adm1, tab_adm2, tab_adm3, tab_adm4, tab_adm5 = st.tabs(
+            [
+                "➕ Gerar Chaves",
+                "👥 Gestão de Clientes",
+                "⚙️ Configurar Planos",
+                "💾 Backup/Restore",
+                "📢 Comunicados",
+            ]
+        )
+
+        # --- TAB 1: GERAR CHAVES ---
+        with tab_adm1:
+            with st.expander("Gerador de Chaves", expanded=True):
+                col_gen1, col_gen2 = st.columns([2, 1])
+
+                # Coluna esquerda: dados do cliente/servidor + KeyUser
+                with col_gen1:
+                    srv_name = st.text_input("Nome do Servidor / Cliente")
+                    nitrado_id = st.text_input(
+                        "ID do Servidor na Nitrado (opcional, ex.: 18927875)",
+                        placeholder="Se preencher, será usado como ID interno do servidor",
                     )
-                    st.rerun()
+                    discord_guild_id_input = st.text_input(
+                        "ID do Servidor Discord (Guild ID)",
+                        placeholder="Ex.: 1234567890123456789",
+                        help=(
+                            "ID numérico do servidor Discord do administrador. "
+                            "Discord > Configurações > Avançado > Modo desenvolvedor > "
+                            "Botão direito no servidor > Copiar ID do servidor."
+                        ),
+                    )
+                    plano_sel = st.selectbox("Escolha o Plano", list(PLANOS.keys()))
 
-            # Coluna direita: validade e gravação
-            with col_gen2:
-                dias_v = st.number_input("Dias de validade", min_value=1, value=30)
-
-                if st.button("🚀 Registrar e Ativar", use_container_width=True):
-                    if not srv_name or not new_k:
-                        st.error("Preencha o nome do servidor/cliente e a KeyUser.")
-                    else:
-                        # 1) Definir ID interno do servidor (server_id)
-                        #    Se tiver ID Nitrado, usa ele; senão gera aleatório
-                        if nitrado_id.strip():
-                            server_id = nitrado_id.strip()
-                        else:
-                            server_id = "".join(
-                                secrets.choice(string.ascii_uppercase + string.digits)
-                                for _ in range(12)
-                            )
-
-                        # 2) Calcular data de expiração
-                        data_exp = (
-                            get_hora_brasilia() + timedelta(days=dias_v)
-                        ).strftime("%d/%m/%Y")
-
-                        # 3) Registrar no users_db: KeyUser -> dados + server_id
-                        st.session_state.db_users["keys"][new_k] = {
-                            "server": srv_name,
-                            "server_id": server_id,
-                            "expires": data_exp,
-                            "plano": plano_sel,
-                            "discord_guild_id": discord_guild_id_input.strip(),
-                        }
-                        save_db(DB_USERS, st.session_state.db_users)
-
-                        # 4) Inicializar estrutura em db_clients para esse server_id
-                        if server_id not in st.session_state.db_clients:
-                            st.session_state.db_clients[server_id] = {
-                                "ftp": {
-                                    "host": "",
-                                    "user": "",
-                                    "pass": "",
-                                    "port": "21",
-                                },
-                                "agendas": [],
-                                "logs": [],
-                                "comunicados": [],
-                                "players": {},
-                            }
-                            save_db(DB_CLIENTS, st.session_state.db_clients)
-
+                    if "temp_key" not in st.session_state:
                         st.session_state.temp_key = ""
-                        st.success(
-                            f"Chave para '{srv_name}' ativada!\n\n"
-                            f"- KeyUser (login do cliente): {new_k}\n"
-                            f"- ID interno do servidor: {server_id}\n"
-                            f"- Guild Discord: {discord_guild_id_input.strip() or '(não informado)'}"
+                    ck1, ck2 = st.columns([3, 1])
+                    new_k = ck1.text_input(
+                        "KeyUser (chave de acesso)",
+                        value=st.session_state.temp_key,
+                    )
+
+                    if ck2.button("🎲 Gerar"):
+                        st.session_state.temp_key = "".join(
+                            secrets.choice(string.ascii_uppercase + string.digits)
+                            for _ in range(12)
                         )
                         st.rerun()
 
-    # --- TAB 2: GESTÃO DE CLIENTES ---
-    with tab_adm2:
-        st.subheader("👥 Gestão de Clientes Ativos")
-        if not st.session_state.db_users["keys"]:
-            st.info("Nenhum cliente cadastrado no momento.")
+                # Coluna direita: validade e gravação
+                with col_gen2:
+                    dias_v = st.number_input("Dias de validade", min_value=1, value=30)
 
-        for k, v in list(st.session_state.db_users["keys"].items()):
-            dt_exp_check = datetime.strptime(v["expires"], "%d/%m/%Y").date()
-            dias_rest = (dt_exp_check - get_hora_brasilia().date()).days
-            cor_status = "🟢" if dias_rest > 0 else "🔴"
+                    if st.button("🚀 Registrar e Ativar", use_container_width=True):
+                        if not srv_name or not new_k:
+                            st.error("Preencha o nome do servidor/cliente e a KeyUser.")
+                        else:
+                            # 1) Definir ID interno do servidor (server_id)
+                            if nitrado_id.strip():
+                                server_id = nitrado_id.strip()
+                            else:
+                                server_id = "".join(
+                                    secrets.choice(string.ascii_uppercase + string.digits)
+                                    for _ in range(12)
+                                )
 
-            limites_globais = st.session_state.db_users.get("config_planos", PLANOS)
-            uso_atual = len(st.session_state.db_clients.get(k, {}).get("agendas", []))
-            limite_padrao = limites_globais.get(v.get("plano", "Starter"), 2)
-            limite_final = v.get("limite_extra", limite_padrao)
+                            # 2) Calcular data de expiração
+                            data_exp = (
+                                get_hora_brasilia() + timedelta(days=dias_v)
+                            ).strftime("%d/%m/%Y")
 
-            with st.expander(
-                f"{cor_status} {v['server']} | {v.get('plano', 'Starter')} ({uso_atual}/{limite_final})"
-            ):
-                st.markdown("### 🔑 Credenciais de Acesso")
-                st.code(k)
-                st.divider()
+                            # 3) Registrar no users_db: KeyUser -> dados + server_id
+                            st.session_state.db_users["keys"][new_k] = {
+                                "server": srv_name,
+                                "server_id": server_id,
+                                "expires": data_exp,
+                                "plano": plano_sel,
+                                "discord_guild_id": discord_guild_id_input.strip(),
+                            }
+                            save_db(DB_USERS, st.session_state.db_users)
 
-                st.markdown("#### 🌐 Monitoramento e Segurança")
-                col_mon1, col_mon2 = st.columns(2)
-                with col_mon1:
-                    st.write(f"**📍 Localização:** {v.get('local', 'Nenhum acesso registrado')}")
-                    st.write(f"**🖥️ IP:** {v.get('last_ip', '0.0.0.0')}")
-                with col_mon2:
-                    st.write(f"**🕒 Último Login:** {v.get('last_login', '---')}")
+                            # 4) Inicializar estrutura em db_clients para esse server_id
+                            if server_id not in st.session_state.db_clients:
+                                st.session_state.db_clients[server_id] = {
+                                    "ftp": {
+                                        "host": "",
+                                        "user": "",
+                                        "pass": "",
+                                        "port": "21",
+                                    },
+                                    "agendas": [],
+                                    "logs": [],
+                                    "comunicados": [],
+                                    "players": {},
+                                }
+                                save_db(DB_CLIENTS, st.session_state.db_clients)
+
+                            st.session_state.temp_key = ""
+                            st.success(
+                                f"Chave para '{srv_name}' ativada!\n\n"
+                                f"- KeyUser (login do cliente): {new_k}\n"
+                                f"- ID interno do servidor: {server_id}\n"
+                                f"- Guild Discord: {discord_guild_id_input.strip() or '(não informado)'}"
+                            )
+                            st.rerun()
+
+        # --- TAB 2: GESTÃO DE CLIENTES ---
+        with tab_adm2:
+            st.subheader("👥 Gestão de Clientes Ativos")
+            if not st.session_state.db_users["keys"]:
+                st.info("Nenhum cliente cadastrado no momento.")
+
+            for k, v in list(st.session_state.db_users["keys"].items()):
+                dt_exp_check = datetime.strptime(v["expires"], "%d/%m/%Y").date()
+                dias_rest = (dt_exp_check - get_hora_brasilia().date()).days
+                cor_status = "🟢" if dias_rest > 0 else "🔴"
+
+                limites_globais = st.session_state.db_users.get("config_planos", PLANOS)
+                uso_atual = len(st.session_state.db_clients.get(k, {}).get("agendas", []))
+                limite_padrao = limites_globais.get(v.get("plano", "Starter"), 2)
+                limite_final = v.get("limite_extra", limite_padrao)
+
+                with st.expander(
+                    f"{cor_status} {v['server']} | {v.get('plano', 'Starter')} ({uso_atual}/{limite_final})"
+                ):
+                    st.markdown("### 🔑 Credenciais de Acesso")
+                    st.code(k)
+                    st.divider()
+
+                    st.markdown("#### 🌐 Monitoramento e Segurança")
+                    col_mon1, col_mon2 = st.columns(2)
+                    with col_mon1:
+                        st.write(f"**📍 Localização:** {v.get('local', 'Nenhum acesso registrado')}")
+                        st.write(f"**🖥️ IP:** {v.get('last_ip', '0.0.0.0')}")
+                    with col_mon2:
+                        st.write(f"**🕒 Último Login:** {v.get('last_login', '---')}")
+                        if st.button(
+                            "🚫 Banir Acesso (Expirar Key)",
+                            key=f"ban_{k}",
+                            type="primary",
+                            use_container_width=True,
+                        ):
+                            v["expires"] = (
+                                get_hora_brasilia() - timedelta(days=1)
+                            ).strftime("%d/%m/%Y")
+                            save_db(DB_USERS, st.session_state.db_users)
+                            st.warning(f"O acesso de {v['server']} foi bloqueado.")
+                            st.rerun()
+
+                    st.divider()
+
+                    c_edit1, c_edit2 = st.columns(2)
+                    with c_edit1:
+                        st.markdown("#### 📝 Informações e Plano")
+                        new_n = st.text_input(
+                            "Editar Nome", value=v["server"], key=f"n_{k}"
+                        )
+                        new_p = st.selectbox(
+                            "Trocar Plano",
+                            list(PLANOS.keys()),
+                            index=list(PLANOS.keys()).index(v.get("plano", "Starter")),
+                            key=f"p_{k}",
+                        )
+                        new_lim = st.number_input(
+                            "Ajustar Limite",
+                            min_value=1,
+                            value=int(limite_final),
+                            key=f"lim_{k}",
+                        )
+
+                        st.markdown("#### 📧 Contatos de Notificação")
+                        new_mail = st.text_input(
+                            "E-mail do Cliente", value=v.get("email", ""), key=f"mail_{k}"
+                        )
+                        new_wa = st.text_input(
+                            "WhatsApp (com DDD)",
+                            value=v.get("whatsapp", ""),
+                            key=f"wa_{k}",
+                        )
+
+                        st.markdown("#### 🎮 Integração Discord")
+                        new_guild = st.text_input(
+                            "ID do Servidor Discord (Guild ID)",
+                            value=v.get("discord_guild_id", ""),
+                            key=f"guild_{k}",
+                            help=(
+                                "ID numérico do servidor Discord do administrador. "
+                                "Para obter: Discord > Configurações > Avançado > Modo desenvolvedor ativo. "
+                                "Depois clique com botão direito no servidor > Copiar ID do servidor."
+                            ),
+                        )
+
+                        if st.button(
+                            "💾 Salvar Alterações",
+                            key=f"bn_{k}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.db_users["keys"][k]["server"] = new_n
+                            st.session_state.db_users["keys"][k]["plano"] = new_p
+                            st.session_state.db_users["keys"][k]["limite_extra"] = new_lim
+                            st.session_state.db_users["keys"][k]["email"] = new_mail
+                            st.session_state.db_users["keys"][k]["whatsapp"] = new_wa
+                            st.session_state.db_users["keys"][k]["discord_guild_id"] = new_guild.strip()
+                            save_db(DB_USERS, st.session_state.db_users)
+                            st.success("Dados atualizados!")
+                            st.rerun()
+
+                    with c_edit2:
+                        st.markdown("#### 📅 Validade do Acesso")
+                        st.write(f"**Expira em:** {v['expires']} ({dias_rest} dias)")
+                        add_d = st.number_input(
+                            "Adicionar dias", min_value=1, value=30, key=f"d_{k}"
+                        )
+                        if st.button(
+                            "➕ Estender/Renovar",
+                            key=f"bd_{k}",
+                            use_container_width=True,
+                        ):
+                            nova_data = (
+                                dt_exp_check + timedelta(days=add_d)
+                            ).strftime("%d/%m/%Y")
+                            st.session_state.db_users["keys"][k]["expires"] = nova_data
+                            save_db(DB_USERS, st.session_state.db_users)
+                            st.success(f"Estendido para {nova_data}!")
+                            st.rerun()
+
+                    st.divider()
+
                     if st.button(
-                        "🚫 Banir Acesso (Expirar Key)",
-                        key=f"ban_{k}",
+                        "🗑️ EXCLUIR CLIENTE PERMANENTEMENTE",
+                        key=f"del_{k}",
                         type="primary",
                         use_container_width=True,
                     ):
-                        v["expires"] = (
-                            get_hora_brasilia() - timedelta(days=1)
-                        ).strftime("%d/%m/%Y")
+                        del st.session_state.db_users["keys"][k]
+                        if k in st.session_state.db_clients:
+                            del st.session_state.db_clients[k]
                         save_db(DB_USERS, st.session_state.db_users)
-                        st.warning(f"O acesso de {v['server']} foi bloqueado.")
+                        save_db(DB_CLIENTS, st.session_state.db_clients)
                         st.rerun()
 
-                st.divider()
+        # --- TAB 3: CONFIG PLANOS ---
+        with tab_adm3:
+            st.subheader("⚙️ Configuração Global de Limites")
+            if "config_planos" not in st.session_state.db_users:
+                st.session_state.db_users["config_planos"] = PLANOS.copy()
+            conf_planos = st.session_state.db_users["config_planos"]
 
-                c_edit1, c_edit2 = st.columns(2)
-                with c_edit1:
-                    st.markdown("#### 📝 Informações e Plano")
-                    new_n = st.text_input(
-                        "Editar Nome", value=v["server"], key=f"n_{k}"
-                    )
-                    new_p = st.selectbox(
-                        "Trocar Plano",
-                        list(PLANOS.keys()),
-                        index=list(PLANOS.keys()).index(v.get("plano", "Starter")),
-                        key=f"p_{k}",
-                    )
-                    new_lim = st.number_input(
-                        "Ajustar Limite",
-                        min_value=1,
-                        value=int(limite_final),
-                        key=f"lim_{k}",
-                    )
+            col_p1, col_p2, col_p3 = st.columns(3)
+            with col_p1:
+                novo_starter = st.number_input(
+                    "Starter",
+                    min_value=1,
+                    value=conf_planos.get("Starter", 2),
+                    key="conf_starter",
+                )
+            with col_p2:
+                novo_pro = st.number_input(
+                    "Pro",
+                    min_value=1,
+                    value=conf_planos.get("Pro", 10),
+                    key="conf_pro",
+                )
+            with col_p3:
+                novo_ent = st.number_input(
+                    "Enterprise",
+                    min_value=1,
+                    value=conf_planos.get("Enterprise", 999),
+                    key="conf_ent",
+                )
 
-                    st.markdown("#### 📧 Contatos de Notificação")
-                    new_mail = st.text_input(
-                        "E-mail do Cliente", value=v.get("email", ""), key=f"mail_{k}"
-                    )
-                    new_wa = st.text_input(
-                        "WhatsApp (com DDD)",
-                        value=v.get("whatsapp", ""),
-                        key=f"wa_{k}",
-                    )
+            if st.button("🚀 Aplicar Limites Globais", use_container_width=True):
+                st.session_state.db_users["config_planos"] = {
+                    "Starter": novo_starter,
+                    "Pro": novo_pro,
+                    "Enterprise": novo_ent,
+                }
+                save_db(DB_USERS, st.session_state.db_users)
+                st.success("Limites globais atualizados!")
+                time.sleep(1)
+                st.rerun()
 
-                    st.markdown("#### 🎮 Integração Discord")
-                    new_guild = st.text_input(
-                        "ID do Servidor Discord (Guild ID)",
-                        value=v.get("discord_guild_id", ""),
-                        key=f"guild_{k}",
-                        help=(
-                            "ID numérico do servidor Discord do administrador. "
-                            "Para obter: Discord > Configurações > Avançado > Modo desenvolvedor ativo. "
-                            "Depois clique com botão direito no servidor > Copiar ID do servidor."
-                        ),
-                    )
+        # --- TAB 4: BACKUP / RESTORE ---
+        with tab_adm4:
+            st.subheader("📦 Central de Migração de Dados")
+            st.info("Faça backup antes de atualizar e restaure logo após o deploy.")
+            col_back, col_rest = st.columns(2)
+            with col_back:
+                st.markdown("### ⬇️ Exportar Backup")
+                dados_totais = {
+                    "users": st.session_state.db_users,
+                    "clients": st.session_state.db_clients,
+                }
+                json_string = json.dumps(dados_totais, indent=4, ensure_ascii=False)
+                st.download_button(
+                    label="💾 Baixar Backup Geral (JSON)",
+                    data=json_string,
+                    file_name=f"backup_titan_{get_hora_brasilia().strftime('%d_%m_%Y')}.json",
+                    mime="application/json",
+                    use_container_width=True,
+                )
+            with col_rest:
+                st.markdown("### ⬆️ Importar/Restaurar")
+                arquivo_upload = st.file_uploader(
+                    "Selecione o arquivo de backup", type="json"
+                )
+                if st.button(
+                    "🚀 Restaurar Dados Agora", use_container_width=True, type="primary"
+                ):
+                    if arquivo_upload is not None:
+                        try:
+                            backup_data = json.load(arquivo_upload)
+                            if "users" in backup_data and "clients" in backup_data:
+                                st.session_state.db_users = backup_data["users"]
+                                st.session_state.db_clients = backup_data["clients"]
+                                save_db(DB_USERS, st.session_state.db_users)
+                                save_db(DB_CLIENTS, st.session_state.db_clients)
+                                st.success("✅ Restauração concluída!")
+                                time.sleep(2)
+                                st.rerun()
+                            else:
+                                st.error("❌ Arquivo inválido!")
+                        except Exception as e:
+                            st.error(f"❌ Erro: {e}")
 
-                    if st.button(
-                        "💾 Salvar Alterações",
-                        key=f"bn_{k}",
-                        use_container_width=True,
-                    ):
-                        st.session_state.db_users["keys"][k]["server"] = new_n
-                        st.session_state.db_users["keys"][k]["plano"] = new_p
-                        st.session_state.db_users["keys"][k]["limite_extra"] = new_lim
-                        st.session_state.db_users["keys"][k]["email"] = new_mail
-                        st.session_state.db_users["keys"][k]["whatsapp"] = new_wa
-                        st.session_state.db_users["keys"][k]["discord_guild_id"] = new_guild.strip()
-                        save_db(DB_USERS, st.session_state.db_users)
-                        st.success("Dados atualizados!")
-                        st.rerun()
+        # --- TAB 5: COMUNICADOS ---
+        with tab_adm5:
+            st.subheader("📢 Enviar Comunicado Oficial")
+            col_c1, col_c2 = st.columns([1, 2])
 
-                with c_edit2:
-                    st.markdown("#### 📅 Validade do Acesso")
-                    st.write(f"**Expira em:** {v['expires']} ({dias_rest} dias)")
-                    add_d = st.number_input(
-                        "Adicionar dias", min_value=1, value=30, key=f"d_{k}"
-                    )
-                    if st.button(
-                        "➕ Estender/Renovar",
-                        key=f"bd_{k}",
-                        use_container_width=True,
-                    ):
-                        nova_data = (
-                            dt_exp_check + timedelta(days=add_d)
-                        ).strftime("%d/%m/%Y")
-                        st.session_state.db_users["keys"][k]["expires"] = nova_data
-                        save_db(DB_USERS, st.session_state.db_users)
-                        st.success(f"Estendido para {nova_data}!")
-                        st.rerun()
+            with col_c1:
+                opcoes_clientes = {
+                    v["server"]: k for k, v in st.session_state.db_users["keys"].items()
+                }
+                alvos = st.multiselect(
+                    "Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos"
+                )
 
-                st.divider()
+                st.write("**Enviar via:**")
+                send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
+                send_mail = st.checkbox("E-mail")
+                send_wa = st.checkbox("WhatsApp")
+                send_disc = st.checkbox("Discord (Webhook do Cliente)")
+
+            with col_c2:
+                titulo_com = st.text_input(
+                    "Título do Comunicado",
+                    placeholder="Ex: Manutenção Programada",
+                    key="input_tit_com",
+                )
+                corpo_com = st.text_area(
+                    "Mensagem",
+                    height=200,
+                    placeholder="Escreva aqui os detalhes...",
+                    key="input_msg_com",
+                )
 
                 if st.button(
-                    "🗑️ EXCLUIR CLIENTE PERMANENTEMENTE",
-                    key=f"del_{k}",
-                    type="primary",
-                    use_container_width=True,
+                    "🚀 Disparar Comunicado", use_container_width=True, type="primary"
                 ):
-                    del st.session_state.db_users["keys"][k]
-                    if k in st.session_state.db_clients:
-                        del st.session_state.db_clients[k]
-                    save_db(DB_USERS, st.session_state.db_users)
-                    save_db(DB_CLIENTS, st.session_state.db_clients)
-                    st.rerun()
-
-    # --- TAB 3: CONFIG PLANOS ---
-    with tab_adm3:
-        st.subheader("⚙️ Configuração Global de Limites")
-        if "config_planos" not in st.session_state.db_users:
-            st.session_state.db_users["config_planos"] = PLANOS.copy()
-        conf_planos = st.session_state.db_users["config_planos"]
-
-        col_p1, col_p2, col_p3 = st.columns(3)
-        with col_p1:
-            novo_starter = st.number_input(
-                "Starter",
-                min_value=1,
-                value=conf_planos.get("Starter", 2),
-                key="conf_starter",
-            )
-        with col_p2:
-            novo_pro = st.number_input(
-                "Pro",
-                min_value=1,
-                value=conf_planos.get("Pro", 10),
-                key="conf_pro",
-            )
-        with col_p3:
-            novo_ent = st.number_input(
-                "Enterprise",
-                min_value=1,
-                value=conf_planos.get("Enterprise", 999),
-                key="conf_ent",
-            )
-
-        if st.button("🚀 Aplicar Limites Globais", use_container_width=True):
-            st.session_state.db_users["config_planos"] = {
-                "Starter": novo_starter,
-                "Pro": novo_pro,
-                "Enterprise": novo_ent,
-            }
-            save_db(DB_USERS, st.session_state.db_users)
-            st.success("Limites globais atualizados!")
-            time.sleep(1)
-            st.rerun()
-
-    # --- TAB 4: BACKUP / RESTORE ---
-    with tab_adm4:
-        st.subheader("📦 Central de Migração de Dados")
-        st.info("Faça backup antes de atualizar e restaure logo após o deploy.")
-        col_back, col_rest = st.columns(2)
-        with col_back:
-            st.markdown("### ⬇️ Exportar Backup")
-            dados_totais = {
-                "users": st.session_state.db_users,
-                "clients": st.session_state.db_clients,
-            }
-            json_string = json.dumps(dados_totais, indent=4, ensure_ascii=False)
-            st.download_button(
-                label="💾 Baixar Backup Geral (JSON)",
-                data=json_string,
-                file_name=f"backup_titan_{get_hora_brasilia().strftime('%d_%m_%Y')}.json",
-                mime="application/json",
-                use_container_width=True,
-            )
-        with col_rest:
-            st.markdown("### ⬆️ Importar/Restaurar")
-            arquivo_upload = st.file_uploader(
-                "Selecione o arquivo de backup", type="json"
-            )
-            if st.button(
-                "🚀 Restaurar Dados Agora", use_container_width=True, type="primary"
-            ):
-                if arquivo_upload is not None:
-                    try:
-                        backup_data = json.load(arquivo_upload)
-                        if "users" in backup_data and "clients" in backup_data:
-                            st.session_state.db_users = backup_data["users"]
-                            st.session_state.db_clients = backup_data["clients"]
-                            save_db(DB_USERS, st.session_state.db_users)
-                            save_db(DB_CLIENTS, st.session_state.db_clients)
-                            st.success("✅ Restauração concluída!")
-                            time.sleep(2)
-                            st.rerun()
-                        else:
-                            st.error("❌ Arquivo inválido!")
-                    except Exception as e:
-                        st.error(f"❌ Erro: {e}")
-
-    # --- TAB 5: COMUNICADOS ---
-    with tab_adm5:
-        st.subheader("📢 Enviar Comunicado Oficial")
-        col_c1, col_c2 = st.columns([1, 2])
-
-        with col_c1:
-            opcoes_clientes = {
-                v["server"]: k for k, v in st.session_state.db_users["keys"].items()
-            }
-            alvos = st.multiselect(
-                "Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos"
-            )
-
-            st.write("**Enviar via:**")
-            send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
-            send_mail = st.checkbox("E-mail")
-            send_wa = st.checkbox("WhatsApp")
-            send_disc = st.checkbox("Discord (Webhook do Cliente)")
-
-        with col_c2:
-            titulo_com = st.text_input(
-                "Título do Comunicado",
-                placeholder="Ex: Manutenção Programada",
-                key="input_tit_com",
-            )
-            corpo_com = st.text_area(
-                "Mensagem",
-                height=200,
-                placeholder="Escreva aqui os detalhes...",
-                key="input_msg_com",
-            )
-
-            if st.button(
-                "🚀 Disparar Comunicado", use_container_width=True, type="primary"
-            ):
-                if titulo_com and corpo_com:
-                    st.session_state.db_users = load_db(
-                        DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}}
-                    )
-                    st.session_state.db_clients = load_db(DB_CLIENTS, {})
-
-                    if "Todos" in alvos:
-                        destinatarios = list(st.session_state.db_users["keys"].keys())
-                    else:
-                        destinatarios = [
-                            opcoes_clientes[nome] for nome in alvos
-                        ]
-
-                    comunicado_obj = {
-                        "id": str(time.time()),
-                        "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
-                        "titulo": titulo_com,
-                        "mensagem": corpo_com,
-                        "lido": False,
-                    }
-
-                    for d_id in destinatarios:
-                        if d_id not in st.session_state.db_clients:
-                            st.session_state.db_clients[d_id] = {
-                                "ftp": {
-                                    "host": "",
-                                    "user": "",
-                                    "pass": "",
-                                    "port": "21",
-                                },
-                                "agendas": [],
-                                "logs": [],
-                                "comunicados": [],
-                            }
-                        if "comunicados" not in st.session_state.db_clients[d_id]:
-                            st.session_state.db_clients[d_id]["comunicados"] = []
-
-                        st.session_state.db_clients[d_id]["comunicados"].insert(
-                            0, comunicado_obj
+                    if titulo_com and corpo_com:
+                        st.session_state.db_users = load_db(
+                            DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}}
                         )
+                        st.session_state.db_clients = load_db(DB_CLIENTS, {})
 
-                        if send_disc:
-                            webhook_url = st.session_state.db_clients.get(d_id, {}).get(
-                                "discord_webhook"
+                        if "Todos" in alvos:
+                            destinatarios = list(st.session_state.db_users["keys"].keys())
+                        else:
+                            destinatarios = [
+                                opcoes_clientes[nome] for nome in alvos
+                            ]
+
+                        comunicado_obj = {
+                            "id": str(time.time()),
+                            "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
+                            "titulo": titulo_com,
+                            "mensagem": corpo_com,
+                            "lido": False,
+                        }
+
+                        for d_id in destinatarios:
+                            if d_id not in st.session_state.db_clients:
+                                st.session_state.db_clients[d_id] = {
+                                    "ftp": {
+                                        "host": "",
+                                        "user": "",
+                                        "pass": "",
+                                        "port": "21",
+                                    },
+                                    "agendas": [],
+                                    "logs": [],
+                                    "comunicados": [],
+                                }
+                            if "comunicados" not in st.session_state.db_clients[d_id]:
+                                st.session_state.db_clients[d_id]["comunicados"] = []
+
+                            st.session_state.db_clients[d_id]["comunicados"].insert(
+                                0, comunicado_obj
                             )
-                            if webhook_url:
-                                try:
-                                    payload = {
-                                        "embeds": [
-                                            {
-                                                "title": f"📢 {titulo_com}",
-                                                "description": corpo_com,
-                                                "color": 16711680,
-                                            }
-                                        ]
-                                    }
-                                    requests.post(
-                                        webhook_url, json=payload, timeout=5
-                                    )
-                                except Exception:
-                                    pass
 
-                        if send_mail:
-                            email_cli = (
-                                st.session_state.db_users["keys"]
-                                .get(d_id, {})
-                                .get("email")
-                            )
-                            if email_cli:
-                                enviar_email(email_cli, titulo_com, corpo_com)
+                            if send_disc:
+                                webhook_url = st.session_state.db_clients.get(d_id, {}).get(
+                                    "discord_webhook"
+                                )
+                                if webhook_url:
+                                    try:
+                                        payload = {
+                                            "embeds": [
+                                                {
+                                                    "title": f"📢 {titulo_com}",
+                                                    "description": corpo_com,
+                                                    "color": 16711680,
+                                                }
+                                            ]
+                                        }
+                                        requests.post(
+                                            webhook_url, json=payload, timeout=5
+                                        )
+                                    except Exception:
+                                        pass
 
-                        if send_wa:
-                            wpp_cli = (
-                                st.session_state.db_users["keys"]
-                                .get(d_id, {})
-                                .get("whatsapp")
-                            )
-                            if wpp_cli:
-                                enviar_whatsapp(wpp_cli, corpo_com)
+                            if send_mail:
+                                email_cli = (
+                                    st.session_state.db_users["keys"]
+                                    .get(d_id, {})
+                                    .get("email")
+                                )
+                                if email_cli:
+                                    enviar_email(email_cli, titulo_com, corpo_com)
 
-                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                            if send_wa:
+                                wpp_cli = (
+                                    st.session_state.db_users["keys"]
+                                    .get(d_id, {})
+                                    .get("whatsapp")
+                                )
+                                if wpp_cli:
+                                    enviar_whatsapp(wpp_cli, corpo_com)
 
-                    if "input_tit_com" in st.session_state:
-                        del st.session_state["input_tit_com"]
-                    if "input_msg_com" in st.session_state:
-                        del st.session_state["input_msg_com"]
+                        save_db(DB_CLIENTS, st.session_state.db_clients)
 
-                    st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("Preencha o título e a mensagem.")
+                        if "input_tit_com" in st.session_state:
+                            del st.session_state["input_tit_com"]
+                        if "input_msg_com" in st.session_state:
+                            del st.session_state["input_msg_com"]
 
-    st.stop()
+                        st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Preencha o título e a mensagem.")
+else:
+    # PORTAL DO JOGADOR
+    player_portal_main()
 
 
 # =========================================================
-# 6. ÁREA DO CLIENTE
+# 7. ÁREA DO CLIENTE
 # =========================================================
 
 user_id = st.session_state.user_key
