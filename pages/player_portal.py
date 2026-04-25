@@ -726,6 +726,240 @@ def parse_adm_killfeed_pvp(log_text: str) -> list:
     return {"players": players}
 
 # =========================================================
+# 4.3 RANKING SEMANAL — ACUMULADO 7 DIAS
+# =========================================================
+
+def ftp_download_adm_files_weekly(ftp_cfg: dict, max_files: int = 7) -> str:
+    """
+    Baixa os últimos max_files arquivos .ADM via FTP e concatena o conteúdo.
+    Retorna string com todos os logs unidos.
+    """
+    arquivos = ftp_list_adm_files(ftp_cfg)
+    if not arquivos:
+        return ""
+
+    # Pega os últimos max_files arquivos (mais recentes primeiro)
+    arquivos_semana = arquivos[:max_files]
+    conteudo_total = ""
+
+    try:
+        with FTP() as ftp:
+            ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=15)
+            ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
+            ftp.cwd(DAYZ_LOG_DIR)
+
+            for nome_arquivo in arquivos_semana:
+                buffer = io.BytesIO()
+                try:
+                    ftp.retrbinary(f"RETR {nome_arquivo}", buffer.write)
+                    texto = buffer.getvalue().decode("utf-8", errors="ignore")
+                    conteudo_total += texto + "\n"
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    return conteudo_total
+
+
+def parse_adm_semanal(log_text: str) -> dict:
+    """
+    Parser completo para ranking semanal.
+    Processa múltiplos arquivos .ADM concatenados.
+    Retorna dict com stats acumulados por jogador:
+    {
+      "nome": {
+        "total_play_seconds": int,       # tempo total de jogo
+        "session_count": int,            # número de sessões
+        "max_survival_seconds": int,     # maior tempo sobrevivendo sem morrer
+        "current_survival_seconds": int, # tempo sobrevivendo atual (sessão em aberto)
+        "total_survival_seconds": int,   # acumulado de todos os períodos vivos
+        "pve_hits": int,                 # hits por zumbi
+        "pve_suicides": int,             # suicídios
+        "pvp_kills": int,                # kills PvP
+        "pvp_deaths": int,               # mortes PvP
+        "last_spawn_dt": datetime|None,  # último spawn (connect ou respawn)
+        "last_death_dt": datetime|None,  # última morte
+        "xp": float,                     # calculado: baseado em tempo de sobrevivência
+      }
+    }
+    """
+    if not log_text or not log_text.strip():
+        return {}
+
+    players = {}
+
+    # Regex
+    re_player_line   = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)"')
+    re_date_header   = re.compile(r'AdminLog started on (\d{4}-\d{2}-\d{2})')
+    re_hit_infected  = re.compile(r'hit by Infected .* for ([\d.]+) damage')
+    re_killed_pvp    = re.compile(r'\) killed Player "([^"]+)"')
+    re_died          = re.compile(r'\(DEAD\).*died\.')
+    re_pos           = re.compile(r'pos=<([\d., -]+)>')
+
+    # Palavras-chave
+    key_connected    = "is connected"
+    key_connecting   = "is connecting"
+    key_disconnected = "has been disconnected"
+    key_suicide_emote= "performed EmoteSuicide"
+    key_committed_sui= "committed suicide"
+    key_hit_infected = "hit by Infected"
+    key_killed       = ") killed Player"
+    key_died         = "(DEAD)"
+
+    # Data corrente do bloco sendo processado
+    current_date = datetime.now(FUSO_BR).date()
+
+    def parse_dt(tstr: str, date=None):
+        base = date or current_date
+        try:
+            dt = datetime.strptime(f"{base} {tstr}", "%Y-%m-%d %H:%M:%S")
+            return dt.replace(tzinfo=FUSO_BR)
+        except Exception:
+            return None
+
+    def ensure_player(name: str) -> dict:
+        if name not in players:
+            players[name] = {
+                "total_play_seconds": 0,
+                "session_count": 0,
+                "max_survival_seconds": 0,
+                "current_survival_seconds": 0,
+                "total_survival_seconds": 0,
+                "pve_hits": 0,
+                "pve_suicides": 0,
+                "pvp_kills": 0,
+                "pvp_deaths": 0,
+                "last_connect_dt": None,
+                "last_spawn_dt": None,
+                "last_death_dt": None,
+                "xp": 0.0,
+            }
+        return players[name]
+
+    def registrar_morte(p: dict, dt_morte):
+        """Registra morte: fecha período de sobrevivência e acumula XP."""
+        if p.get("last_spawn_dt") and dt_morte:
+            delta = (dt_morte - p["last_spawn_dt"]).total_seconds()
+            if delta > 0:
+                surv = int(delta)
+                p["total_survival_seconds"] += surv
+                if surv > p["max_survival_seconds"]:
+                    p["max_survival_seconds"] = surv
+        p["last_death_dt"] = dt_morte
+        p["last_spawn_dt"] = None
+        # XP = total de segundos sobrevivendo / 60 (minutos = pontos de XP)
+        p["xp"] = round(p["total_survival_seconds"] / 60, 2)
+
+    for line in log_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        # Atualiza data do bloco
+        m_date = re_date_header.search(line)
+        if m_date:
+            try:
+                current_date = datetime.strptime(m_date.group(1), "%Y-%m-%d").date()
+            except Exception:
+                pass
+            continue
+
+        m = re_player_line.match(line)
+        if not m:
+            continue
+
+        hora_str = m.group(1)
+        nome = m.group(2)
+        # Ignora linhas de jogador morto para stats principais
+        is_dead_line = key_died in line
+
+        dt_evento = parse_dt(hora_str, current_date)
+        p = ensure_player(nome)
+
+        # Conexão
+        if key_connected in line and key_connecting not in line and not is_dead_line:
+            p["last_connect_dt"] = dt_evento
+            # Considera connect como novo spawn (novo personagem)
+            if p["last_spawn_dt"] is None:
+                p["last_spawn_dt"] = dt_evento
+
+        # Desconexão — fecha sessão de jogo
+        elif key_disconnected in line:
+            if p.get("last_connect_dt") and dt_evento:
+                delta = (dt_evento - p["last_connect_dt"]).total_seconds()
+                if delta > 0:
+                    p["total_play_seconds"] += int(delta)
+                    p["session_count"] += 1
+            p["last_connect_dt"] = None
+
+        # Hit por Infected (dano real)
+        if key_hit_infected in line and not is_dead_line:
+            m_hit = re_hit_infected.search(line)
+            if m_hit and float(m_hit.group(1)) > 0:
+                p["pve_hits"] += 1
+
+        # Suicídio / EmoteSuicide
+        if key_suicide_emote in line or key_committed_sui in line:
+            if not is_dead_line:
+                p["pve_suicides"] += 1
+            registrar_morte(p, dt_evento)
+
+        # Morte real (DEAD died)
+        if is_dead_line and "died." in line and key_committed_sui not in line:
+            registrar_morte(p, dt_evento)
+            p["pvp_deaths"] += 1
+
+        # Kill PvP — credita para o assassino
+        if key_killed in line and not is_dead_line:
+            m_kill = re_killed_pvp.search(line)
+            if m_kill:
+                p["pvp_kills"] += 1
+                # Registra morte para a vítima
+                vitima = m_kill.group(1)
+                pv = ensure_player(vitima)
+                registrar_morte(pv, dt_evento)
+                pv["pvp_deaths"] += 1
+
+    # Recalcula XP final para todos
+    for nome, p in players.items():
+        # Se jogador ainda está vivo (sem morte registrada), estima sobrevivência
+        if p.get("last_spawn_dt") and p.get("last_connect_dt"):
+            agora = datetime.now(FUSO_BR)
+            delta_atual = (agora - p["last_spawn_dt"]).total_seconds()
+            if delta_atual > 0:
+                p["current_survival_seconds"] = int(delta_atual)
+        p["xp"] = round(p["total_survival_seconds"] / 60, 2)
+
+    return players
+
+
+def get_magnata_ranking(clients_db: dict, server_id: str) -> list:
+    """
+    Retorna top 10 jogadores por saldo total (banco + carteira) em DzCoins.
+    """
+    client_data = clients_db.get(server_id, {})
+    wallets = client_data.get("wallets", {})
+    bank = client_data.get("bank", {})
+
+    ranking = []
+    todos_jogadores = set(list(wallets.keys()) + list(bank.keys()))
+
+    for gt in todos_jogadores:
+        saldo_w = wallets.get(gt, {}).get("balance", 0)
+        saldo_b = bank.get(gt, {}).get("balance", 0)
+        total = saldo_w + saldo_b
+        ranking.append({
+            "gamertag": gt,
+            "carteira": saldo_w,
+            "banco": saldo_b,
+            "total": total,
+        })
+
+    ranking.sort(key=lambda x: x["total"], reverse=True)
+    return ranking[:10]
+    
+# =========================================================
 # 5. COMPONENTES DE UI
 # =========================================================
 
@@ -1012,98 +1246,288 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
 # 7. ABA RANKING
 # =========================================================
 
-def render_ranking(client_data: dict, gamertag_vinculada: str):
+def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict, server_id: str):
     ftp_cfg = get_client_ftp_config(client_data)
     if not ftp_cfg:
         st.warning(
-            "FTP do servidor não está configurado para este cliente. "
+            "FTP do servidor não está configurado. "
             "Peça ao admin para configurar no painel."
         )
         return
 
     @st.fragment(run_every=300)
-    def _ranking(ftp_cfg, gamertag_vinculada):
-        with st.spinner("Carregando dados de ranking a partir dos logs do servidor..."):
-            log_text, err = ftp_download_latest_adm(ftp_cfg)
+    def _ranking(ftp_cfg, gamertag_vinculada, clients_db, server_id):
+        with st.spinner("Carregando ranking semanal (últimos 7 dias)..."):
+            log_text_semanal = ftp_download_adm_files_weekly(ftp_cfg, max_files=7)
 
-        if err or not log_text:
+        if not log_text_semanal.strip():
             st.warning("Não foi possível carregar os logs do servidor.")
-            st.caption(f"Detalhes: {err or 'log vazio'}")
             return
 
-        parsed = parse_adm_sessions_and_pve(log_text)
+        stats = parse_adm_semanal(log_text_semanal)
 
-        if not isinstance(parsed, dict):
-            st.warning("Formato de log não reconhecido.")
+        if not stats:
+            st.info("Nenhuma estatística encontrada nos logs da semana.")
             return
 
-        pstats = parsed.get("players", {})
-        if not pstats:
-            st.info("Nenhuma estatística encontrada no log .ADM mais recente.")
-            return
+        st.caption(
+            f"📊 {len(stats)} jogadores encontrados nos logs dos últimos 7 dias "
+            f"— atualizado a cada 5 min"
+        )
 
-        ranking_play = []
-        for nome, dados in pstats.items():
-            total_play = dados.get("total_play_seconds", 0)
-            ranking_play.append({
-                "Jogador": nome,
-                "Tempo de jogo": format_seconds_hhmmss(total_play),
-                "_segundos": total_play,
-                "Sessões": dados.get("session_count", 0),
-                "Hits PvE": dados.get("pve_hits", 0),
-                "Suicídios": dados.get("pve_suicides", 0),
-            })
+        # ---- Sub-abas de ranking ----
+        sub_play, sub_surv, sub_xp, sub_pvp, sub_pve, sub_dzcoins = st.tabs([
+            "⏱️ Tempo de Jogo",
+            "🏕️ Sobrevivência",
+            "⭐ XP",
+            "⚔️ PvP",
+            "🧟 PvE",
+            "💰 Magnata DzCoins",
+        ])
 
-        ranking_play_sorted = sorted(
-            ranking_play, key=lambda x: x["_segundos"], reverse=True
-        )[:10]
+        # ---- TEMPO DE JOGO TOP 10 ----
+        with sub_play:
+            st.markdown("#### ⏱️ Tempo de Jogo Total — Top 10")
+            ranking_play = sorted(
+                stats.items(),
+                key=lambda x: x[1]["total_play_seconds"],
+                reverse=True
+            )[:10]
 
-        col_r1, col_r2 = st.columns(2)
-
-        with col_r1:
-            st.markdown("#### ⏱️ Tempo de jogo total — Top 10")
-            if ranking_play_sorted:
-                st.table([{
-                    "#": idx + 1,
-                    "Jogador": r["Jogador"],
-                    "Tempo de jogo": r["Tempo de jogo"],
-                    "Sessões": r["Sessões"],
-                } for idx, r in enumerate(ranking_play_sorted)])
+            if not ranking_play:
+                st.info("Sem dados de tempo de jogo.")
             else:
-                st.info("Sem dados de tempo de jogo neste log.")
+                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+                for idx, (nome, dados) in enumerate(ranking_play):
+                    destaque = nome == gamertag_vinculada
+                    cor = "#00d4ff" if destaque else "#e0e0e0"
+                    st.markdown(
+                        f"""
+                        <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
+                                    border-left:3px solid {'#00d4ff' if destaque else '#333'};
+                                    margin-bottom:5px;">
+                            <span style="font-size:16px;">{medalhas[idx]}</span>
+                            <span style="color:{cor}; font-weight:bold; margin-left:8px;">
+                                {nome}
+                            </span>
+                            <span style="color:#aaa; float:right;">
+                                ⏱️ {format_seconds_hhmmss(dados['total_play_seconds'])}
+                                &nbsp;|&nbsp; 🔁 {dados['session_count']} sessões
+                            </span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
-        with col_r2:
+        # ---- SOBREVIVÊNCIA TOP 10 ----
+        with sub_surv:
+            st.markdown("#### 🏕️ Maior Tempo Sobrevivendo — Top 10")
+            st.caption("Tempo máximo que o jogador ficou vivo sem morrer em uma única vida.")
+            ranking_surv = sorted(
+                stats.items(),
+                key=lambda x: x[1]["max_survival_seconds"],
+                reverse=True
+            )[:10]
+
+            if not ranking_surv:
+                st.info("Sem dados de sobrevivência.")
+            else:
+                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+                for idx, (nome, dados) in enumerate(ranking_surv):
+                    destaque = nome == gamertag_vinculada
+                    cor = "#00d4ff" if destaque else "#e0e0e0"
+                    total_surv = dados["total_survival_seconds"]
+                    max_surv = dados["max_survival_seconds"]
+                    st.markdown(
+                        f"""
+                        <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
+                                    border-left:3px solid {'#00d4ff' if destaque else '#333'};
+                                    margin-bottom:5px;">
+                            <span style="font-size:16px;">{medalhas[idx]}</span>
+                            <span style="color:{cor}; font-weight:bold; margin-left:8px;">
+                                {nome}
+                            </span>
+                            <span style="color:#aaa; float:right;">
+                                🏆 Melhor: {format_seconds_hhmmss(max_surv)}
+                                &nbsp;|&nbsp; Total: {format_seconds_hhmmss(total_surv)}
+                            </span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+        # ---- XP TOP 10 ----
+        with sub_xp:
+            st.markdown("#### ⭐ XP (Experiência) — Top 10")
+            st.caption("XP é calculado com base no tempo total sobrevivendo. 1 minuto vivo = 1 XP.")
+            ranking_xp = sorted(
+                stats.items(),
+                key=lambda x: x[1]["xp"],
+                reverse=True
+            )[:10]
+
+            if not ranking_xp:
+                st.info("Sem dados de XP.")
+            else:
+                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+                xp_max = ranking_xp[0][1]["xp"] if ranking_xp else 1
+                for idx, (nome, dados) in enumerate(ranking_xp):
+                    destaque = nome == gamertag_vinculada
+                    cor = "#00d4ff" if destaque else "#e0e0e0"
+                    xp = dados["xp"]
+                    nivel = max(1, int(xp // 100) + 1)
+                    barra_pct = int((xp / max(xp_max, 1)) * 100)
+                    st.markdown(
+                        f"""
+                        <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
+                                    border-left:3px solid {'#00d4ff' if destaque else '#333'};
+                                    margin-bottom:5px;">
+                            <span style="font-size:16px;">{medalhas[idx]}</span>
+                            <span style="color:{cor}; font-weight:bold; margin-left:8px;">
+                                {nome}
+                            </span>
+                            <span style="color:#aaa; float:right;">
+                                Nvl {nivel} &nbsp;|&nbsp; ⭐ {xp:.1f} XP
+                            </span>
+                            <div style="background:#333; border-radius:4px; height:4px;
+                                        margin-top:6px;">
+                                <div style="background:#00d4ff; width:{barra_pct}%;
+                                            height:4px; border-radius:4px;"></div>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+        # ---- PVP TOP 10 ----
+        with sub_pvp:
+            st.markdown("#### ⚔️ PvP por Período — Top 10")
+
+            ranking_pvp = sorted(
+                stats.items(),
+                key=lambda x: x[1]["pvp_kills"],
+                reverse=True
+            )[:10]
+
+            tem_pvp = any(d["pvp_kills"] > 0 for _, d in ranking_pvp)
+
+            if not tem_pvp:
+                st.info("Nenhum evento PvP registrado nos últimos 7 dias.")
+                st.caption("O ranking será preenchido automaticamente quando ocorrerem kills PvP no servidor.")
+            else:
+                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+                for idx, (nome, dados) in enumerate(ranking_pvp):
+                    destaque = nome == gamertag_vinculada
+                    cor = "#00d4ff" if destaque else "#e0e0e0"
+                    kills = dados["pvp_kills"]
+                    deaths = dados["pvp_deaths"]
+                    kd = round(kills / max(deaths, 1), 2)
+                    st.markdown(
+                        f"""
+                        <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
+                                    border-left:3px solid {'#00d4ff' if destaque else '#ff4444'};
+                                    margin-bottom:5px;">
+                            <span style="font-size:16px;">{medalhas[idx]}</span>
+                            <span style="color:{cor}; font-weight:bold; margin-left:8px;">
+                                {nome}
+                            </span>
+                            <span style="color:#aaa; float:right;">
+                                ⚔️ K: {kills} &nbsp;|&nbsp; 💀 D: {deaths}
+                                &nbsp;|&nbsp; K/D: {kd}
+                            </span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+        # ---- PVE TOP 10 ----
+        with sub_pve:
             st.markdown("#### 🧟 Hits PvE & Suicídios — Top 10")
             ranking_pve = sorted(
-                ranking_play, key=lambda x: x["Hits PvE"], reverse=True
+                stats.items(),
+                key=lambda x: x[1]["pve_hits"],
+                reverse=True
             )[:10]
-            if ranking_pve:
-                st.table([{
-                    "#": idx + 1,
-                    "Jogador": r["Jogador"],
-                    "Hits PvE": r["Hits PvE"],
-                    "Suicídios": r["Suicídios"],
-                } for idx, r in enumerate(ranking_pve)])
+
+            if not ranking_pve:
+                st.info("Sem dados de PvE.")
             else:
-                st.info("Sem dados de PvE neste log.")
+                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+                for idx, (nome, dados) in enumerate(ranking_pve):
+                    destaque = nome == gamertag_vinculada
+                    cor = "#00d4ff" if destaque else "#e0e0e0"
+                    st.markdown(
+                        f"""
+                        <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
+                                    border-left:3px solid {'#00d4ff' if destaque else '#ff8800'};
+                                    margin-bottom:5px;">
+                            <span style="font-size:16px;">{medalhas[idx]}</span>
+                            <span style="color:{cor}; font-weight:bold; margin-left:8px;">
+                                {nome}
+                            </span>
+                            <span style="color:#aaa; float:right;">
+                                🧟 Hits: {dados['pve_hits']}
+                                &nbsp;|&nbsp; 💀 Suicídios: {dados['pve_suicides']}
+                            </span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
-        st.markdown("---")
-        st.markdown("#### 👤 Meu desempenho no log atual")
+        # ---- MAGNATA DZCOINS TOP 10 ----
+        with sub_dzcoins:
+            st.markdown("#### 💰 Magnata DzCoins — Top 10")
+            st.caption("Ranking baseado no saldo total (Carteira + Banco).")
+            ranking_mag = get_magnata_ranking(clients_db, server_id)
 
-        meu_reg = next(
-            (r for r in ranking_play if r["Jogador"] == gamertag_vinculada),
-            None,
-        )
-        if not meu_reg:
-            st.info("Ainda não há dados seus neste log (nenhuma sessão registrada).")
+            if not ranking_mag:
+                st.info("Nenhum jogador com DzCoins registrado ainda.")
+            else:
+                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+                total_max = ranking_mag[0]["total"] if ranking_mag else 1
+                for idx, r in enumerate(ranking_mag):
+                    destaque = r["gamertag"] == gamertag_vinculada
+                    cor = "#00d4ff" if destaque else "#e0e0e0"
+                    barra_pct = int((r["total"] / max(total_max, 1)) * 100)
+                    st.markdown(
+                        f"""
+                        <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
+                                    border-left:3px solid {'#00d4ff' if destaque else '#FFD700'};
+                                    margin-bottom:5px;">
+                            <span style="font-size:16px;">{medalhas[idx]}</span>
+                            <span style="color:{cor}; font-weight:bold; margin-left:8px;">
+                                {r['gamertag']}
+                            </span>
+                            <span style="color:#aaa; float:right;">
+                                💰 {r['carteira']} carteira
+                                &nbsp;|&nbsp; 🏦 {r['banco']} banco
+                                &nbsp;|&nbsp; 💎 {r['total']} total
+                            </span>
+                            <div style="background:#333; border-radius:4px; height:4px;
+                                        margin-top:6px;">
+                                <div style="background:#FFD700; width:{barra_pct}%;
+                                            height:4px; border-radius:4px;"></div>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+        # ---- MEU DESEMPENHO ----
+        st.divider()
+        st.markdown("#### 👤 Meu desempenho na semana")
+        meu = stats.get(gamertag_vinculada)
+        if not meu:
+            st.info("Sua Gamertag ainda não aparece nos logs desta semana.")
         else:
-            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-            col_m1.metric("⏱️ Tempo de jogo", meu_reg["Tempo de jogo"])
-            col_m2.metric("🔁 Sessões", meu_reg["Sessões"])
-            col_m3.metric("🧟 Hits PvE", meu_reg["Hits PvE"])
-            col_m4.metric("💀 Suicídios", meu_reg["Suicídios"])
+            col1, col2, col3, col4, col5 = st.columns(5)
+            col1.metric("⏱️ Tempo de Jogo", format_seconds_hhmmss(meu["total_play_seconds"]))
+            col2.metric("🏕️ Melhor Vida", format_seconds_hhmmss(meu["max_survival_seconds"]))
+            col3.metric("⭐ XP", f"{meu['xp']:.1f}")
+            col4.metric("⚔️ Kills PvP", meu["pvp_kills"])
+            col5.metric("🧟 Hits PvE", meu["pve_hits"])
 
-    _ranking(ftp_cfg, gamertag_vinculada)
+    _ranking(ftp_cfg, gamertag_vinculada, clients_db, server_id)
 
 # =========================================================
 # 8. UI PRINCIPAL
@@ -1424,8 +1848,8 @@ def main():
 
     # --- ABA RANKING ---
     with tab_ranking:
-        st.markdown("### 🏆 Ranking — Tempo de Jogo & PvE")
-        render_ranking(client_data, gamertag_vinculada)
+        st.markdown("### 🏆 Ranking Semanal")
+        render_ranking(client_data, gamertag_vinculada, clients_db_fresh, server_id)
 
     # --- ABA KILLFEED PVP ---
     with tab_pvp:
