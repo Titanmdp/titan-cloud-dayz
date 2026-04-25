@@ -1731,17 +1731,6 @@ def main():
     users_db = load_db(DB_USERS, {"keys": {}})
     clients_db = load_db(DB_CLIENTS, {})
 
-    # --- INSERÇÃO DO DEBUG ---
-    st.write(f"DEBUG - DB_CLIENTS path: {DB_CLIENTS}")
-    st.write(f"DEBUG - Conteúdo clients_db encontrado: {bool(clients_db)}")
-    st.write(f"DEBUG - Chaves no banco: {list(clients_db.keys())}")
-    # -------------------------
-    
-    # Adicione este debug para inspecionar o servidor 18927875
-    server_id = '18927875' # ou a variável que você usa
-    dados_servidor = clients_db.get(server_id, {})
-    st.write(f"DEBUG - Conteúdo do servidor {server_id}:", dados_servidor.keys())
-
     discord_id = st.session_state.get("portal_discord_id")
     discord_name = st.session_state.get("portal_discord_name", "Jogador")
 
@@ -2149,10 +2138,6 @@ def main():
         # 3. SEGURANÇA: Verifica se a chave 'loja' existe
         loja = client_data_loja.get("loja", {})
         
-        # DEBUG (Deixe isso até ver os itens aparecerem)
-        st.write(f"DEBUG: Buscando itens no server_id: {server_id}")
-        st.write(f"DEBUG: Estrutura da loja encontrada: {list(loja.keys()) if loja else 'Loja vazia ou inexistente'}")
-
         itens = [i for i in loja.get("itens", []) if i.get("ativo", True)]
 
         if not itens:
