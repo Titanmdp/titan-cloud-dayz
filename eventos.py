@@ -2352,11 +2352,13 @@ with tab6:
 
     with col_loja2:
         if st.button("Salvar Loja no Titan Cloud", use_container_width=True):
+            # 0. DEBUG: Verifique se o server_id está correto
+            st.write(f"DEBUG: Tentando salvar loja no ID: {server_id}")
+            
             # 1. Carrega o banco global
             db_completo = load_db(DB_CLIENTS, {})
             
             # 2. Garante que o servidor exista no banco
-            # A linha abaixo agora está devidamente recuada (indentada)
             if server_id not in db_completo:
                 db_completo[server_id] = {}
             
