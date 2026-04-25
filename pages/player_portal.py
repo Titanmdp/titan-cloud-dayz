@@ -18,7 +18,7 @@ if os.path.exists("/var/data"):
     DB_USERS = "/var/data/users_db.json"
     DB_CLIENTS = "/var/data/clients_data.json"
 else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if IS_DEV:
         DB_USERS = os.path.join(BASE_DIR, "users_db_dev.json")
         DB_CLIENTS = os.path.join(BASE_DIR, "clients_data_dev.json")
@@ -1730,6 +1730,12 @@ def main():
     # ----------------------------------------------------------
     users_db = load_db(DB_USERS, {"keys": {}})
     clients_db = load_db(DB_CLIENTS, {})
+
+    # --- INSERÇÃO DO DEBUG ---
+    st.write(f"DEBUG - DB_CLIENTS path: {DB_CLIENTS}")
+    st.write(f"DEBUG - Conteúdo clients_db encontrado: {bool(clients_db)}")
+    st.write(f"DEBUG - Chaves no banco: {list(clients_db.keys())}")
+    # -------------------------
 
     discord_id = st.session_state.get("portal_discord_id")
     discord_name = st.session_state.get("portal_discord_name", "Jogador")
