@@ -803,140 +803,140 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         )
                         st.rerun()
 
-        # --- TAB 2: GESTÃO DE CLIENTES ---
-        with tab_adm2:
-            st.subheader("👥 Gestão de Clientes Ativos")
-            if not st.session_state.db_users["keys"]:
-                st.info("Nenhum cliente cadastrado no momento.")
+    # --- TAB 2: GESTÃO DE CLIENTES ---
+    with tab_adm2:
+        st.subheader("👥 Gestão de Clientes Ativos")
+        if not st.session_state.db_users["keys"]:
+            st.info("Nenhum cliente cadastrado no momento.")
 
-            for k, v in list(st.session_state.db_users["keys"].items()):
-                dt_exp_check = datetime.strptime(v["expires"], "%d/%m/%Y").date()
-                dias_rest = (dt_exp_check - get_hora_brasilia().date()).days
-                cor_status = "🟢" if dias_rest > 0 else "🔴"
+        for k, v in list(st.session_state.db_users["keys"].items()):
+            dt_exp_check = datetime.strptime(v["expires"], "%d/%m/%Y").date()
+            dias_rest = (dt_exp_check - get_hora_brasilia().date()).days
+            cor_status = "🟢" if dias_rest > 0 else "🔴"
 
-                limites_globais = st.session_state.db_users.get("config_planos", PLANOS)
-                uso_atual = len(st.session_state.db_clients.get(k, {}).get("agendas", []))
-                limite_padrao = limites_globais.get(v.get("plano", "Starter"), 2)
-                limite_final = v.get("limite_extra", limite_padrao)
+            limites_globais = st.session_state.db_users.get("config_planos", PLANOS)
+            uso_atual = len(st.session_state.db_clients.get(k, {}).get("agendas", []))
+            limite_padrao = limites_globais.get(v.get("plano", "Starter"), 2)
+            limite_final = v.get("limite_extra", limite_padrao)
 
-                with st.expander(
-                    f"{cor_status} {v['server']} | {v.get('plano', 'Starter')} ({uso_atual}/{limite_final})"
-                ):
-                    st.markdown("### 🔑 Credenciais de Acesso")
-                    st.code(k)
-                    st.divider()
+            with st.expander(
+                f"{cor_status} {v['server']} | {v.get('plano', 'Starter')} ({uso_atual}/{limite_final})"
+            ):
+                st.markdown("### 🔑 Credenciais de Acesso")
+                st.code(k)
+                st.divider()
 
-                    st.markdown("#### 🌐 Monitoramento e Segurança")
-                    col_mon1, col_mon2 = st.columns(2)
-                    with col_mon1:
-                        st.write(f"**📍 Localização:** {v.get('local', 'Nenhum acesso registrado')}")
-                        st.write(f"**🖥️ IP:** {v.get('last_ip', '0.0.0.0')}")
-                    with col_mon2:
-                        st.write(f"**🕒 Último Login:** {v.get('last_login', '---')}")
-                        if st.button(
-                            "🚫 Banir Acesso (Expirar Key)",
-                            key=f"ban_{k}",
-                            type="primary",
-                            use_container_width=True,
-                        ):
-                            v["expires"] = (
-                                get_hora_brasilia() - timedelta(days=1)
-                            ).strftime("%d/%m/%Y")
-                            save_db(DB_USERS, st.session_state.db_users)
-                            st.warning(f"O acesso de {v['server']} foi bloqueado.")
-                            st.rerun()
-
-                    st.divider()
-
-                    c_edit1, c_edit2 = st.columns(2)
-                    with c_edit1:
-                        st.markdown("#### 📝 Informações e Plano")
-                        new_n = st.text_input(
-                            "Editar Nome", value=v["server"], key=f"n_{k}"
-                        )
-                        new_p = st.selectbox(
-                            "Trocar Plano",
-                            list(PLANOS.keys()),
-                            index=list(PLANOS.keys()).index(v.get("plano", "Starter")),
-                            key=f"p_{k}",
-                        )
-                        new_lim = st.number_input(
-                            "Ajustar Limite",
-                            min_value=1,
-                            value=int(limite_final),
-                            key=f"lim_{k}",
-                        )
-
-                        st.markdown("#### 📧 Contatos de Notificação")
-                        new_mail = st.text_input(
-                            "E-mail do Cliente", value=v.get("email", ""), key=f"mail_{k}"
-                        )
-                        new_wa = st.text_input(
-                            "WhatsApp (com DDD)",
-                            value=v.get("whatsapp", ""),
-                            key=f"wa_{k}",
-                        )
-
-                        st.markdown("#### 🎮 Integração Discord")
-                        new_guild = st.text_input(
-                            "ID do Servidor Discord (Guild ID)",
-                            value=v.get("discord_guild_id", ""),
-                            key=f"guild_{k}",
-                            help=(
-                                "ID numérico do servidor Discord do administrador. "
-                                "Para obter: Discord > Configurações > Avançado > Modo desenvolvedor ativo. "
-                                "Depois clique com botão direito no servidor > Copiar ID do servidor."
-                            ),
-                        )
-
-                        if st.button(
-                            "💾 Salvar Alterações",
-                            key=f"bn_{k}",
-                            use_container_width=True,
-                        ):
-                            st.session_state.db_users["keys"][k]["server"] = new_n
-                            st.session_state.db_users["keys"][k]["plano"] = new_p
-                            st.session_state.db_users["keys"][k]["limite_extra"] = new_lim
-                            st.session_state.db_users["keys"][k]["email"] = new_mail
-                            st.session_state.db_users["keys"][k]["whatsapp"] = new_wa
-                            st.session_state.db_users["keys"][k]["discord_guild_id"] = new_guild.strip()
-                            save_db(DB_USERS, st.session_state.db_users)
-                            st.success("Dados atualizados!")
-                            st.rerun()
-
-                    with c_edit2:
-                        st.markdown("#### 📅 Validade do Acesso")
-                        st.write(f"**Expira em:** {v['expires']} ({dias_rest} dias)")
-                        add_d = st.number_input(
-                            "Adicionar dias", min_value=1, value=30, key=f"d_{k}"
-                        )
-                        if st.button(
-                            "➕ Estender/Renovar",
-                            key=f"bd_{k}",
-                            use_container_width=True,
-                        ):
-                            nova_data = (
-                                dt_exp_check + timedelta(days=add_d)
-                            ).strftime("%d/%m/%Y")
-                            st.session_state.db_users["keys"][k]["expires"] = nova_data
-                            save_db(DB_USERS, st.session_state.db_users)
-                            st.success(f"Estendido para {nova_data}!")
-                            st.rerun()
-
-                    st.divider()
-
+                st.markdown("#### 🌐 Monitoramento e Segurança")
+                col_mon1, col_mon2 = st.columns(2)
+                with col_mon1:
+                    st.write(f"**📍 Localização:** {v.get('local', 'Nenhum acesso registrado')}")
+                    st.write(f"**🖥️ IP:** {v.get('last_ip', '0.0.0.0')}")
+                with col_mon2:
+                    st.write(f"**🕒 Último Login:** {v.get('last_login', '---')}")
                     if st.button(
-                        "🗑️ EXCLUIR CLIENTE PERMANENTEMENTE",
-                        key=f"del_{k}",
+                        "🚫 Banir Acesso (Expirar Key)",
+                        key=f"ban_{k}",
                         type="primary",
                         use_container_width=True,
                     ):
-                        del st.session_state.db_users["keys"][k]
-                        if k in st.session_state.db_clients:
-                            del st.session_state.db_clients[k]
+                        v["expires"] = (
+                            get_hora_brasilia() - timedelta(days=1)
+                        ).strftime("%d/%m/%Y")
                         save_db(DB_USERS, st.session_state.db_users)
-                        save_db(DB_CLIENTS, st.session_state.db_clients)
+                        st.warning(f"O acesso de {v['server']} foi bloqueado.")
                         st.rerun()
+
+                st.divider()
+
+                c_edit1, c_edit2 = st.columns(2)
+                with c_edit1:
+                    st.markdown("#### 📝 Informações e Plano")
+                    new_n = st.text_input(
+                        "Editar Nome", value=v["server"], key=f"n_{k}"
+                    )
+                    new_p = st.selectbox(
+                        "Trocar Plano",
+                        list(PLANOS.keys()),
+                        index=list(PLANOS.keys()).index(v.get("plano", "Starter")),
+                        key=f"p_{k}",
+                    )
+                    new_lim = st.number_input(
+                        "Ajustar Limite",
+                        min_value=1,
+                        value=int(limite_final),
+                        key=f"lim_{k}",
+                    )
+
+                    st.markdown("#### 📧 Contatos de Notificação")
+                    new_mail = st.text_input(
+                        "E-mail do Cliente", value=v.get("email", ""), key=f"mail_{k}"
+                    )
+                    new_wa = st.text_input(
+                        "WhatsApp (com DDD)",
+                        value=v.get("whatsapp", ""),
+                        key=f"wa_{k}",
+                    )
+
+                    st.markdown("#### 🎮 Integração Discord")
+                    new_guild = st.text_input(
+                        "ID do Servidor Discord (Guild ID)",
+                        value=v.get("discord_guild_id", ""),
+                        key=f"guild_{k}",
+                        help=(
+                            "ID numérico do servidor Discord do administrador. "
+                            "Para obter: Discord > Configurações > Avançado > Modo desenvolvedor ativo. "
+                            "Depois clique com botão direito no servidor > Copiar ID do servidor."
+                        ),
+                    )
+
+                    if st.button(
+                        "💾 Salvar Alterações",
+                        key=f"bn_{k}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.db_users["keys"][k]["server"] = new_n
+                        st.session_state.db_users["keys"][k]["plano"] = new_p
+                        st.session_state.db_users["keys"][k]["limite_extra"] = new_lim
+                        st.session_state.db_users["keys"][k]["email"] = new_mail
+                        st.session_state.db_users["keys"][k]["whatsapp"] = new_wa
+                        st.session_state.db_users["keys"][k]["discord_guild_id"] = new_guild.strip()
+                        save_db(DB_USERS, st.session_state.db_users)
+                        st.success("Dados atualizados!")
+                        st.rerun()
+
+                with c_edit2:
+                    st.markdown("#### 📅 Validade do Acesso")
+                    st.write(f"**Expira em:** {v['expires']} ({dias_rest} dias)")
+                    add_d = st.number_input(
+                        "Adicionar dias", min_value=1, value=30, key=f"d_{k}"
+                    )
+                    if st.button(
+                        "➕ Estender/Renovar",
+                        key=f"bd_{k}",
+                        use_container_width=True,
+                    ):
+                        nova_data = (
+                            dt_exp_check + timedelta(days=add_d)
+                        ).strftime("%d/%m/%Y")
+                        st.session_state.db_users["keys"][k]["expires"] = nova_data
+                        save_db(DB_USERS, st.session_state.db_users)
+                        st.success(f"Estendido para {nova_data}!")
+                        st.rerun()
+
+                st.divider()
+
+                if st.button(
+                    "🗑️ EXCLUIR CLIENTE PERMANENTEMENTE",
+                    key=f"del_{k}",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    del st.session_state.db_users["keys"][k]
+                    if k in st.session_state.db_clients:
+                        del st.session_state.db_clients[k]
+                    save_db(DB_USERS, st.session_state.db_users)
+                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                    st.rerun()
 
         # --- TAB 3: CONFIG PLANOS ---
         with tab_adm3:
@@ -1153,9 +1153,15 @@ else:
     # PORTAL DO JOGADOR
     player_portal_main()
 
+# =========================================================
+# 8. PORTAL DO JOGADOR (só se NÃO for admin)
+# =========================================================
+elif st.session_state.role != "admin":
+    player_portal_main()
+
 
 # =========================================================
-# 7. ÁREA DO CLIENTE
+# 9. ÁREA DO CLIENTE
 # =========================================================
 
 user_id = st.session_state.user_key
