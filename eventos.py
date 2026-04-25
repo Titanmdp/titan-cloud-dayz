@@ -11,7 +11,7 @@ import shutil
 import smtplib
 import xml.etree.ElementTree as ET
 import pandas as pd
-from pages.player_portal import main as player_portal_main
+from page.player_portal import main as player_portal_main
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
@@ -616,68 +616,7 @@ if "view_mode" not in st.session_state:
 
 
 # =========================================================
-# 4. TELA DE LOGIN
-# =========================================================
-
-if not st.session_state.authenticated:
-    st.title("🔑 Titan Cloud - Login")
-
-    dados_geo = buscar_localizacao_cliente()
-    login_key = st.text_input("Insira sua KeyUser", type="password")
-
-    if st.button("Entrar no Painel", use_container_width=True):
-        ok, cargo = validar_acesso(login_key)
-
-        if ok:
-            token_sessao = secrets.token_hex(8)
-
-            if dados_geo:
-                local_final = f"{dados_geo['cidade']} - {dados_geo['estado']}"
-            else:
-                local_final = "Localização não capturada"
-
-            # Se for cliente, atualiza informações de acesso no users_db
-            if cargo == "client":
-                db_users = st.session_state.db_users
-
-                # Recupera dados da key e o server_id associado
-                key_data = db_users.get("keys", {}).get(login_key, {})
-                server_id = key_data.get("server_id")
-
-                if not server_id:
-                    st.error(
-                        "Esta KeyUser não possui um ID de servidor associado (server_id).\n"
-                        "Registre ou atualize o cliente pelo painel de administração."
-                    )
-                    st.stop()
-
-                # Atualiza logs de acesso
-                db_users["keys"][login_key]["last_session"] = token_sessao
-                db_users["keys"][login_key]["local"] = local_final
-                db_users["keys"][login_key]["last_login"] = (
-                    get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
-                )
-                save_db(DB_USERS, db_users)
-
-                # Guarda server_id na sessão (ponte para clients_data.json)
-                st.session_state.server_id = server_id
-
-            # Para admin, pode não haver server_id direto
-            st.session_state.authenticated = True
-            st.session_state.user_key = login_key
-            st.session_state.role = cargo
-            st.session_state.session_token = token_sessao
-            st.session_state.view_mode = "admin" if cargo == "admin" else "client"
-
-            st.rerun()
-        else:
-            st.error(cargo)
-
-    st.stop()
-
-
-# =========================================================
-# 5. SELETOR DE PORTAL NA SIDEBAR
+# 4. SELETOR DE PORTAL (ANTES DE QUALQUER LOGIN)
 # =========================================================
 
 with st.sidebar:
@@ -689,131 +628,180 @@ with st.sidebar:
         key="portal_principal",
     )
 
+# =========================================================
+# 5. ROTEAMENTO INICIAL: PORTAL DO JOGADOR NÃO USA KEY
+# =========================================================
+
+if portal == "Portal do Jogador":
+    # Vai direto para o portal do jogador (login Discord), sem KeyUser
+    player_portal_main()
+    st.stop()
+
 
 # =========================================================
-# 6. ROTEAMENTO ENTRE PORTAIS
+# 6. TELA DE LOGIN (APENAS PARA PORTAL DO ADMIN)
 # =========================================================
 
-if portal == "Portal do Administrador":
-    # ============================
-    # ÁREA DO ADMINISTRADOR
-    # ============================
-    if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
-        with st.sidebar:
-            st.subheader("🛡️ Menu Admin")
-            if st.button("🚀 Usar Sistema (Modo Teste)", use_container_width=True):
-                st.session_state.view_mode = "client"
-                st.rerun()
-            if st.button("🔴 Logout (Admin)", use_container_width=True):
-                st.session_state.authenticated = False
-                st.rerun()
+if not st.session_state.get("authenticated") or st.session_state.get("role") != "admin":
+    st.title("🔑 Titan Cloud - Login (Admin)")
 
-        st.title("🛡️ Painel de Controle - Administrador")
+    dados_geo = buscar_localizacao_cliente()
+    login_key = st.text_input("Insira sua KeyUser de administrador", type="password")
 
-        tab_adm1, tab_adm2, tab_adm3, tab_adm4, tab_adm5 = st.tabs(
-            [
-                "➕ Gerar Chaves",
-                "👥 Gestão de Clientes",
-                "⚙️ Configurar Planos",
-                "💾 Backup/Restore",
-                "📢 Comunicados",
-            ]
-        )
+    if st.button("Entrar no Painel", use_container_width=True):
+        ok, cargo = validar_acesso(login_key)
 
-        # --- TAB 1: GERAR CHAVES ---
-        with tab_adm1:
-            with st.expander("Gerador de Chaves", expanded=True):
-                col_gen1, col_gen2 = st.columns([2, 1])
+        if ok and cargo == "admin":
+            token_sessao = secrets.token_hex(8)
 
-                # Coluna esquerda: dados do cliente/servidor + KeyUser
-                with col_gen1:
-                    srv_name = st.text_input("Nome do Servidor / Cliente")
-                    nitrado_id = st.text_input(
-                        "ID do Servidor na Nitrado (opcional, ex.: 18927875)",
-                        placeholder="Se preencher, será usado como ID interno do servidor",
+            if dados_geo:
+                local_final = f"{dados_geo['cidade']} - {dados_geo['estado']}"
+            else:
+                local_final = "Localização não capturada"
+
+            # Opcional: registrar log de acesso do admin
+            db_users = st.session_state.db_users
+            db_users["admin_last_session"] = token_sessao
+            db_users["admin_local"] = local_final
+            db_users["admin_last_login"] = get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
+            save_db(DB_USERS, db_users)
+
+            st.session_state.authenticated = True
+            st.session_state.user_key = login_key
+            st.session_state.role = "admin"
+            st.session_state.session_token = token_sessao
+            st.session_state.view_mode = "admin"
+
+            st.rerun()
+        elif ok and cargo == "client":
+            st.error("Essa KeyUser é de cliente. Use o Portal do Jogador.")
+        else:
+            st.error(cargo)
+
+    st.stop()
+
+
+# =========================================================
+# 7. ÁREA DO ADMINISTRADOR
+# =========================================================
+
+if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
+    with st.sidebar:
+        st.subheader("🛡️ Menu Admin")
+        if st.button("🚀 Usar Sistema (Modo Teste)", use_container_width=True):
+            st.session_state.view_mode = "client"
+            st.rerun()
+        if st.button("🔴 Logout (Admin)", use_container_width=True):
+            st.session_state.authenticated = False
+            st.session_state.role = None
+            st.rerun()
+
+    st.title("🛡️ Painel de Controle - Administrador")
+
+    tab_adm1, tab_adm2, tab_adm3, tab_adm4, tab_adm5 = st.tabs(
+        [
+            "➕ Gerar Chaves",
+            "👥 Gestão de Clientes",
+            "⚙️ Configurar Planos",
+            "💾 Backup/Restore",
+            "📢 Comunicados",
+        ]
+    )
+
+    # --- TAB 1: GERAR CHAVES ---
+    with tab_adm1:
+        with st.expander("Gerador de Chaves", expanded=True):
+            col_gen1, col_gen2 = st.columns([2, 1])
+
+            # Coluna esquerda: dados do cliente/servidor + KeyUser
+            with col_gen1:
+                srv_name = st.text_input("Nome do Servidor / Cliente")
+                nitrado_id = st.text_input(
+                    "ID do Servidor na Nitrado (opcional, ex.: 18927875)",
+                    placeholder="Se preencher, será usado como ID interno do servidor",
+                )
+                discord_guild_id_input = st.text_input(
+                    "ID do Servidor Discord (Guild ID)",
+                    placeholder="Ex.: 1234567890123456789",
+                    help=(
+                        "ID numérico do servidor Discord do administrador. "
+                        "Discord > Configurações > Avançado > Modo desenvolvedor > "
+                        "Botão direito no servidor > Copiar ID do servidor."
+                    ),
+                )
+                plano_sel = st.selectbox("Escolha o Plano", list(PLANOS.keys()))
+
+                if "temp_key" not in st.session_state:
+                    st.session_state.temp_key = ""
+                ck1, ck2 = st.columns([3, 1])
+                new_k = ck1.text_input(
+                    "KeyUser (chave de acesso)",
+                    value=st.session_state.temp_key,
+                )
+
+                if ck2.button("🎲 Gerar"):
+                    st.session_state.temp_key = "".join(
+                        secrets.choice(string.ascii_uppercase + string.digits)
+                        for _ in range(12)
                     )
-                    discord_guild_id_input = st.text_input(
-                        "ID do Servidor Discord (Guild ID)",
-                        placeholder="Ex.: 1234567890123456789",
-                        help=(
-                            "ID numérico do servidor Discord do administrador. "
-                            "Discord > Configurações > Avançado > Modo desenvolvedor > "
-                            "Botão direito no servidor > Copiar ID do servidor."
-                        ),
-                    )
-                    plano_sel = st.selectbox("Escolha o Plano", list(PLANOS.keys()))
+                    st.rerun()
 
-                    if "temp_key" not in st.session_state:
+            # Coluna direita: validade e gravação
+            with col_gen2:
+                dias_v = st.number_input("Dias de validade", min_value=1, value=30)
+
+                if st.button("🚀 Registrar e Ativar", use_container_width=True):
+                    if not srv_name or not new_k:
+                        st.error("Preencha o nome do servidor/cliente e a KeyUser.")
+                    else:
+                        # 1) Definir ID interno do servidor (server_id)
+                        if nitrado_id.strip():
+                            server_id = nitrado_id.strip()
+                        else:
+                            server_id = "".join(
+                                secrets.choice(string.ascii_uppercase + string.digits)
+                                for _ in range(12)
+                            )
+
+                        # 2) Calcular data de expiração
+                        data_exp = (
+                            get_hora_brasilia() + timedelta(days=dias_v)
+                        ).strftime("%d/%m/%Y")
+
+                        # 3) Registrar no users_db: KeyUser -> dados + server_id
+                        st.session_state.db_users["keys"][new_k] = {
+                            "server": srv_name,
+                            "server_id": server_id,
+                            "expires": data_exp,
+                            "plano": plano_sel,
+                            "discord_guild_id": discord_guild_id_input.strip(),
+                        }
+                        save_db(DB_USERS, st.session_state.db_users)
+
+                        # 4) Inicializar estrutura em db_clients para esse server_id
+                        if server_id not in st.session_state.db_clients:
+                            st.session_state.db_clients[server_id] = {
+                                "ftp": {
+                                    "host": "",
+                                    "user": "",
+                                    "pass": "",
+                                    "port": "21",
+                                },
+                                "agendas": [],
+                                "logs": [],
+                                "comunicados": [],
+                                "players": {},
+                            }
+                            save_db(DB_CLIENTS, st.session_state.db_clients)
+
                         st.session_state.temp_key = ""
-                    ck1, ck2 = st.columns([3, 1])
-                    new_k = ck1.text_input(
-                        "KeyUser (chave de acesso)",
-                        value=st.session_state.temp_key,
-                    )
-
-                    if ck2.button("🎲 Gerar"):
-                        st.session_state.temp_key = "".join(
-                            secrets.choice(string.ascii_uppercase + string.digits)
-                            for _ in range(12)
+                        st.success(
+                            f"Chave para '{srv_name}' ativada!\n\n"
+                            f"- KeyUser (login do cliente): {new_k}\n"
+                            f"- ID interno do servidor: {server_id}\n"
+                            f"- Guild Discord: {discord_guild_id_input.strip() or '(não informado)'}"
                         )
                         st.rerun()
-
-                # Coluna direita: validade e gravação
-                with col_gen2:
-                    dias_v = st.number_input("Dias de validade", min_value=1, value=30)
-
-                    if st.button("🚀 Registrar e Ativar", use_container_width=True):
-                        if not srv_name or not new_k:
-                            st.error("Preencha o nome do servidor/cliente e a KeyUser.")
-                        else:
-                            # 1) Definir ID interno do servidor (server_id)
-                            if nitrado_id.strip():
-                                server_id = nitrado_id.strip()
-                            else:
-                                server_id = "".join(
-                                    secrets.choice(string.ascii_uppercase + string.digits)
-                                    for _ in range(12)
-                                )
-
-                            # 2) Calcular data de expiração
-                            data_exp = (
-                                get_hora_brasilia() + timedelta(days=dias_v)
-                            ).strftime("%d/%m/%Y")
-
-                            # 3) Registrar no users_db: KeyUser -> dados + server_id
-                            st.session_state.db_users["keys"][new_k] = {
-                                "server": srv_name,
-                                "server_id": server_id,
-                                "expires": data_exp,
-                                "plano": plano_sel,
-                                "discord_guild_id": discord_guild_id_input.strip(),
-                            }
-                            save_db(DB_USERS, st.session_state.db_users)
-
-                            # 4) Inicializar estrutura em db_clients para esse server_id
-                            if server_id not in st.session_state.db_clients:
-                                st.session_state.db_clients[server_id] = {
-                                    "ftp": {
-                                        "host": "",
-                                        "user": "",
-                                        "pass": "",
-                                        "port": "21",
-                                    },
-                                    "agendas": [],
-                                    "logs": [],
-                                    "comunicados": [],
-                                    "players": {},
-                                }
-                                save_db(DB_CLIENTS, st.session_state.db_clients)
-
-                            st.session_state.temp_key = ""
-                            st.success(
-                                f"Chave para '{srv_name}' ativada!\n\n"
-                                f"- KeyUser (login do cliente): {new_k}\n"
-                                f"- ID interno do servidor: {server_id}\n"
-                                f"- Guild Discord: {discord_guild_id_input.strip() or '(não informado)'}"
-                            )
-                            st.rerun()
 
         # --- TAB 2: GESTÃO DE CLIENTES ---
         with tab_adm2:
