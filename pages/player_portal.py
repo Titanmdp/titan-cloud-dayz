@@ -254,6 +254,9 @@ def parse_adm_sessions_and_pve(log_text: str) -> dict:
     Extrai sessões de jogo, hits PvE e suicídios de cada jogador.
     Retorna: {"players": {nome: {...stats...}}}
     """
+    if not log_text or not log_text.strip():
+        return {"players": {}}
+
     players = {}
 
     # Regex para linha de player
@@ -280,6 +283,65 @@ def parse_adm_sessions_and_pve(log_text: str) -> dict:
 
     if not log_date:
         log_date = datetime.now(FUSO_BR).date()
+
+    # ---- funções auxiliares ----
+
+    def ensure_player(name: str) -> dict:
+        if name not in players:
+            players[name] = {
+                "total_play_seconds": 0,
+                "session_count": 0,
+                "last_connect": None,
+                "last_disconnect": None,
+                "last_death_time": None,
+                "pve_hits": 0,
+                "pve_suicides": 0,
+            }
+        return players[name]
+
+    def parse_dt(tstr: str):
+        try:
+            dt = datetime.strptime(f"{log_date} {tstr}", "%Y-%m-%d %H:%M:%S")
+            return dt.replace(tzinfo=FUSO_BR)
+        except Exception:
+            return None
+
+    # ---- processamento linha a linha ----
+
+    for line in log_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        m = re_player_line.match(line)
+        if not m:
+            continue
+
+        hora_str = m.group(1)
+        nome = m.group(2)
+        dt_evento = parse_dt(hora_str)
+        p = ensure_player(nome)
+
+        if key_connected in line and "is connecting" not in line:
+            p["last_connect"] = dt_evento
+
+        elif key_disconnected in line:
+            if p.get("last_connect") and dt_evento:
+                delta = (dt_evento - p["last_connect"]).total_seconds()
+                if delta > 0:
+                    p["total_play_seconds"] += int(delta)
+                    p["session_count"] += 1
+            p["last_disconnect"] = dt_evento
+            p["last_connect"] = None
+
+        if key_suicide_emote in line or key_committed_sui in line:
+            p["pve_suicides"] += 1
+            p["last_death_time"] = dt_evento
+
+        if key_hit_infected in line:
+            p["pve_hits"] += 1
+
+    return {"players": players}
 
 # =========================================================
 # 4.2 PARSERS KILLFEED PvE, PvP E CONEXÃO
