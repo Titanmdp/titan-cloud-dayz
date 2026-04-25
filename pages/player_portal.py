@@ -1,4 +1,6 @@
 import streamlit as st
+
+st.title("Portal do Player")
 import json
 import os
 import time
@@ -1183,116 +1185,119 @@ def main():
         render_banco(client_data_fresh, clients_db_fresh, server_id, gamertag_vinculada)
 
     # --- ABA RANKING ---
-    with tab_ranking:
-        st.markdown("### 🏆 Ranking — Tempo de Jogo & Sobrevivência")
+with tab_ranking:
+    st.markdown("### 🏆 Ranking — Tempo de Jogo & Sobrevivência")
 
-        ftp_cfg = get_client_ftp_config(client_data)
-        if not ftp_cfg:
-            st.warning(
-                "FTP do servidor não está configurado para este cliente. "
-                "Peça ao admin para configurar no painel."
-            )
-        else:
+    ftp_cfg = get_client_ftp_config(client_data)
+    if not ftp_cfg:
+        st.warning(
+            "FTP do servidor não está configurado para este cliente. "
+            "Peça ao admin para configurar no painel."
+        )
+    else:
 
-            @st.fragment(run_every=300)
-            def _ranking_fragment(ftp_cfg, gamertag_vinculada: str):
-                with st.spinner("Carregando dados de ranking a partir dos logs do servidor..."):
-                    log_text, err = ftp_download_latest_adm(ftp_cfg)
+        @st.fragment(run_every=300)
+        def _ranking_fragment(ftp_cfg, gamertag_vinculada: str):
+            with st.spinner("Carregando dados de ranking a partir dos logs do servidor..."):
+                log_text, err = ftp_download_latest_adm(ftp_cfg)
 
-                if err or not log_text:
-                    st.error(f"Não foi possível ler o log .ADM: {err or 'conteúdo vazio'}")
-                    return
-
-                parsed = parse_adm_sessions_and_pve(log_text)
-
-                # Garante que parsed é um dict antes de usar .get
-                if not isinstance(parsed, dict):
-                    st.warning(
-                        "Ainda não foi possível carregar os dados de ranking a partir dos logs do servidor."
-                    )
-                    return
-
-                pstats = parsed.get("players", {})
-
-                if not pstats:
-                    st.info("Nenhuma estatística encontrada no log .ADM mais recente.")
-                    return
-
-                # Monta listas para ranking
-                ranking_play = []
-                ranking_surv = []
-
-                for nome, dados in pstats.items():
-                    total_play = dados.get("total_play_seconds", 0)
-                    ranking_play.append({
-                        "Jogador": nome,
-                        "Tempo de jogo": format_seconds_hhmmss(total_play),
-                        "Tempo (segundos)": total_play,
-                        "Sessões": dados.get("session_count", 0),
-                        "Hits PvE": dados.get("pve_hits", 0),
-                        "Suicídios": dados.get("pve_suicides", 0),
-                    })
-
-                    ranking_surv.append({
-                        "Jogador": nome,
-                        "Tempo de sobrevivência": format_seconds_hhmmss(total_play),
-                        "Tempo (segundos)": total_play,
-                        "Suicídios": dados.get("pve_suicides", 0),
-                    })
-
-                ranking_play_sorted = sorted(
-                    ranking_play, key=lambda x: x["Tempo (segundos)"], reverse=True
-                )[:10]
-                ranking_surv_sorted = sorted(
-                    ranking_surv, key=lambda x: x["Tempo (segundos)"], reverse=True
-                )[:10]
-
-                col_r1, col_r2 = st.columns(2)
-
-                with col_r1:
-                    st.markdown("#### ⏱️ Tempo de jogo total — Top 10")
-                    if ranking_play_sorted:
-                        st.table([{
-                            "#": idx + 1,
-                            "Jogador": r["Jogador"],
-                            "Tempo de jogo": r["Tempo de jogo"],
-                            "Sessões": r["Sessões"],
-                            "Hits PvE": r["Hits PvE"],
-                            "Suicídios": r["Suicídios"],
-                        } for idx, r in enumerate(ranking_play_sorted)])
-                    else:
-                        st.info("Sem dados de tempo de jogo ainda neste log.")
-
-                with col_r2:
-                    st.markdown("#### 🧟 Tempo de sobrevivência (proxy) — Top 10")
-                    if ranking_surv_sorted:
-                        st.table([{
-                            "#": idx + 1,
-                            "Jogador": r["Jogador"],
-                            "Tempo de sobrevivência": r["Tempo de sobrevivência"],
-                            "Suicídios": r["Suicídios"],
-                        } for idx, r in enumerate(ranking_surv_sorted)])
-                    else:
-                        st.info("Sem dados de sobrevivência ainda neste log.")
-
-                # Destaque para o jogador logado
-                st.markdown("---")
-                st.markdown("#### 👤 Meu desempenho no log atual")
-
-                meu_reg = next(
-                    (r for r in ranking_play if r["Jogador"] == gamertag_vinculada),
-                    None,
+            if err or not log_text:
+                st.warning(
+                    "Ainda não foi possível carregar os dados de ranking a partir dos logs do servidor."
                 )
-                if not meu_reg:
-                    st.info("Ainda não há dados seus neste log (nenhuma sessão registrada).")
-                else:
-                    col_m1, col_m2, col_m3 = st.columns(3)
-                    col_m1.metric("⏱️ Tempo de jogo", meu_reg["Tempo de jogo"])
-                    col_m2.metric("🔁 Sessões", meu_reg["Sessões"])
-                    col_m3.metric("🧟 Hits PvE", meu_reg["Hits PvE"])
+                st.caption(f"Detalhes técnicos: {err or 'log vazio'}")
+                return
 
-            # chama o fragmento passando os argumentos
-            _ranking_fragment(ftp_cfg, gamertag_vinculada)
+            parsed = parse_adm_sessions_and_pve(log_text)
+
+            # Garante que parsed é um dict antes de usar .get
+            if not isinstance(parsed, dict):
+                st.warning(
+                    "Ainda não foi possível carregar os dados de ranking a partir dos logs do servidor."
+                )
+                return
+
+            pstats = parsed.get("players", {})
+
+            if not pstats:
+                st.info("Nenhuma estatística encontrada no log .ADM mais recente.")
+                return
+
+            # Monta listas para ranking
+            ranking_play = []
+            ranking_surv = []
+
+            for nome, dados in pstats.items():
+                total_play = dados.get("total_play_seconds", 0)
+                ranking_play.append({
+                    "Jogador": nome,
+                    "Tempo de jogo": format_seconds_hhmmss(total_play),
+                    "Tempo (segundos)": total_play,
+                    "Sessões": dados.get("session_count", 0),
+                    "Hits PvE": dados.get("pve_hits", 0),
+                    "Suicídios": dados.get("pve_suicides", 0),
+                })
+
+                ranking_surv.append({
+                    "Jogador": nome,
+                    "Tempo de sobrevivência": format_seconds_hhmmss(total_play),
+                    "Tempo (segundos)": total_play,
+                    "Suicídios": dados.get("pve_suicides", 0),
+                })
+
+            ranking_play_sorted = sorted(
+                ranking_play, key=lambda x: x["Tempo (segundos)"], reverse=True
+            )[:10]
+            ranking_surv_sorted = sorted(
+                ranking_surv, key=lambda x: x["Tempo (segundos)"], reverse=True
+            )[:10]
+
+            col_r1, col_r2 = st.columns(2)
+
+            with col_r1:
+                st.markdown("#### ⏱️ Tempo de jogo total — Top 10")
+                if ranking_play_sorted:
+                    st.table([{
+                        "#": idx + 1,
+                        "Jogador": r["Jogador"],
+                        "Tempo de jogo": r["Tempo de jogo"],
+                        "Sessões": r["Sessões"],
+                        "Hits PvE": r["Hits PvE"],
+                        "Suicídios": r["Suicídios"],
+                    } for idx, r in enumerate(ranking_play_sorted)])
+                else:
+                    st.info("Sem dados de tempo de jogo ainda neste log.")
+
+            with col_r2:
+                st.markdown("#### 🧟 Tempo de sobrevivência (proxy) — Top 10")
+                if ranking_surv_sorted:
+                    st.table([{
+                        "#": idx + 1,
+                        "Jogador": r["Jogador"],
+                        "Tempo de sobrevivência": r["Tempo de sobrevivência"],
+                        "Suicídios": r["Suicídios"],
+                    } for idx, r in enumerate(ranking_surv_sorted)])
+                else:
+                    st.info("Sem dados de sobrevivência ainda neste log.")
+
+            # Destaque para o jogador logado
+            st.markdown("---")
+            st.markdown("#### 👤 Meu desempenho no log atual")
+
+            meu_reg = next(
+                (r for r in ranking_play if r["Jogador"] == gamertag_vinculada),
+                None,
+            )
+            if not meu_reg:
+                st.info("Ainda não há dados seus neste log (nenhuma sessão registrada).")
+            else:
+                col_m1, col_m2, col_m3 = st.columns(3)
+                col_m1.metric("⏱️ Tempo de jogo", meu_reg["Tempo de jogo"])
+                col_m2.metric("🔁 Sessões", meu_reg["Sessões"])
+                col_m3.metric("🧟 Hits PvE", meu_reg["Hits PvE"])
+
+        # chama o fragmento passando os argumentos
+        _ranking_fragment(ftp_cfg, gamertag_vinculada)
 
 
 if __name__ == "__main__":
