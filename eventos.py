@@ -37,6 +37,10 @@ else:
         DB_USERS = os.path.join(BASE_DIR, "users_db.json")
         DB_CLIENTS = os.path.join(BASE_DIR, "clients_data.json")
 
+# DEBUG TEMPORÁRIO PARA VER OS ARQUIVOS USADOS
+st.write("DEBUG DB_USERS path:", DB_USERS)
+st.write("DEBUG DB_CLIENTS path:", DB_CLIENTS)
+
 # --- CONFIGURAÇÃO DA PÁGINA (antes de qualquer sidebar) ---
 st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
 
@@ -59,6 +63,10 @@ PLANOS = {
     "Enterprise": 999,
 }
 
+# --- CONFIGURAÇÃO NITRADO API ---
+NITRADO_TOKEN = os.environ.get("NITRADO_TOKEN", "")
+NITRADO_API = "https://api.nitrado.net"
+
 # Caminhos padrão do types.xml por mapa no servidor DayZ
 TYPES_REMOTE_PATHS = {
     "Chernarus": "mpmissions/dayzOffline.chernarusplus/db",
@@ -69,6 +77,18 @@ TYPES_REMOTE_PATHS = {
 UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
+
+# --- CONFIGURAÇÃO DE GERAÇÃO DE DZCOINS ---
+DZCOINS_DEFAULT_CONFIG = {
+    "ativo": True,                    # Se o sistema está ativado
+    "quantidade_dzcoins": 10,         # Quantidade de DzCoins a ganhar
+    "intervalo_minutos": 5,           # A cada X minutos
+    "ativado_em": None,               # Data de ativação
+}
+
+# Dict global para rastrear último ganho por jogador
+# Será setado durante a execução do worker
+player_last_earning = {}
 
 
 # =========================================================
@@ -361,42 +381,11 @@ def enviar_globals_via_ftp(client_id, local_path, mapa):
         ftp.connect(conf["host"], int(conf["port"]), timeout=15)
         ftp.login(conf["user"], conf["pass"])
         ftp.cwd(remote_dir)
-        filename = "globals.xml"
+
+        filename = "globals.xml"  # nome padrão no servidor
         with open(local_path, "rb") as f:
             ftp.storbinary(f"STOR {filename}", f)
-        ftp.quit()
-        return True, "Sucesso"
-    except Exception as e:
-        return False, str(e)
 
-
-def enviar_cfggameplay_via_ftp(client_id, local_path, mapa):
-    """
-    Envia o arquivo cfggameplay.json já salvo em local_path
-    para o caminho correto no servidor, de acordo com o mapa.
-    """
-    CFGGAMEPLAY_REMOTE_PATHS = {
-        "Chernarus": "mpmissions/dayzOffline.chernarusplus",
-        "Livonia":   "mpmissions/dayzOffline.enoch",
-    }
-
-    db_atual = load_db(DB_CLIENTS, {})
-    if client_id not in db_atual:
-        return False, "Cliente não encontrado"
-
-    conf = db_atual[client_id]["ftp"]
-    remote_dir = CFGGAMEPLAY_REMOTE_PATHS.get(mapa)
-    if not remote_dir:
-        return False, f"Caminho remoto não configurado para o mapa {mapa}"
-
-    try:
-        ftp = ftplib.FTP()
-        ftp.connect(conf["host"], int(conf["port"]), timeout=15)
-        ftp.login(conf["user"], conf["pass"])
-        ftp.cwd(remote_dir)
-        filename = "cfggameplay.json"
-        with open(local_path, "rb") as f:
-            ftp.storbinary(f"STOR {filename}", f)
         ftp.quit()
         return True, "Sucesso"
     except Exception as e:
@@ -613,6 +602,205 @@ def df_to_players(df):
         }
     return players
 
+# --------- HELPERS GERAÇÃO DE DZCOINS ---------
+
+def carregar_dzcoins_config(client_data_obj):
+    """
+    Garante que exista a configuração de ganho de DzCoins dentro do client_data.
+    Retorna a configuração.
+    """
+    if "dzcoins_config" not in client_data_obj:
+        client_data_obj["dzcoins_config"] = DZCOINS_DEFAULT_CONFIG.copy()
+    
+    # Garante todas as chaves necessárias
+    config = client_data_obj["dzcoins_config"]
+    config.setdefault("ativo", True)
+    config.setdefault("quantidade_dzcoins", 10)
+    config.setdefault("intervalo_minutos", 5)
+    config.setdefault("ativado_em", None)
+    
+    return config
+
+
+def salvar_dzcoins_config(client_data_obj, config):
+    """
+    Salva a configuração de DzCoins no client_data.
+    """
+    client_data_obj["dzcoins_config"] = config
+
+
+def processar_ganhos_dzcoins(clients_data, players_online_dict):
+    """
+    Processa ganhos de DzCoins para todos os servidores/clientes.
+    
+    Parametros:
+    - clients_data: dict completo de DB_CLIENTS
+    - players_online_dict: dict {server_id: [lista_de_nomes_online]} 
+    
+    Retorna: (clientes_atualizados, mensagens_log)
+    """
+    global player_last_earning
+    
+    mensagens = []
+    mudou_algo = False
+    
+    for server_id, client_data in clients_data.items():
+        # Carrega config de DzCoins
+        config = carregar_dzcoins_config(client_data)
+        
+        # Se não estiver ativo, pula
+        if not config.get("ativo", False):
+            continue
+        
+        # Recupera jogadores online neste servidor (da API Nitrado ou similar)
+        players_online = players_online_dict.get(server_id, [])
+        if not players_online:
+            continue
+        
+        # Garante estruturas de wallets
+        if "wallets" not in client_data:
+            client_data["wallets"] = {}
+        wallets = client_data["wallets"]
+        
+        # Config de ganho
+        quantidade = config.get("quantidade_dzcoins", 10)
+        intervalo_seg = config.get("intervalo_minutos", 5) * 60
+        
+        agora = get_hora_brasilia()
+        
+        for player_name in players_online:
+            # Normaliza nome
+            player_key = f"{server_id}:{player_name}"
+            
+            # Verifica se já ganhou recentemente
+            ultima_vez = player_last_earning.get(player_key)
+            
+            if ultima_vez is None:
+                # Primeira vez, registra e credita
+                player_last_earning[player_key] = agora
+                
+                # Inicializa wallet se não existe
+                if player_name not in wallets:
+                    wallets[player_name] = {"balance": 0, "historico": []}
+                
+                wallet = wallets[player_name]
+                wallet["balance"] += quantidade
+                
+                hora_str = agora.strftime("%d/%m/%Y %H:%M:%S")
+                msg_hist = f"[{hora_str}] GANHO AUTOMÁTICO +{quantidade} DzCoins (tempo online)"
+                wallet.setdefault("historico", []).append(msg_hist)
+                
+                mensagens.append(f"[{server_id}] {player_name}: +{quantidade} DzCoins (primeira vez)")
+                mudou_algo = True
+                
+            else:
+                # Verifica se passou o intervalo
+                delta_seg = (agora - ultima_vez).total_seconds()
+                
+                if delta_seg >= intervalo_seg:
+                    # Credita e atualiza
+                    player_last_earning[player_key] = agora
+                    
+                    if player_name not in wallets:
+                        wallets[player_name] = {"balance": 0, "historico": []}
+                    
+                    wallet = wallets[player_name]
+                    wallet["balance"] += quantidade
+                    
+                    hora_str = agora.strftime("%d/%m/%Y %H:%M:%S")
+                    msg_hist = f"[{hora_str}] GANHO AUTOMÁTICO +{quantidade} DzCoins (tempo online)"
+                    wallet.setdefault("historico", []).append(msg_hist)
+                    
+                    mensagens.append(f"[{server_id}] {player_name}: +{quantidade} DzCoins")
+                    mudou_algo = True
+        
+        client_data["wallets"] = wallets
+    
+    return clients_data, mensagens, mudou_algo
+
+
+def worker_dzcoins_thread():
+    """
+    Worker em thread que processa ganhos de DzCoins periodicamente.
+    Executa a cada 30 segundos (para manter sincronização).
+    Usa API Nitrado para pegar jogadores online.
+    """
+    import time
+    
+    while True:
+        try:
+            # Carrega dados atuais
+            clients_data = load_db(DB_CLIENTS, {})
+            db_users_data = load_db(DB_USERS, {})
+            
+            # Para cada servidor, tenta obter jogadores online via Nitrado
+            players_online_map = {}
+            
+            for server_id, client_data in clients_data.items():
+                # server_id é na verdade o nitrado_id armazenado durante geração de chave
+                nitrado_id = server_id
+                
+                # Chama get_players_online (importado dinamicamente)
+                try:
+                    # Tenta chamar a função do player_portal
+                    # Como não é trivial importar, fazemos um clone simplificado aqui
+                    players_online = _get_players_online_helper(nitrado_id)
+                    if players_online:
+                        players_online_map[server_id] = players_online
+                except Exception as e:
+                    print(f"[DZCOINS] Erro ao obter jogadores online para {server_id}: {e}")
+                
+            # Processa ganhos
+            clients_data, msgs, mudou = processar_ganhos_dzcoins(
+                clients_data, 
+                players_online_map
+            )
+            
+            # Salva se algo mudou
+            if mudou:
+                save_db(DB_CLIENTS, clients_data)
+                # Log
+                for msg in msgs:
+                    print(f"[DZCOINS] {msg}")
+        
+        except Exception as e:
+            print(f"[DZCOINS ERROR] {e}")
+        
+        # Aguarda 30 segundos antes de próxima iteração
+        time.sleep(30)
+
+
+def _get_players_online_helper(nitrado_id: str):
+    """
+    Helper que obtém jogadores online via Nitrado API.
+    Retorna lista de nomes ou None se erro.
+    """
+    if not NITRADO_TOKEN:
+        return None
+    
+    try:
+        headers = {"Authorization": f"Bearer {NITRADO_TOKEN}"}
+        url = f"{NITRADO_API}/services/{nitrado_id}/gameservers"
+        resp = requests.get(url, headers=headers, timeout=10)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            gs = data.get("data", {}).get("gameserver", {})
+            query = gs.get("query", {})
+            players_raw = query.get("players", [])
+            
+            # players_raw pode ser lista de dicts ou lista de strings
+            if players_raw and isinstance(players_raw[0], dict):
+                nomes = [p.get("name", "?") for p in players_raw]
+            else:
+                nomes = [str(p) for p in players_raw]
+            
+            return nomes if nomes else None
+        else:
+            return None
+    except Exception:
+        return None
+
 # =========================================================
 # 3. INICIALIZAÇÃO DE ESTADO
 # =========================================================
@@ -642,27 +830,19 @@ if "view_mode" not in st.session_state:
 
 
 # =========================================================
-# 4. SIDEBAR — TITAN CLOUD PRO
+# 4. TELA DE LOGIN
 # =========================================================
 
-with st.sidebar:
-    st.subheader("Titan Cloud Pro")
-
-
-# =========================================================
-# 5. TELA DE LOGIN (APENAS PARA PORTAL DO ADMIN)
-# =========================================================
-
-if not st.session_state.get("authenticated"):
-    st.title("🔑 Titan Cloud - Login (Admin)")
+if not st.session_state.authenticated:
+    st.title("🔑 Titan Cloud - Login")
 
     dados_geo = buscar_localizacao_cliente()
-    login_key = st.text_input("Insira sua KeyUser de administrador", type="password")
+    login_key = st.text_input("Insira sua KeyUser", type="password")
 
     if st.button("Entrar no Painel", use_container_width=True):
         ok, cargo = validar_acesso(login_key)
 
-        if ok and cargo == "admin":
+        if ok:
             token_sessao = secrets.token_hex(8)
 
             if dados_geo:
@@ -670,33 +850,39 @@ if not st.session_state.get("authenticated"):
             else:
                 local_final = "Localização não capturada"
 
-            # Opcional: registrar log de acesso do admin
-            db_users = st.session_state.db_users
-            db_users["admin_last_session"] = token_sessao
-            db_users["admin_local"] = local_final
-            db_users["admin_last_login"] = get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
-            save_db(DB_USERS, db_users)
+            # Se for cliente, atualiza informações de acesso no users_db
+            if cargo == "client":
+                # Garante que db_users está carregado
+                db_users = st.session_state.db_users
 
+                # Recupera dados da key e o server_id associado
+                key_data = db_users.get("keys", {}).get(login_key, {})
+                server_id = key_data.get("server_id")
+
+                if not server_id:
+                    st.error(
+                        "Esta KeyUser não possui um ID de servidor associado (server_id).\n"
+                        "Registre ou atualize o cliente pelo painel de administração."
+                    )
+                    st.stop()
+
+                # Atualiza logs de acesso
+                db_users["keys"][login_key]["last_session"] = token_sessao
+                db_users["keys"][login_key]["local"] = local_final
+                db_users["keys"][login_key]["last_login"] = (
+                    get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
+                )
+                save_db(DB_USERS, db_users)
+
+                # Guarda server_id na sessão (ponte para clients_data.json)
+                st.session_state.server_id = server_id
+
+            # Para admin, pode não haver server_id direto
             st.session_state.authenticated = True
             st.session_state.user_key = login_key
-            st.session_state.role = "admin"
+            st.session_state.role = cargo
             st.session_state.session_token = token_sessao
-            st.session_state.view_mode = "admin"
-
-            st.rerun()
-        elif ok and cargo == "client":
-            token_sessao = secrets.token_hex(8)
-
-            st.session_state.authenticated = True
-            st.session_state.user_key = login_key
-            st.session_state.role = "client"
-            st.session_state.session_token = token_sessao
-            st.session_state.view_mode = "client"
-
-            user_info_login = st.session_state.db_users["keys"][login_key]
-            user_info_login["last_session"] = token_sessao
-            user_info_login["last_login"] = get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
-            save_db(DB_USERS, st.session_state.db_users)
+            st.session_state.view_mode = "admin" if cargo == "admin" else "client"
 
             st.rerun()
         else:
@@ -706,7 +892,7 @@ if not st.session_state.get("authenticated"):
 
 
 # =========================================================
-# 6. ÁREA DO ADMINISTRADOR
+# 5. ÁREA DO ADMINISTRADOR
 # =========================================================
 
 if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
@@ -716,8 +902,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             st.session_state.view_mode = "client"
             st.rerun()
         if st.button("🔴 Logout (Admin)", use_container_width=True):
-            for k in ["authenticated", "role", "view_mode", "user_key", "session_token"]:
-                st.session_state.pop(k, None)
+            st.session_state.authenticated = False
             st.rerun()
 
     st.title("🛡️ Painel de Controle - Administrador")
@@ -779,6 +964,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         st.error("Preencha o nome do servidor/cliente e a KeyUser.")
                     else:
                         # 1) Definir ID interno do servidor (server_id)
+                        #    Se tiver ID Nitrado, usa ele; senão gera aleatório
                         if nitrado_id.strip():
                             server_id = nitrado_id.strip()
                         else:
@@ -857,8 +1043,15 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     st.write(f"**🖥️ IP:** {v.get('last_ip', '0.0.0.0')}")
                 with col_mon2:
                     st.write(f"**🕒 Último Login:** {v.get('last_login', '---')}")
-                    if st.button("🚫 Banir Acesso (Expirar Key)", key=f"ban_{k}", type="primary", use_container_width=True):
-                        v["expires"] = (get_hora_brasilia() - timedelta(days=1)).strftime("%d/%m/%Y")
+                    if st.button(
+                        "🚫 Banir Acesso (Expirar Key)",
+                        key=f"ban_{k}",
+                        type="primary",
+                        use_container_width=True,
+                    ):
+                        v["expires"] = (
+                            get_hora_brasilia() - timedelta(days=1)
+                        ).strftime("%d/%m/%Y")
                         save_db(DB_USERS, st.session_state.db_users)
                         st.warning(f"O acesso de {v['server']} foi bloqueado.")
                         st.rerun()
@@ -868,14 +1061,55 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                 c_edit1, c_edit2 = st.columns(2)
                 with c_edit1:
                     st.markdown("#### 📝 Informações e Plano")
-                    new_n = st.text_input("Editar Nome", value=v["server"], key=f"n_{k}")
-                    new_p = st.selectbox("Trocar Plano", list(PLANOS.keys()), index=list(PLANOS.keys()).index(v.get("plano", "Starter")), key=f"p_{k}")
-                    new_lim = st.number_input("Ajustar Limite", min_value=1, value=int(limite_final), key=f"lim_{k}")
+                    new_n = st.text_input(
+                        "Editar Nome", value=v["server"], key=f"n_{k}"
+                    )
+                    new_p = st.selectbox(
+                        "Trocar Plano",
+                        list(PLANOS.keys()),
+                        index=list(PLANOS.keys()).index(v.get("plano", "Starter")),
+                        key=f"p_{k}",
+                    )
+                    new_lim = st.number_input(
+                        "Ajustar Limite",
+                        min_value=1,
+                        value=int(limite_final),
+                        key=f"lim_{k}",
+                    )
 
-                    if st.button("💾 Salvar Alterações", key=f"bn_{k}", use_container_width=True):
+                    st.markdown("#### 📧 Contatos de Notificação")
+                    new_mail = st.text_input(
+                        "E-mail do Cliente", value=v.get("email", ""), key=f"mail_{k}"
+                    )
+                    new_wa = st.text_input(
+                        "WhatsApp (com DDD)",
+                        value=v.get("whatsapp", ""),
+                        key=f"wa_{k}",
+                    )
+
+                    st.markdown("#### 🎮 Integração Discord")
+                    new_guild = st.text_input(
+                        "ID do Servidor Discord (Guild ID)",
+                        value=v.get("discord_guild_id", ""),
+                        key=f"guild_{k}",
+                        help=(
+                            "ID numérico do servidor Discord do administrador. "
+                            "Para obter: Discord > Configurações > Avançado > Modo desenvolvedor ativo. "
+                            "Depois clique com botão direito no servidor > Copiar ID do servidor."
+                        ),
+                    )
+
+                    if st.button(
+                        "💾 Salvar Alterações",
+                        key=f"bn_{k}",
+                        use_container_width=True,
+                    ):
                         st.session_state.db_users["keys"][k]["server"] = new_n
                         st.session_state.db_users["keys"][k]["plano"] = new_p
                         st.session_state.db_users["keys"][k]["limite_extra"] = new_lim
+                        st.session_state.db_users["keys"][k]["email"] = new_mail
+                        st.session_state.db_users["keys"][k]["whatsapp"] = new_wa
+                        st.session_state.db_users["keys"][k]["discord_guild_id"] = new_guild.strip()
                         save_db(DB_USERS, st.session_state.db_users)
                         st.success("Dados atualizados!")
                         st.rerun()
@@ -883,38 +1117,30 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                 with c_edit2:
                     st.markdown("#### 📅 Validade do Acesso")
                     st.write(f"**Expira em:** {v['expires']} ({dias_rest} dias)")
-                    add_d = st.number_input("Adicionar dias", min_value=1, value=30, key=f"d_{k}")
-                    if st.button("➕ Estender/Renovar", key=f"bd_{k}", use_container_width=True):
-                        nova_data = (dt_exp_check + timedelta(days=add_d)).strftime("%d/%m/%Y")
+                    add_d = st.number_input(
+                        "Adicionar dias", min_value=1, value=30, key=f"d_{k}"
+                    )
+                    if st.button(
+                        "➕ Estender/Renovar",
+                        key=f"bd_{k}",
+                        use_container_width=True,
+                    ):
+                        nova_data = (
+                            dt_exp_check + timedelta(days=add_d)
+                        ).strftime("%d/%m/%Y")
                         st.session_state.db_users["keys"][k]["expires"] = nova_data
                         save_db(DB_USERS, st.session_state.db_users)
                         st.success(f"Estendido para {nova_data}!")
                         st.rerun()
 
                 st.divider()
-                st.markdown("#### 🛒 Ações Administrativas")
-                
-                if st.button("💾 Salvar/Sincronizar Loja", key=f"save_loja_{k}", use_container_width=True):
-                    db_completo = load_db(DB_CLIENTS, {})
-                    if k not in db_completo:
-                        db_completo[k] = {}
-                    
-                    # Busca o DataFrame editado que foi salvo com a chave única do cliente
-                    df_loja_key = f"df_loja_{k}"
-                    df_editado = st.session_state.get(df_loja_key, pd.DataFrame())
-                    itens_atualizados = df_to_loja_itens(df_editado)
-                    
-                    db_completo[k]["loja"] = {
-                        "mapa_padrao": "Chernarus",
-                        "posicao_padrao": "",
-                        "itens": itens_atualizados
-                    }
-                    save_db(DB_CLIENTS, db_completo)
-                    st.session_state.db_clients = db_completo
-                    st.success(f"Loja do servidor {v['server']} sincronizada com sucesso!")
 
-                st.divider()
-                if st.button("🗑️ EXCLUIR CLIENTE PERMANENTEMENTE", key=f"del_{k}", type="primary", use_container_width=True):
+                if st.button(
+                    "🗑️ EXCLUIR CLIENTE PERMANENTEMENTE",
+                    key=f"del_{k}",
+                    type="primary",
+                    use_container_width=True,
+                ):
                     del st.session_state.db_users["keys"][k]
                     if k in st.session_state.db_clients:
                         del st.session_state.db_clients[k]
@@ -922,225 +1148,223 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     save_db(DB_CLIENTS, st.session_state.db_clients)
                     st.rerun()
 
-        # --- TAB 3: CONFIG PLANOS ---
-        with tab_adm3:
-            st.subheader("⚙️ Configuração Global de Limites")
-            if "config_planos" not in st.session_state.db_users:
-                st.session_state.db_users["config_planos"] = PLANOS.copy()
-            conf_planos = st.session_state.db_users["config_planos"]
+    # --- TAB 3: CONFIG PLANOS ---
+    with tab_adm3:
+        st.subheader("⚙️ Configuração Global de Limites")
+        if "config_planos" not in st.session_state.db_users:
+            st.session_state.db_users["config_planos"] = PLANOS.copy()
+        conf_planos = st.session_state.db_users["config_planos"]
 
-            col_p1, col_p2, col_p3 = st.columns(3)
-            with col_p1:
-                novo_starter = st.number_input(
-                    "Starter",
-                    min_value=1,
-                    value=conf_planos.get("Starter", 2),
-                    key="conf_starter",
-                )
-            with col_p2:
-                novo_pro = st.number_input(
-                    "Pro",
-                    min_value=1,
-                    value=conf_planos.get("Pro", 10),
-                    key="conf_pro",
-                )
-            with col_p3:
-                novo_ent = st.number_input(
-                    "Enterprise",
-                    min_value=1,
-                    value=conf_planos.get("Enterprise", 999),
-                    key="conf_ent",
-                )
+        col_p1, col_p2, col_p3 = st.columns(3)
+        with col_p1:
+            novo_starter = st.number_input(
+                "Starter",
+                min_value=1,
+                value=conf_planos.get("Starter", 2),
+                key="conf_starter",
+            )
+        with col_p2:
+            novo_pro = st.number_input(
+                "Pro",
+                min_value=1,
+                value=conf_planos.get("Pro", 10),
+                key="conf_pro",
+            )
+        with col_p3:
+            novo_ent = st.number_input(
+                "Enterprise",
+                min_value=1,
+                value=conf_planos.get("Enterprise", 999),
+                key="conf_ent",
+            )
 
-            if st.button("🚀 Aplicar Limites Globais", use_container_width=True):
-                st.session_state.db_users["config_planos"] = {
-                    "Starter": novo_starter,
-                    "Pro": novo_pro,
-                    "Enterprise": novo_ent,
-                }
-                save_db(DB_USERS, st.session_state.db_users)
-                st.success("Limites globais atualizados!")
-                time.sleep(1)
-                st.rerun()
+        if st.button("🚀 Aplicar Limites Globais", use_container_width=True):
+            st.session_state.db_users["config_planos"] = {
+                "Starter": novo_starter,
+                "Pro": novo_pro,
+                "Enterprise": novo_ent,
+            }
+            save_db(DB_USERS, st.session_state.db_users)
+            st.success("Limites globais atualizados!")
+            time.sleep(1)
+            st.rerun()
 
-        # --- TAB 4: BACKUP / RESTORE ---
-        with tab_adm4:
-            st.subheader("📦 Central de Migração de Dados")
-            st.info("Faça backup antes de atualizar e restaure logo após o deploy.")
-            col_back, col_rest = st.columns(2)
-            with col_back:
-                st.markdown("### ⬇️ Exportar Backup")
-                dados_totais = {
-                    "users": st.session_state.db_users,
-                    "clients": st.session_state.db_clients,
-                }
-                json_string = json.dumps(dados_totais, indent=4, ensure_ascii=False)
-                st.download_button(
-                    label="💾 Baixar Backup Geral (JSON)",
-                    data=json_string,
-                    file_name=f"backup_titan_{get_hora_brasilia().strftime('%d_%m_%Y')}.json",
-                    mime="application/json",
-                    use_container_width=True,
-                )
-            with col_rest:
-                st.markdown("### ⬆️ Importar/Restaurar")
-                arquivo_upload = st.file_uploader(
-                    "Selecione o arquivo de backup", type="json"
-                )
-                if st.button(
-                    "🚀 Restaurar Dados Agora", use_container_width=True, type="primary"
-                ):
-                    if arquivo_upload is not None:
-                        try:
-                            backup_data = json.load(arquivo_upload)
-                            if "users" in backup_data and "clients" in backup_data:
-                                st.session_state.db_users = backup_data["users"]
-                                st.session_state.db_clients = backup_data["clients"]
-                                save_db(DB_USERS, st.session_state.db_users)
-                                save_db(DB_CLIENTS, st.session_state.db_clients)
-                                st.success("✅ Restauração concluída!")
-                                time.sleep(2)
-                                st.rerun()
-                            else:
-                                st.error("❌ Arquivo inválido!")
-                        except Exception as e:
-                            st.error(f"❌ Erro: {e}")
-
-        # --- TAB 5: COMUNICADOS ---
-        with tab_adm5:
-            st.subheader("📢 Enviar Comunicado Oficial")
-            col_c1, col_c2 = st.columns([1, 2])
-
-            with col_c1:
-                opcoes_clientes = {
-                    v["server"]: k for k, v in st.session_state.db_users["keys"].items()
-                }
-                alvos = st.multiselect(
-                    "Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos"
-                )
-
-                st.write("**Enviar via:**")
-                send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
-                send_mail = st.checkbox("E-mail")
-                send_wa = st.checkbox("WhatsApp")
-                send_disc = st.checkbox("Discord (Webhook do Cliente)")
-
-            with col_c2:
-                titulo_com = st.text_input(
-                    "Título do Comunicado",
-                    placeholder="Ex: Manutenção Programada",
-                    key="input_tit_com",
-                )
-                corpo_com = st.text_area(
-                    "Mensagem",
-                    height=200,
-                    placeholder="Escreva aqui os detalhes...",
-                    key="input_msg_com",
-                )
-
-                if st.button(
-                    "🚀 Disparar Comunicado", use_container_width=True, type="primary"
-                ):
-                    if titulo_com and corpo_com:
-                        st.session_state.db_users = load_db(
-                            DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}}
-                        )
-                        st.session_state.db_clients = load_db(DB_CLIENTS, {})
-
-                        if "Todos" in alvos:
-                            destinatarios = list(st.session_state.db_users["keys"].keys())
+    # --- TAB 4: BACKUP / RESTORE ---
+    with tab_adm4:
+        st.subheader("📦 Central de Migração de Dados")
+        st.info("Faça backup antes de atualizar e restaure logo após o deploy.")
+        col_back, col_rest = st.columns(2)
+        with col_back:
+            st.markdown("### ⬇️ Exportar Backup")
+            dados_totais = {
+                "users": st.session_state.db_users,
+                "clients": st.session_state.db_clients,
+            }
+            json_string = json.dumps(dados_totais, indent=4, ensure_ascii=False)
+            st.download_button(
+                label="💾 Baixar Backup Geral (JSON)",
+                data=json_string,
+                file_name=f"backup_titan_{get_hora_brasilia().strftime('%d_%m_%Y')}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+        with col_rest:
+            st.markdown("### ⬆️ Importar/Restaurar")
+            arquivo_upload = st.file_uploader(
+                "Selecione o arquivo de backup", type="json"
+            )
+            if st.button(
+                "🚀 Restaurar Dados Agora", use_container_width=True, type="primary"
+            ):
+                if arquivo_upload is not None:
+                    try:
+                        backup_data = json.load(arquivo_upload)
+                        if "users" in backup_data and "clients" in backup_data:
+                            st.session_state.db_users = backup_data["users"]
+                            st.session_state.db_clients = backup_data["clients"]
+                            save_db(DB_USERS, st.session_state.db_users)
+                            save_db(DB_CLIENTS, st.session_state.db_clients)
+                            st.success("✅ Restauração concluída!")
+                            time.sleep(2)
+                            st.rerun()
                         else:
-                            destinatarios = [
-                                opcoes_clientes[nome] for nome in alvos
-                            ]
+                            st.error("❌ Arquivo inválido!")
+                    except Exception as e:
+                        st.error(f"❌ Erro: {e}")
 
-                        comunicado_obj = {
-                            "id": str(time.time()),
-                            "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
-                            "titulo": titulo_com,
-                            "mensagem": corpo_com,
-                            "lido": False,
-                        }
+    # --- TAB 5: COMUNICADOS ---
+    with tab_adm5:
+        st.subheader("📢 Enviar Comunicado Oficial")
+        col_c1, col_c2 = st.columns([1, 2])
 
-                        for d_id in destinatarios:
-                            if d_id not in st.session_state.db_clients:
-                                st.session_state.db_clients[d_id] = {
-                                    "ftp": {
-                                        "host": "",
-                                        "user": "",
-                                        "pass": "",
-                                        "port": "21",
-                                    },
-                                    "agendas": [],
-                                    "logs": [],
-                                    "comunicados": [],
-                                }
-                            if "comunicados" not in st.session_state.db_clients[d_id]:
-                                st.session_state.db_clients[d_id]["comunicados"] = []
+        with col_c1:
+            opcoes_clientes = {
+                v["server"]: k for k, v in st.session_state.db_users["keys"].items()
+            }
+            alvos = st.multiselect(
+                "Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos"
+            )
 
-                            st.session_state.db_clients[d_id]["comunicados"].insert(
-                                0, comunicado_obj
-                            )
+            st.write("**Enviar via:**")
+            send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
+            send_mail = st.checkbox("E-mail")
+            send_wa = st.checkbox("WhatsApp")
+            send_disc = st.checkbox("Discord (Webhook do Cliente)")
 
-                            if send_disc:
-                                webhook_url = st.session_state.db_clients.get(d_id, {}).get(
-                                    "discord_webhook"
-                                )
-                                if webhook_url:
-                                    try:
-                                        payload = {
-                                            "embeds": [
-                                                {
-                                                    "title": f"📢 {titulo_com}",
-                                                    "description": corpo_com,
-                                                    "color": 16711680,
-                                                }
-                                            ]
-                                        }
-                                        requests.post(
-                                            webhook_url, json=payload, timeout=5
-                                        )
-                                    except Exception:
-                                        pass
+        with col_c2:
+            titulo_com = st.text_input(
+                "Título do Comunicado",
+                placeholder="Ex: Manutenção Programada",
+                key="input_tit_com",
+            )
+            corpo_com = st.text_area(
+                "Mensagem",
+                height=200,
+                placeholder="Escreva aqui os detalhes...",
+                key="input_msg_com",
+            )
 
-                            if send_mail:
-                                email_cli = (
-                                    st.session_state.db_users["keys"]
-                                    .get(d_id, {})
-                                    .get("email")
-                                )
-                                if email_cli:
-                                    enviar_email(email_cli, titulo_com, corpo_com)
+            if st.button(
+                "🚀 Disparar Comunicado", use_container_width=True, type="primary"
+            ):
+                if titulo_com and corpo_com:
+                    st.session_state.db_users = load_db(
+                        DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}}
+                    )
+                    st.session_state.db_clients = load_db(DB_CLIENTS, {})
 
-                            if send_wa:
-                                wpp_cli = (
-                                    st.session_state.db_users["keys"]
-                                    .get(d_id, {})
-                                    .get("whatsapp")
-                                )
-                                if wpp_cli:
-                                    enviar_whatsapp(wpp_cli, corpo_com)
-
-                        save_db(DB_CLIENTS, st.session_state.db_clients)
-
-                        if "input_tit_com" in st.session_state:
-                            del st.session_state["input_tit_com"]
-                        if "input_msg_com" in st.session_state:
-                            del st.session_state["input_msg_com"]
-
-                        st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
-                        time.sleep(1)
-                        st.rerun()
+                    if "Todos" in alvos:
+                        destinatarios = list(st.session_state.db_users["keys"].keys())
                     else:
-                        st.error("Preencha o título e a mensagem.")
+                        destinatarios = [
+                            opcoes_clientes[nome] for nome in alvos
+                        ]
 
-    st.stop()  # Admin viu o painel, para aqui
+                    comunicado_obj = {
+                        "id": str(time.time()),
+                        "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
+                        "titulo": titulo_com,
+                        "mensagem": corpo_com,
+                        "lido": False,
+                    }
 
-elif st.session_state.get("view_mode") == "client":
-    pass  # continua para a Área do Cliente abaixo
+                    for d_id in destinatarios:
+                        if d_id not in st.session_state.db_clients:
+                            st.session_state.db_clients[d_id] = {
+                                "ftp": {
+                                    "host": "",
+                                    "user": "",
+                                    "pass": "",
+                                    "port": "21",
+                                },
+                                "agendas": [],
+                                "logs": [],
+                                "comunicados": [],
+                            }
+                        if "comunicados" not in st.session_state.db_clients[d_id]:
+                            st.session_state.db_clients[d_id]["comunicados"] = []
+
+                        st.session_state.db_clients[d_id]["comunicados"].insert(
+                            0, comunicado_obj
+                        )
+
+                        if send_disc:
+                            webhook_url = st.session_state.db_clients.get(d_id, {}).get(
+                                "discord_webhook"
+                            )
+                            if webhook_url:
+                                try:
+                                    payload = {
+                                        "embeds": [
+                                            {
+                                                "title": f"📢 {titulo_com}",
+                                                "description": corpo_com,
+                                                "color": 16711680,
+                                            }
+                                        ]
+                                    }
+                                    requests.post(
+                                        webhook_url, json=payload, timeout=5
+                                    )
+                                except Exception:
+                                    pass
+
+                        if send_mail:
+                            email_cli = (
+                                st.session_state.db_users["keys"]
+                                .get(d_id, {})
+                                .get("email")
+                            )
+                            if email_cli:
+                                enviar_email(email_cli, titulo_com, corpo_com)
+
+                        if send_wa:
+                            wpp_cli = (
+                                st.session_state.db_users["keys"]
+                                .get(d_id, {})
+                                .get("whatsapp")
+                            )
+                            if wpp_cli:
+                                enviar_whatsapp(wpp_cli, corpo_com)
+
+                    save_db(DB_CLIENTS, st.session_state.db_clients)
+
+                    if "input_tit_com" in st.session_state:
+                        del st.session_state["input_tit_com"]
+                    if "input_msg_com" in st.session_state:
+                        del st.session_state["input_msg_com"]
+
+                    st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("Preencha o título e a mensagem.")
+
+    st.stop()
+
 
 # =========================================================
-# 7. ÁREA DO CLIENTE
+# 6. ÁREA DO CLIENTE
 # =========================================================
 
 user_id = st.session_state.user_key
@@ -1149,32 +1373,6 @@ db_disco_clients = load_db(DB_CLIENTS, {})
 db_disco_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
 st.session_state.db_clients = db_disco_clients
 st.session_state.db_users = db_disco_users
-
-# Admin em modo teste: usa o primeiro cliente disponível como referência
-# Cliente normal: usa sua própria user_key
-if st.session_state.get("role") == "admin":
-    chaves_clientes = list(st.session_state.db_users.get("keys", {}).keys())
-    if not chaves_clientes:
-        st.warning("Nenhum cliente cadastrado ainda. Cadastre um cliente primeiro no Painel Admin.")
-        if st.button("⚙️ Voltar ao Painel Admin"):
-            st.session_state.view_mode = "admin"
-            st.rerun()
-        st.stop()
-
-    with st.sidebar:
-        st.subheader("🔍 Modo Teste — Selecione o Cliente")
-        nomes_clientes = {
-            v["server"]: k
-            for k, v in st.session_state.db_users["keys"].items()
-        }
-        cliente_sel_nome = st.selectbox(
-            "Visualizar como cliente:",
-            list(nomes_clientes.keys()),
-            key="admin_cliente_sel",
-        )
-        user_id = nomes_clientes[cliente_sel_nome]
-else:
-    user_id = st.session_state.user_key
 
 if user_id not in st.session_state.db_clients:
     st.session_state.db_clients[user_id] = {
@@ -1187,7 +1385,7 @@ if user_id not in st.session_state.db_clients:
 
 client_data = st.session_state.db_clients[user_id]
 user_info = st.session_state.db_users["keys"].get(
-    user_id, {"server": "Servidor (Admin Teste)", "plano": "Admin", "expires": "31/12/2099"}
+    user_id, {"server": "Servidor", "plano": "Starter", "expires": "01/01/2000"}
 )
 
 if st.session_state.role == "client":
@@ -1292,7 +1490,7 @@ with st.sidebar:
 
 # --- TABS PRINCIPAIS CLIENTE ---
 st.title(f"🎮 {user_info['server']}")
-tab1, tab2, tab3, tab4, tab5, tab_cfggameplay, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab_cfggameplay, tab6, tab7, tab8, tab9 = st.tabs([
     "📅 Agendamentos",
     "📜 Logs",
     "📢 Comunicados",
@@ -1302,6 +1500,7 @@ tab1, tab2, tab3, tab4, tab5, tab_cfggameplay, tab6, tab7, tab8 = st.tabs([
     "🛒 Loja / Trader",
     "👤 Jogadores / Vínculos",
     "🏦 Banco & Carteira",
+    "⚡ Ganho DzCoins",
 ])
 
 with tab1:
@@ -2311,44 +2510,18 @@ with tab6:
             st.success("Alterações aplicadas na sessão da Loja.")
 
     with col_loja2:
-        if st.button("Salvar Loja no Titan Cloud", key=f"btn_salvar_{user_id}", use_container_width=True):
-
-            # Busca o server_id real a partir da user_key logada
-            server_id_loja = st.session_state.db_users.get("keys", {}).get(
-                user_id, {}
-            ).get("server_id", user_id)
-
-            # 1. Carrega o banco global atualizado do disco
-            db_completo = load_db(DB_CLIENTS, {})
-
-            # 2. Garante que o servidor exista no banco
-            if server_id_loja not in db_completo:
-                db_completo[server_id_loja] = {
-                    "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
-                    "agendas": [],
-                    "logs": [],
-                    "comunicados": [],
-                    "players": {},
-                }
-
-            # 3. Prepara a estrutura da loja
+        if st.button("Salvar Loja no Titan Cloud", use_container_width=True):
+            # Converte DF para lista de itens e salva em client_data + disco
             itens_atualizados = df_to_loja_itens(edited_df_loja)
-            loja_obj = {
-                "mapa_padrao": loja_mapa_padrao,
-                "posicao_padrao": loja_posicao_padrao,
-                "itens": itens_atualizados,
-            }
+            loja["mapa_padrao"] = loja_mapa_padrao
+            loja["posicao_padrao"] = loja_posicao_padrao
+            loja["itens"] = itens_atualizados
 
-            # 4. Salva na chave correta do servidor
-            db_completo[server_id_loja]["loja"] = loja_obj
+            client_data["loja"] = loja
+            st.session_state.db_clients[user_id] = client_data
+            save_db(DB_CLIENTS, st.session_state.db_clients)
 
-            # 5. Persiste no arquivo JSON
-            save_db(DB_CLIENTS, db_completo)
-
-            # 6. Atualiza o session_state
-            st.session_state.db_clients = db_completo
-
-            st.success(f"✅ Catálogo salvo com sucesso para o Servidor {server_id_loja}!")
+            st.success("Catálogo da Loja salvo com sucesso no Titan Cloud!")
 
     with col_loja3:
         if st.button("⬇️ Baixar Loja (JSON)", use_container_width=True):
@@ -2376,9 +2549,8 @@ with tab7:
         "Esses dados serão usados pela Loja, Banco DzCoins e estatísticas."
     )
 
-    # Busca o server_id a partir da user_key logada
-    user_key = st.session_state.get("user_key", "")
-    server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
+    # Garante que o cliente está autenticado e possui um server_id vinculado
+    server_id = st.session_state.get("server_id")
     if not server_id:
         st.error(
             "Nenhum servidor vinculado a este login.\n"
@@ -2474,8 +2646,7 @@ with tab8:
     )
 
     # 1) Garante que há um servidor válido na sessão
-    user_key = st.session_state.get("user_key", "")
-    server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
+    server_id = st.session_state.get("server_id")
     if not server_id:
         st.error(
             "Nenhum servidor vinculado a este login.\n"
@@ -2632,7 +2803,184 @@ with tab8:
     else:
         st.info("Ainda não há movimentações registradas para este jogador.")
 
+with tab9:
+    st.subheader("⚡ Configurar Ganho Automático de DzCoins")
+    
+    st.info(
+        "Configure aqui os parâmetros de ganho automático de DzCoins para os jogadores "
+        "enquanto estão online no servidor."
+    )
+    
+    # Carrega dados do servidor
+    server_id = st.session_state.get("server_id")
+    if not server_id:
+        st.error("Nenhum servidor vinculado a este login.")
+        st.stop()
+    
+    clients_data = load_db(DB_CLIENTS, {})
+    if server_id not in clients_data:
+        st.error(f"Servidor com ID {server_id} não encontrado.")
+        st.stop()
+    
+    client_data = clients_data[server_id]
+    config = carregar_dzcoins_config(client_data)
+    
+    # === SEÇÃO 1: STATUS DO SISTEMA ===
+    st.markdown("### 🔴 Status do Sistema")
+    
+    col_status1, col_status2, col_status3 = st.columns(3)
+    with col_status1:
+        status_texto = "🟢 ATIVADO" if config.get("ativo", False) else "🔴 DESATIVADO"
+        st.metric("Status", status_texto)
+    
+    with col_status2:
+        intervalo = config.get("intervalo_minutos", 5)
+        st.metric("Intervalo", f"{intervalo} min")
+    
+    with col_status3:
+        quantidade = config.get("quantidade_dzcoins", 10)
+        st.metric("Ganho por intervalo", f"{quantidade} DzCoins")
+    
+    st.divider()
+    
+    # === SEÇÃO 2: CONFIGURAÇÃO ===
+    st.markdown("### ⚙️ Configurações")
+    
+    col_conf1, col_conf2 = st.columns(2)
+    
+    with col_conf1:
+        st.markdown("#### Ativar/Desativar")
+        novo_ativo = st.toggle(
+            "Sistema de ganho automático",
+            value=config.get("ativo", False),
+            key="dzcoins_toggle"
+        )
+        config["ativo"] = novo_ativo
+    
+    with col_conf2:
+        st.markdown("#### Intervalo de Tempo")
+        novo_intervalo = st.number_input(
+            "A cada quantos minutos o jogador ganha DzCoins?",
+            min_value=1,
+            max_value=60,
+            value=config.get("intervalo_minutos", 5),
+            step=1,
+            key="dzcoins_intervalo"
+        )
+        config["intervalo_minutos"] = novo_intervalo
+    
+    st.markdown("#### Quantidade de DzCoins")
+    nova_quantidade = st.number_input(
+        "Quantos DzCoins ganham a cada intervalo?",
+        min_value=1,
+        max_value=1000,
+        value=config.get("quantidade_dzcoins", 10),
+        step=1,
+        key="dzcoins_quantidade"
+    )
+    config["quantidade_dzcoins"] = nova_quantidade
+    
+    st.divider()
+    
+    # === SEÇÃO 3: RESUMO E SAVE ===
+    st.markdown("### 📊 Resumo de Ganho")
+    
+    ganho_por_hora = (nova_quantidade * 60) // novo_intervalo
+    ganho_por_dia = ganho_por_hora * 24
+    
+    resumo_col1, resumo_col2, resumo_col3 = st.columns(3)
+    with resumo_col1:
+        st.metric("Por Hora", f"{ganho_por_hora} DzCoins")
+    with resumo_col2:
+        st.metric("Por Dia (24h)", f"{ganho_por_dia} DzCoins")
+    with resumo_col3:
+        st.metric("Por Semana", f"{ganho_por_dia * 7} DzCoins")
+    
+    st.markdown(
+        f"""
+        **Exemplo de ganho:**
+        - A cada **{novo_intervalo} minuto(s)** online: +{nova_quantidade} DzCoins
+        - Jogador online **1 hora**: +{ganho_por_hora} DzCoins
+        - Jogador online **1 dia**: +{ganho_por_dia} DzCoins
+        """
+    )
+    
+    st.divider()
+    
+    # === BOTÃO SALVAR ===
+    if st.button("💾 Salvar Configurações", use_container_width=True, type="primary"):
+        salvar_dzcoins_config(client_data, config)
+        clients_data[server_id] = client_data
+        save_db(DB_CLIENTS, clients_data)
+        
+        status_msg = "ATIVADO" if config.get("ativo") else "DESATIVADO"
+        st.success(
+            f"✅ Configurações salvas!\n\n"
+            f"Status: {status_msg}\n"
+            f"Ganho: {nova_quantidade} DzCoins a cada {novo_intervalo} minuto(s)\n"
+            f"Equivale a ~{ganho_por_hora} DzCoins/hora"
+        )
+        time.sleep(1)
+        st.rerun()
+    
+    st.divider()
+    
+    # === SEÇÃO 4: TESTE DE GANHO (ADMIN) ===
+    st.markdown("### 🧪 Teste de Ganho Automático")
+    
+    with st.expander("Simular ganhos para jogadores", expanded=False):
+        st.warning(
+            "Use esta seção para testar o sistema de ganho automático. "
+            "Selecione um jogador e clique em 'Simular Ganho' para adicionar "
+            "DzCoins como se o jogador estivesse online."
+        )
+        
+        players = client_data.get("players", {})
+        if not players:
+            st.info("Nenhum jogador cadastrado ainda.")
+        else:
+            col_test1, col_test2 = st.columns([2, 1])
+            
+            with col_test1:
+                player_teste = st.selectbox(
+                    "Selecione um jogador",
+                    list(players.keys()),
+                    key="test_player_select"
+                )
+            
+            with col_test2:
+                st.write("")  # Espaçador
+                if st.button("▶️ Simular Ganho", use_container_width=True):
+                    # Credita DzCoins para o jogador
+                    if "wallets" not in client_data:
+                        client_data["wallets"] = {}
+                    
+                    wallets = client_data["wallets"]
+                    if player_teste not in wallets:
+                        wallets[player_teste] = {"balance": 0, "historico": []}
+                    
+                    wallet = wallets[player_teste]
+                    wallet["balance"] += nova_quantidade
+                    
+                    hora_str = get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
+                    msg_hist = f"[{hora_str}] TESTE: Simulação de ganho automático +{nova_quantidade} DzCoins"
+                    wallet.setdefault("historico", []).append(msg_hist)
+                    
+                    client_data["wallets"] = wallets
+                    clients_data[server_id] = client_data
+                    save_db(DB_CLIENTS, clients_data)
+                    
+                    st.success(
+                        f"✅ Ganho simulado para {player_teste}!\n"
+                        f"+{nova_quantidade} DzCoins adicionados"
+                    )
+                    st.rerun()
+
 # --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
 if "worker_started" not in st.session_state:
     threading.Thread(target=pro_worker, daemon=True).start()
     st.session_state["worker_started"] = True
+
+if "worker_dzcoins_started" not in st.session_state:
+    threading.Thread(target=worker_dzcoins_thread, daemon=True).start()
+    st.session_state["worker_dzcoins_started"] = True
