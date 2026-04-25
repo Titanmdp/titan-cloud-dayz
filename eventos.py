@@ -643,37 +643,15 @@ if "view_mode" not in st.session_state:
 
 
 # =========================================================
-# 4. SELETOR DE PORTAL (ANTES DE QUALQUER LOGIN)
+# 4. SIDEBAR — TITAN CLOUD PRO
 # =========================================================
 
 with st.sidebar:
     st.subheader("Titan Cloud Pro")
-    # Só mostra o seletor se não estiver autenticado
-    if not st.session_state.get("authenticated"):
-        portal = st.radio(
-            "Selecione o portal:",
-            ["Portal do Administrador", "Portal do Jogador"],
-            index=0,
-            key="portal_principal",
-        )
-    else:
-        # Se autenticado, força o portal correto pelo role
-        if st.session_state.get("role") == "admin":
-            portal = "Portal do Administrador"
-        else:
-            portal = "Portal do Jogador"
-
-# =========================================================
-# 5. ROTEAMENTO INICIAL: PORTAL DO JOGADOR NÃO USA KEY
-# =========================================================
-
-if portal == "Portal do Jogador" and not st.session_state.get("authenticated"):
-    player_portal_main()
-    st.stop()
 
 
 # =========================================================
-# 6. TELA DE LOGIN (APENAS PARA PORTAL DO ADMIN)
+# 5. TELA DE LOGIN (APENAS PARA PORTAL DO ADMIN)
 # =========================================================
 
 if not st.session_state.get("authenticated") or st.session_state.get("role") != "admin":
@@ -716,7 +694,7 @@ if not st.session_state.get("authenticated") or st.session_state.get("role") != 
 
 
 # =========================================================
-# 7. ÁREA DO ADMINISTRADOR
+# 6. ÁREA DO ADMINISTRADOR
 # =========================================================
 
 if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
@@ -1183,12 +1161,15 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         st.rerun()
                     else:
                         st.error("Preencha o título e a mensagem.")
+
+    st.stop()  # Admin viu o painel, para aqui
+
 elif st.session_state.get("view_mode") == "client":
     player_portal_main()
     st.stop()
 
 # =========================================================
-# 8. ÁREA DO CLIENTE
+# 7. ÁREA DO CLIENTE
 # =========================================================
 
 user_id = st.session_state.user_key
