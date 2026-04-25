@@ -1188,17 +1188,30 @@ def main():
 
         ftp_cfg = get_client_ftp_config(client_data)
         if not ftp_cfg:
-            st.warning("FTP do servidor não está configurado para este cliente. Peça ao admin para configurar no painel.")
+            st.warning(
+                "FTP do servidor não está configurado para este cliente. "
+                "Peça ao admin para configurar no painel."
+            )
         else:
+
             @st.fragment(run_every=300)
-            def _ranking_fragment():
+            def _ranking_fragment(ftp_cfg, gamertag_vinculada: str):
                 with st.spinner("Carregando dados de ranking a partir dos logs do servidor..."):
                     log_text, err = ftp_download_latest_adm(ftp_cfg)
+
                 if err or not log_text:
                     st.error(f"Não foi possível ler o log .ADM: {err or 'conteúdo vazio'}")
                     return
 
                 parsed = parse_adm_sessions_and_pve(log_text)
+
+                # Garante que parsed é um dict antes de usar .get
+                if not isinstance(parsed, dict):
+                    st.warning(
+                        "Ainda não foi possível carregar os dados de ranking a partir dos logs do servidor."
+                    )
+                    return
+
                 pstats = parsed.get("players", {})
 
                 if not pstats:
@@ -1211,10 +1224,6 @@ def main():
 
                 for nome, dados in pstats.items():
                     total_play = dados.get("total_play_seconds", 0)
-                    # Sobrevivência: tempo entre primeira conexão e última morte (se existir)
-                    last_death = dados.get("last_death_time")
-                    first_connect = dados.get("last_connect")  # pode não ser ideal; simplificado
-                    # Como não guardamos first_connect, usamos total_play como principal métrica
                     ranking_play.append({
                         "Jogador": nome,
                         "Tempo de jogo": format_seconds_hhmmss(total_play),
@@ -1224,7 +1233,6 @@ def main():
                         "Suicídios": dados.get("pve_suicides", 0),
                     })
 
-                    # Para ranking de sobrevivência, ainda sem first_connect, usamos "total_play" como proxy
                     ranking_surv.append({
                         "Jogador": nome,
                         "Tempo de sobrevivência": format_seconds_hhmmss(total_play),
@@ -1232,8 +1240,12 @@ def main():
                         "Suicídios": dados.get("pve_suicides", 0),
                     })
 
-                ranking_play_sorted = sorted(ranking_play, key=lambda x: x["Tempo (segundos)"], reverse=True)[:10]
-                ranking_surv_sorted = sorted(ranking_surv, key=lambda x: x["Tempo (segundos)"], reverse=True)[:10]
+                ranking_play_sorted = sorted(
+                    ranking_play, key=lambda x: x["Tempo (segundos)"], reverse=True
+                )[:10]
+                ranking_surv_sorted = sorted(
+                    ranking_surv, key=lambda x: x["Tempo (segundos)"], reverse=True
+                )[:10]
 
                 col_r1, col_r2 = st.columns(2)
 
@@ -1267,7 +1279,10 @@ def main():
                 st.markdown("---")
                 st.markdown("#### 👤 Meu desempenho no log atual")
 
-                meu_reg = next((r for r in ranking_play if r["Jogador"] == gamertag_vinculada), None)
+                meu_reg = next(
+                    (r for r in ranking_play if r["Jogador"] == gamertag_vinculada),
+                    None,
+                )
                 if not meu_reg:
                     st.info("Ainda não há dados seus neste log (nenhuma sessão registrada).")
                 else:
@@ -1276,7 +1291,8 @@ def main():
                     col_m2.metric("🔁 Sessões", meu_reg["Sessões"])
                     col_m3.metric("🧟 Hits PvE", meu_reg["Hits PvE"])
 
-            _ranking_fragment()
+            # chama o fragmento passando os argumentos
+            _ranking_fragment(ftp_cfg, gamertag_vinculada)
 
 
 if __name__ == "__main__":
