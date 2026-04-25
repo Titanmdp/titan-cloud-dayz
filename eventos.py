@@ -11,7 +11,7 @@ import shutil
 import smtplib
 import xml.etree.ElementTree as ET
 import pandas as pd
-from page.player_portal import main as player_portal_main
+from pages.player_portal import main as player_portal_main
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
