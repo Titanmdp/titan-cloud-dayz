@@ -2139,15 +2139,26 @@ def main():
     with tab_loja:
         st.markdown("### 🛒 Loja Virtual")
 
-        # Recarrega dados frescos
+        # 1. Carrega o banco completo
         clients_db_loja = load_db(DB_CLIENTS, {})
+        
+        # 2. Localiza o cliente pelo server_id que você já tem no portal
+        # O server_id aqui já deve estar vindo do login/seleção de servidor
         client_data_loja = clients_db_loja.get(server_id, {})
+        
+        # 3. SEGURANÇA: Verifica se a chave 'loja' existe
         loja = client_data_loja.get("loja", {})
+        
+        # DEBUG (Deixe isso até ver os itens aparecerem)
+        st.write(f"DEBUG: Buscando itens no server_id: {server_id}")
+        st.write(f"DEBUG: Estrutura da loja encontrada: {list(loja.keys()) if loja else 'Loja vazia ou inexistente'}")
+
         itens = [i for i in loja.get("itens", []) if i.get("ativo", True)]
 
         if not itens:
-            st.info("A loja ainda não possui itens cadastrados. Aguarde o administrador configurar o catálogo.")
+            st.info("A loja ainda não possui itens cadastrados ou ativos.")
         else:
+            # ... (seu código de exibição da loja continua aqui)
             hora_br = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
 
             # Saldos do jogador
