@@ -1165,8 +1165,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
     st.stop()  # Admin viu o painel, para aqui
 
 elif st.session_state.get("view_mode") == "client":
-    player_portal_main()
-    st.stop()
+    pass  # continua para a Área do Cliente abaixo
 
 # =========================================================
 # 7. ÁREA DO CLIENTE
@@ -1179,6 +1178,32 @@ db_disco_users = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
 st.session_state.db_clients = db_disco_clients
 st.session_state.db_users = db_disco_users
 
+# Admin em modo teste: usa o primeiro cliente disponível como referência
+# Cliente normal: usa sua própria user_key
+if st.session_state.get("role") == "admin":
+    chaves_clientes = list(st.session_state.db_users.get("keys", {}).keys())
+    if not chaves_clientes:
+        st.warning("Nenhum cliente cadastrado ainda. Cadastre um cliente primeiro no Painel Admin.")
+        if st.button("⚙️ Voltar ao Painel Admin"):
+            st.session_state.view_mode = "admin"
+            st.rerun()
+        st.stop()
+
+    with st.sidebar:
+        st.subheader("🔍 Modo Teste — Selecione o Cliente")
+        nomes_clientes = {
+            v["server"]: k
+            for k, v in st.session_state.db_users["keys"].items()
+        }
+        cliente_sel_nome = st.selectbox(
+            "Visualizar como cliente:",
+            list(nomes_clientes.keys()),
+            key="admin_cliente_sel",
+        )
+        user_id = nomes_clientes[cliente_sel_nome]
+else:
+    user_id = st.session_state.user_key
+
 if user_id not in st.session_state.db_clients:
     st.session_state.db_clients[user_id] = {
         "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
@@ -1190,7 +1215,7 @@ if user_id not in st.session_state.db_clients:
 
 client_data = st.session_state.db_clients[user_id]
 user_info = st.session_state.db_users["keys"].get(
-    user_id, {"server": "Servidor", "plano": "Starter", "expires": "01/01/2000"}
+    user_id, {"server": "Servidor (Admin Teste)", "plano": "Admin", "expires": "31/12/2099"}
 )
 
 if st.session_state.role == "client":
