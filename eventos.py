@@ -857,15 +857,8 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     st.write(f"**🖥️ IP:** {v.get('last_ip', '0.0.0.0')}")
                 with col_mon2:
                     st.write(f"**🕒 Último Login:** {v.get('last_login', '---')}")
-                    if st.button(
-                        "🚫 Banir Acesso (Expirar Key)",
-                        key=f"ban_{k}",
-                        type="primary",
-                        use_container_width=True,
-                    ):
-                        v["expires"] = (
-                            get_hora_brasilia() - timedelta(days=1)
-                        ).strftime("%d/%m/%Y")
+                    if st.button("🚫 Banir Acesso (Expirar Key)", key=f"ban_{k}", type="primary", use_container_width=True):
+                        v["expires"] = (get_hora_brasilia() - timedelta(days=1)).strftime("%d/%m/%Y")
                         save_db(DB_USERS, st.session_state.db_users)
                         st.warning(f"O acesso de {v['server']} foi bloqueado.")
                         st.rerun()
@@ -875,55 +868,14 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                 c_edit1, c_edit2 = st.columns(2)
                 with c_edit1:
                     st.markdown("#### 📝 Informações e Plano")
-                    new_n = st.text_input(
-                        "Editar Nome", value=v["server"], key=f"n_{k}"
-                    )
-                    new_p = st.selectbox(
-                        "Trocar Plano",
-                        list(PLANOS.keys()),
-                        index=list(PLANOS.keys()).index(v.get("plano", "Starter")),
-                        key=f"p_{k}",
-                    )
-                    new_lim = st.number_input(
-                        "Ajustar Limite",
-                        min_value=1,
-                        value=int(limite_final),
-                        key=f"lim_{k}",
-                    )
+                    new_n = st.text_input("Editar Nome", value=v["server"], key=f"n_{k}")
+                    new_p = st.selectbox("Trocar Plano", list(PLANOS.keys()), index=list(PLANOS.keys()).index(v.get("plano", "Starter")), key=f"p_{k}")
+                    new_lim = st.number_input("Ajustar Limite", min_value=1, value=int(limite_final), key=f"lim_{k}")
 
-                    st.markdown("#### 📧 Contatos de Notificação")
-                    new_mail = st.text_input(
-                        "E-mail do Cliente", value=v.get("email", ""), key=f"mail_{k}"
-                    )
-                    new_wa = st.text_input(
-                        "WhatsApp (com DDD)",
-                        value=v.get("whatsapp", ""),
-                        key=f"wa_{k}",
-                    )
-
-                    st.markdown("#### 🎮 Integração Discord")
-                    new_guild = st.text_input(
-                        "ID do Servidor Discord (Guild ID)",
-                        value=v.get("discord_guild_id", ""),
-                        key=f"guild_{k}",
-                        help=(
-                            "ID numérico do servidor Discord do administrador. "
-                            "Para obter: Discord > Configurações > Avançado > Modo desenvolvedor ativo. "
-                            "Depois clique com botão direito no servidor > Copiar ID do servidor."
-                        ),
-                    )
-
-                    if st.button(
-                        "💾 Salvar Alterações",
-                        key=f"bn_{k}",
-                        use_container_width=True,
-                    ):
+                    if st.button("💾 Salvar Alterações", key=f"bn_{k}", use_container_width=True):
                         st.session_state.db_users["keys"][k]["server"] = new_n
                         st.session_state.db_users["keys"][k]["plano"] = new_p
                         st.session_state.db_users["keys"][k]["limite_extra"] = new_lim
-                        st.session_state.db_users["keys"][k]["email"] = new_mail
-                        st.session_state.db_users["keys"][k]["whatsapp"] = new_wa
-                        st.session_state.db_users["keys"][k]["discord_guild_id"] = new_guild.strip()
                         save_db(DB_USERS, st.session_state.db_users)
                         st.success("Dados atualizados!")
                         st.rerun()
@@ -931,30 +883,38 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                 with c_edit2:
                     st.markdown("#### 📅 Validade do Acesso")
                     st.write(f"**Expira em:** {v['expires']} ({dias_rest} dias)")
-                    add_d = st.number_input(
-                        "Adicionar dias", min_value=1, value=30, key=f"d_{k}"
-                    )
-                    if st.button(
-                        "➕ Estender/Renovar",
-                        key=f"bd_{k}",
-                        use_container_width=True,
-                    ):
-                        nova_data = (
-                            dt_exp_check + timedelta(days=add_d)
-                        ).strftime("%d/%m/%Y")
+                    add_d = st.number_input("Adicionar dias", min_value=1, value=30, key=f"d_{k}")
+                    if st.button("➕ Estender/Renovar", key=f"bd_{k}", use_container_width=True):
+                        nova_data = (dt_exp_check + timedelta(days=add_d)).strftime("%d/%m/%Y")
                         st.session_state.db_users["keys"][k]["expires"] = nova_data
                         save_db(DB_USERS, st.session_state.db_users)
                         st.success(f"Estendido para {nova_data}!")
                         st.rerun()
 
+                # --- BOTÃO DE SALVAR LOJA INTEGRADO ---
                 st.divider()
+                st.markdown("#### 🛒 Ações Administrativas")
+                if st.button("💾 Salvar/Sincronizar Loja", key=f"save_loja_{k}", use_container_width=True):
+                    db_completo = load_db(DB_CLIENTS, {})
+                    if k not in db_completo:
+                        db_completo[k] = {}
+                    
+                    # Recupera o estado atual da loja (se houver edição pendente)
+                    # Certifique-se de que o edited_df_loja esteja acessível aqui
+                    # ou use st.session_state[f"df_loja_{k}"]
+                    itens_atualizados = df_to_loja_itens(st.session_state.get(f"df_loja_{k}", pd.DataFrame()))
+                    
+                    db_completo[k]["loja"] = {
+                        "mapa_padrao": "Chernarus",
+                        "posicao_padrao": "",
+                        "itens": itens_atualizados
+                    }
+                    save_db(DB_CLIENTS, db_completo)
+                    st.session_state.db_clients = db_completo
+                    st.success(f"Loja do servidor {v['server']} sincronizada com sucesso!")
 
-                if st.button(
-                    "🗑️ EXCLUIR CLIENTE PERMANENTEMENTE",
-                    key=f"del_{k}",
-                    type="primary",
-                    use_container_width=True,
-                ):
+                st.divider()
+                if st.button("🗑️ EXCLUIR CLIENTE PERMANENTEMENTE", key=f"del_{k}", type="primary", use_container_width=True):
                     del st.session_state.db_users["keys"][k]
                     if k in st.session_state.db_clients:
                         del st.session_state.db_clients[k]
@@ -2351,16 +2311,29 @@ with tab6:
             st.success("Alterações aplicadas na sessão da Loja.")
 
     with col_loja2:
-        if st.button("Salvar Loja no Titan Cloud", use_container_width=True):
+        # A chave do botão precisa ser única usando 'k' para evitar conflitos no Streamlit
+        if st.button("Salvar Loja no Titan Cloud", key=f"btn_salvar_{k}", use_container_width=True):
+            
+            # Usamos 'k' diretamente do loop, que representa o server_id 
+            # cadastrado no seu banco users_db.json
+            server_id = k 
+
             # 0. DEBUG: Verifique se o server_id está correto
             st.write(f"DEBUG: Tentando salvar loja no ID: {server_id}")
             
-            # 1. Carrega o banco global
+            # 1. Carrega o banco global atualizado do disco
             db_completo = load_db(DB_CLIENTS, {})
             
             # 2. Garante que o servidor exista no banco
             if server_id not in db_completo:
-                db_completo[server_id] = {}
+                # Inicializa com a estrutura básica se não existir
+                db_completo[server_id] = {
+                    "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
+                    "agendas": [],
+                    "logs": [],
+                    "comunicados": [],
+                    "players": {}
+                }
             
             # 3. Prepara a estrutura da loja
             itens_atualizados = df_to_loja_itens(edited_df_loja)
@@ -2370,13 +2343,13 @@ with tab6:
                 "itens": itens_atualizados
             }
             
-            # 4. SALVA ESPECIFICAMENTE NO ID DO SERVIDOR
+            # 4. SALVA ESPECIFICAMENTE NA CHAVE DO SERVIDOR
             db_completo[server_id]["loja"] = loja_obj
             
             # 5. Persiste no arquivo JSON
             save_db(DB_CLIENTS, db_completo)
             
-            # 6. Atualiza o session_state para refletir a mudança
+            # 6. Atualiza o session_state para refletir a mudança imediatamente
             st.session_state.db_clients = db_completo
             
             st.success(f"Catálogo salvo com sucesso para o Servidor {server_id}!")
