@@ -1,6 +1,4 @@
 import streamlit as st
-
-st.title("Portal do Player")
 import json
 import os
 import time
@@ -1145,46 +1143,46 @@ def main():
     st.divider()
 
     # ----------------------------------------------------------
-    # 7.8 ABAS PRINCIPAIS
-    # ----------------------------------------------------------
-    tab_inicio, tab_banco, tab_ranking = st.tabs([
-        "🏠 Início",
-        "🏦 Banco DzCoins",
-        "🏆 Ranking",
-    ])
+# 7.8 ABAS PRINCIPAIS
+# ----------------------------------------------------------
+tab_inicio, tab_banco, tab_ranking = st.tabs([
+    "🏠 Início",
+    "🏦 Banco DzCoins",
+    "🏆 Ranking",
+])
 
-    # --- ABA INÍCIO ---
-    with tab_inicio:
-        col_a, col_b, col_c = st.columns(3)
+# --- ABA INÍCIO ---
+with tab_inicio:
+    col_a, col_b, col_c = st.columns(3)
 
-        with col_a:
-            st.markdown("#### 🌐 Players Online")
-            render_players_online(nitrado_id)
+    with col_a:
+        st.markdown("#### 🌐 Players Online")
+        render_players_online(nitrado_id)
 
-        with col_b:
-            st.markdown("#### 🔄 Reset do Servidor")
-            render_reset_info(client_data)
+    with col_b:
+        st.markdown("#### 🔄 Reset do Servidor")
+        render_reset_info(client_data)
 
-        with col_c:
-            st.markdown("#### 📊 Meu Resumo")
-            wallet_saldo = client_data.get("wallets", {}).get(
-                gamertag_vinculada, {}
-            ).get("balance", 0)
-            bank_saldo = client_data.get("bank", {}).get(
-                gamertag_vinculada, {}
-            ).get("balance", 0)
-            st.metric("💰 Carteira", f"{wallet_saldo} DzCoins")
-            st.metric("🏦 Banco", f"{bank_saldo} DzCoins")
-            st.metric("💎 Total", f"{wallet_saldo + bank_saldo} DzCoins")
+    with col_c:
+        st.markdown("#### 📊 Meu Resumo")
+        wallet_saldo = client_data.get("wallets", {}).get(
+            gamertag_vinculada, {}
+        ).get("balance", 0)
+        bank_saldo = client_data.get("bank", {}).get(
+            gamertag_vinculada, {}
+        ).get("balance", 0)
+        st.metric("💰 Carteira", f"{wallet_saldo} DzCoins")
+        st.metric("🏦 Banco", f"{bank_saldo} DzCoins")
+        st.metric("💎 Total", f"{wallet_saldo + bank_saldo} DzCoins")
 
-    # --- ABA BANCO ---
-    with tab_banco:
-        st.markdown(f"### 🏦 Banco DzCoins — {gamertag_vinculada}")
-        clients_db_fresh = load_db(DB_CLIENTS, {})
-        client_data_fresh = clients_db_fresh.get(server_id, {})
-        render_banco(client_data_fresh, clients_db_fresh, server_id, gamertag_vinculada)
+# --- ABA BANCO ---
+with tab_banco:
+    st.markdown(f"### 🏦 Banco DzCoins — {gamertag_vinculada}")
+    clients_db_fresh = load_db(DB_CLIENTS, {})
+    client_data_fresh = clients_db_fresh.get(server_id, {})
+    render_banco(client_data_fresh, clients_db_fresh, server_id, gamertag_vinculada)
 
-    # --- ABA RANKING ---
+# --- ABA RANKING ---
 with tab_ranking:
     st.markdown("### 🏆 Ranking — Tempo de Jogo & Sobrevivência")
 
