@@ -686,7 +686,20 @@ if not st.session_state.get("authenticated") or st.session_state.get("role") != 
 
             st.rerun()
         elif ok and cargo == "client":
-            st.error("Essa KeyUser é de cliente. Use o Portal do Jogador.")
+            token_sessao = secrets.token_hex(8)
+
+            st.session_state.authenticated = True
+            st.session_state.user_key = login_key
+            st.session_state.role = "client"
+            st.session_state.session_token = token_sessao
+            st.session_state.view_mode = "client"
+
+            user_info_login = st.session_state.db_users["keys"][login_key]
+            user_info_login["last_session"] = token_sessao
+            user_info_login["last_login"] = get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
+            save_db(DB_USERS, st.session_state.db_users)
+
+            st.rerun()
         else:
             st.error(cargo)
 
