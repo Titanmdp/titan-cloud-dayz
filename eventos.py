@@ -648,19 +648,26 @@ if "view_mode" not in st.session_state:
 
 with st.sidebar:
     st.subheader("Titan Cloud Pro")
-    portal = st.radio(
-        "Selecione o portal:",
-        ["Portal do Administrador", "Portal do Jogador"],
-        index=0,              # mude para 1 se quiser abrir direto no Jogador
-        key="portal_principal",
-    )
+    # Só mostra o seletor se não estiver autenticado
+    if not st.session_state.get("authenticated"):
+        portal = st.radio(
+            "Selecione o portal:",
+            ["Portal do Administrador", "Portal do Jogador"],
+            index=0,
+            key="portal_principal",
+        )
+    else:
+        # Se autenticado, força o portal correto pelo role
+        if st.session_state.get("role") == "admin":
+            portal = "Portal do Administrador"
+        else:
+            portal = "Portal do Jogador"
 
 # =========================================================
 # 5. ROTEAMENTO INICIAL: PORTAL DO JOGADOR NÃO USA KEY
 # =========================================================
 
-if portal == "Portal do Jogador":
-    # Vai direto para o portal do jogador (login Discord), sem KeyUser
+if portal == "Portal do Jogador" and not st.session_state.get("authenticated"):
     player_portal_main()
     st.stop()
 
@@ -719,8 +726,8 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             st.session_state.view_mode = "client"
             st.rerun()
         if st.button("🔴 Logout (Admin)", use_container_width=True):
-            st.session_state.authenticated = False
-            st.session_state.role = None
+            for k in ["authenticated", "role", "view_mode", "user_key", "session_token"]:
+                st.session_state.pop(k, None)
             st.rerun()
 
     st.title("🛡️ Painel de Controle - Administrador")
@@ -1176,9 +1183,9 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         st.rerun()
                     else:
                         st.error("Preencha o título e a mensagem.")
-else:
-    # PORTAL DO JOGADOR
+elif st.session_state.get("view_mode") == "client":
     player_portal_main()
+    st.stop()
 
 # =========================================================
 # 8. ÁREA DO CLIENTE
