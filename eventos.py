@@ -654,7 +654,7 @@ with st.sidebar:
 # 5. TELA DE LOGIN (APENAS PARA PORTAL DO ADMIN)
 # =========================================================
 
-if not st.session_state.get("authenticated") or st.session_state.get("role") != "admin":
+if not st.session_state.get("authenticated"):
     st.title("🔑 Titan Cloud - Login (Admin)")
 
     dados_geo = buscar_localizacao_cliente()
