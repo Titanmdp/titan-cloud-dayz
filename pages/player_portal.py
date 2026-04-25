@@ -960,6 +960,88 @@ def get_magnata_ranking(clients_db: dict, server_id: str) -> list:
     return ranking[:10]
     
 # =========================================================
+# 4.4 FUNÇÕES DA LOJA VIRTUAL
+# =========================================================
+
+def registrar_compra(
+    clients_db: dict,
+    server_id: str,
+    gamertag: str,
+    item: dict,
+    origem: str,
+    coordenadas: str,
+    hora_br: str,
+) -> tuple[bool, str]:
+    """
+    Registra uma compra na loja:
+    - Debita DzCoins do banco ou carteira
+    - Salva pedido em client_data["pedidos"]
+    - Retorna (sucesso, mensagem)
+    """
+    client_data = clients_db.get(server_id, {})
+
+    if "wallets" not in client_data:
+        client_data["wallets"] = {}
+    if "bank" not in client_data:
+        client_data["bank"] = {}
+    if "pedidos" not in client_data:
+        client_data["pedidos"] = []
+
+    wallets = client_data["wallets"]
+    bank    = client_data["bank"]
+    preco   = int(item.get("preco", 0))
+
+    wallet_reg = wallets.get(gamertag, {"balance": 0, "historico": []})
+    bank_reg   = bank.get(gamertag,   {"balance": 0, "historico": []})
+
+    saldo_w = wallet_reg.get("balance", 0)
+    saldo_b = bank_reg.get("balance", 0)
+
+    # Valida saldo
+    if origem == "💰 Carteira":
+        if saldo_w < preco:
+            return False, f"Saldo insuficiente na carteira ({saldo_w} DzCoins)."
+        wallet_reg["balance"] = saldo_w - preco
+        wallet_reg.setdefault("historico", []).append(
+            f"[{hora_br}] COMPRA LOJA — {item['nome']} x{item.get('quantidade',1)} "
+            f"-{preco} DzCoins (carteira)"
+        )
+        wallets[gamertag] = wallet_reg
+
+    elif origem == "🏦 Banco":
+        if saldo_b < preco:
+            return False, f"Saldo insuficiente no banco ({saldo_b} DzCoins)."
+        bank_reg["balance"] = saldo_b - preco
+        bank_reg.setdefault("historico", []).append(
+            f"[{hora_br}] COMPRA LOJA — {item['nome']} x{item.get('quantidade',1)} "
+            f"-{preco} DzCoins (banco)"
+        )
+        bank[gamertag] = bank_reg
+
+    # Registra pedido
+    pedido = {
+        "id": f"{gamertag}_{hora_br.replace('/', '').replace(':', '').replace(' ', '_')}",
+        "gamertag": gamertag,
+        "item_id": item.get("id"),
+        "item_nome": item.get("nome"),
+        "item_classe": item.get("classe"),
+        "item_categoria": item.get("categoria"),
+        "quantidade": item.get("quantidade", 1),
+        "preco": preco,
+        "origem_pagamento": origem,
+        "coordenadas": coordenadas.strip(),
+        "data_compra": hora_br,
+        "status": "Aguardando Reset",
+    }
+
+    client_data["pedidos"].insert(0, pedido)
+    client_data["wallets"] = wallets
+    client_data["bank"]    = bank
+    clients_db[server_id]  = client_data
+
+    return True, "ok"
+    
+# =========================================================
 # 5. COMPONENTES DE UI
 # =========================================================
 
@@ -1806,13 +1888,14 @@ def main():
     # ----------------------------------------------------------
     # 8.8 ABAS PRINCIPAIS (todas dentro de main())
     # ----------------------------------------------------------
-    tab_inicio, tab_banco, tab_ranking, tab_pvp, tab_pve, tab_conexao = st.tabs([
+    tab_inicio, tab_banco, tab_ranking, tab_pvp, tab_pve, tab_conexao, tab_loja = st.tabs([
         "🏠 Início",
         "🏦 Banco DzCoins",
         "🏆 Ranking",
         "⚔️ Killfeed PvP",
         "🧟 Killfeed PvE",
         "🔌 Conexão",
+        "🛒 Loja Virtual",
     ])
 
     # --- ABA INÍCIO ---
@@ -2040,6 +2123,197 @@ def main():
                         )
 
             _conexoes(ftp_cfg, filtro_con)
+
+    # --- ABA LOJA VIRTUAL ---
+    with tab_loja:
+        st.markdown("### 🛒 Loja Virtual")
+
+        # Recarrega dados frescos
+        clients_db_loja = load_db(DB_CLIENTS, {})
+        client_data_loja = clients_db_loja.get(server_id, {})
+        loja = client_data_loja.get("loja", {})
+        itens = [i for i in loja.get("itens", []) if i.get("ativo", True)]
+
+        if not itens:
+            st.info("A loja ainda não possui itens cadastrados. Aguarde o administrador configurar o catálogo.")
+        else:
+            hora_br = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
+
+            # Saldos do jogador
+            wallets_loja = client_data_loja.get("wallets", {})
+            bank_loja    = client_data_loja.get("bank", {})
+            saldo_w = wallets_loja.get(gamertag_vinculada, {}).get("balance", 0)
+            saldo_b = bank_loja.get(gamertag_vinculada, {}).get("balance", 0)
+
+            col_sw, col_sb, col_st = st.columns(3)
+            col_sw.metric("💰 Carteira", f"{saldo_w} DzCoins")
+            col_sb.metric("🏦 Banco",    f"{saldo_b} DzCoins")
+            col_st.metric("💎 Total",    f"{saldo_w + saldo_b} DzCoins")
+
+            st.divider()
+
+            # Filtro por categoria
+            categorias = sorted(set(i.get("categoria", "Geral") for i in itens))
+            categorias_opcoes = ["Todas"] + categorias
+            cat_sel = st.selectbox(
+                "Filtrar por categoria",
+                categorias_opcoes,
+                key="loja_cat_sel",
+            )
+
+            itens_filtrados = (
+                itens if cat_sel == "Todas"
+                else [i for i in itens if i.get("categoria") == cat_sel]
+            )
+
+            st.markdown(f"**{len(itens_filtrados)} item(ns) disponível(is)**")
+            st.divider()
+
+            # Grid de itens
+            for item in itens_filtrados:
+                with st.expander(
+                    f"🎒 {item['nome']} — {item['preco']} DzCoins "
+                    f"| Qtd: {item.get('quantidade', 1)} "
+                    f"| {item.get('categoria', '')}",
+                    expanded=False,
+                ):
+                    col_info, col_compra = st.columns([2, 3])
+
+                    with col_info:
+                        st.markdown(
+                            f"""
+                            <div style="background:#1a1a2e; border-radius:8px;
+                                        padding:12px; border:1px solid #333;">
+                                <div style="font-size:18px; font-weight:bold;
+                                            color:#00d4ff; margin-bottom:8px;">
+                                    {item['nome']}
+                                </div>
+                                <div style="font-size:13px; color:#aaa;">
+                                    🏷️ Classe: <b style="color:#fff;">{item.get('classe','')}</b><br>
+                                    📦 Quantidade: <b style="color:#fff;">{item.get('quantidade', 1)}</b><br>
+                                    🗂️ Categoria: <b style="color:#fff;">{item.get('categoria','')}</b><br>
+                                    💰 Preço: <b style="color:#FFD700;">{item['preco']} DzCoins</b>
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+                        # Indica se tem saldo suficiente
+                        tem_saldo_w = saldo_w >= item["preco"]
+                        tem_saldo_b = saldo_b >= item["preco"]
+                        if not tem_saldo_w and not tem_saldo_b:
+                            st.error(
+                                f"❌ Saldo insuficiente. Você precisa de {item['preco']} DzCoins."
+                            )
+                        elif tem_saldo_w and not tem_saldo_b:
+                            st.info("💰 Saldo disponível apenas na Carteira.")
+                        elif not tem_saldo_w and tem_saldo_b:
+                            st.info("🏦 Saldo disponível apenas no Banco.")
+                        else:
+                            st.success("✅ Saldo suficiente na Carteira e no Banco.")
+
+                    with col_compra:
+                        st.markdown("#### 🛍️ Finalizar Compra")
+
+                        origem_pag = st.radio(
+                            "Debitar de:",
+                            ["💰 Carteira", "🏦 Banco"],
+                            horizontal=True,
+                            key=f"origem_{item['id']}",
+                        )
+
+                        coordenadas = st.text_input(
+                            "📍 Coordenadas de entrega",
+                            placeholder="Ex: 8867.2 x 2267.4 x 8.0",
+                            help=(
+                                "Informe sua posição atual no mapa. "
+                                "No DayZ pressione ~ para ver as coordenadas. "
+                                "O item será entregue neste local no próximo reset."
+                            ),
+                            key=f"coord_{item['id']}",
+                        )
+
+                        st.markdown(
+                            """
+                            <div style="background:#1a1a2e; border-radius:6px;
+                                        padding:8px 12px; border:1px solid #444;
+                                        font-size:12px; color:#aaa; margin-bottom:10px;">
+                                ⏰ O item será incluído no servidor no
+                                <b style="color:#00d4ff;">próximo reset</b>
+                                após a confirmação da compra.
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+                        confirmar = st.button(
+                            f"✅ Confirmar Compra — {item['preco']} DzCoins",
+                            key=f"comprar_{item['id']}",
+                            use_container_width=True,
+                            type="primary",
+                        )
+
+                        if confirmar:
+                            if not coordenadas.strip():
+                                st.error("Informe as coordenadas de entrega antes de confirmar.")
+                            else:
+                                ok, msg = registrar_compra(
+                                    clients_db_loja,
+                                    server_id,
+                                    gamertag_vinculada,
+                                    item,
+                                    origem_pag,
+                                    coordenadas,
+                                    hora_br,
+                                )
+                                if ok:
+                                    save_db(DB_CLIENTS, clients_db_loja)
+                                    st.success(
+                                        f"✅ Compra confirmada! **{item['nome']}** x{item.get('quantidade',1)} "
+                                        f"será entregue em **{coordenadas.strip()}** no próximo reset."
+                                    )
+                                    st.balloons()
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+
+            # --- Histórico de Compras do Jogador ---
+            st.divider()
+            st.markdown("### 📜 Minhas Compras")
+
+            pedidos = client_data_loja.get("pedidos", [])
+            meus_pedidos = [p for p in pedidos if p.get("gamertag") == gamertag_vinculada]
+
+            if not meus_pedidos:
+                st.info("Você ainda não realizou nenhuma compra.")
+            else:
+                for pedido in meus_pedidos[:20]:
+                    status = pedido.get("status", "Aguardando Reset")
+                    cor_status = (
+                        "#00ff88" if status == "Entregue"
+                        else "#FFD700" if status == "Aguardando Reset"
+                        else "#aaa"
+                    )
+                    st.markdown(
+                        f"""
+                        <div style="background:#1a1a2e; border-radius:8px;
+                                    padding:10px 14px; border-left:3px solid {cor_status};
+                                    margin-bottom:6px;">
+                            <span style="font-size:13px; color:#00d4ff; font-weight:bold;">
+                                {pedido.get('data_compra','--')} — {pedido.get('item_nome','?')}
+                                x{pedido.get('quantidade',1)}
+                            </span><br>
+                            <span style="font-size:12px; color:#aaa;">
+                                💰 {pedido.get('preco',0)} DzCoins ({pedido.get('origem_pagamento','?')})
+                                &nbsp;|&nbsp; 📍 {pedido.get('coordenadas','?')}
+                                &nbsp;|&nbsp;
+                                <span style="color:{cor_status};">● {status}</span>
+                            </span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
 if __name__ == "__main__":
     main()
