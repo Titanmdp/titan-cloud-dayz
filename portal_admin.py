@@ -11,8 +11,6 @@ import shutil
 import smtplib
 import xml.etree.ElementTree as ET
 import pandas as pd
-from streamlit import Page
-from streamlit.navigation import navigation
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
@@ -42,9 +40,6 @@ else:
 # DEBUG TEMPORÁRIO PARA VER OS ARQUIVOS USADOS
 st.write("DEBUG DB_USERS path:", DB_USERS)
 st.write("DEBUG DB_CLIENTS path:", DB_CLIENTS)
-
-# --- CONFIGURAÇÃO DA PÁGINA (antes de qualquer sidebar) ---
-st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
 
 if IS_DEV:
     st.sidebar.warning("🚧 AMBIENTE DE TESTES (DEV)")
@@ -692,7 +687,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             st.session_state.authenticated = False
             st.rerun()
 
-    st.title("🛡️ Painel de Controle - Administrador")
+    st.title("Portal do Administrador")
 
     tab_adm1, tab_adm2, tab_adm3, tab_adm4, tab_adm5 = st.tabs(
         [
