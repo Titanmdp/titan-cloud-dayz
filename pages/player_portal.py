@@ -1,12 +1,15 @@
 import streamlit as st
+
+st.title("Portal do Player")
 import json
 import os
+import time
 import requests
 import urllib.parse
-import io
-import re
 from datetime import datetime, timezone, timedelta
 from ftplib import FTP
+import io
+import re
 
 # =========================================================
 # 1. CONFIG / AMBIENTE / CONSTANTES
@@ -18,7 +21,7 @@ if os.path.exists("/var/data"):
     DB_USERS = "/var/data/users_db.json"
     DB_CLIENTS = "/var/data/clients_data.json"
 else:
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     if IS_DEV:
         DB_USERS = os.path.join(BASE_DIR, "users_db_dev.json")
         DB_CLIENTS = os.path.join(BASE_DIR, "clients_data_dev.json")
@@ -42,8 +45,8 @@ NITRADO_API = "https://api.nitrado.net"
 
 FUSO_BR = timezone(timedelta(hours=-3))
 
+# Pasta onde os logs .ADM ficam no FTP do servidor DayZ
 DAYZ_LOG_DIR = "dayzxb/config"
-RESTART_LOG_FILENAME = "restart.log"
 
 # =========================================================
 # 2. FUNÇÕES DE PERSISTÊNCIA
@@ -131,6 +134,10 @@ def nitrado_headers():
     return {"Authorization": f"Bearer {NITRADO_TOKEN}"}
 
 def get_players_online(nitrado_id: str) -> dict:
+    """
+    Busca jogadores online via API Nitrado.
+    Retorna dict com 'players' (lista de nomes) e 'total'.
+    """
     if not NITRADO_TOKEN:
         return {"players": [], "total": 0, "erro": "Token não configurado"}
     try:
@@ -141,6 +148,7 @@ def get_players_online(nitrado_id: str) -> dict:
             gs = data.get("data", {}).get("gameserver", {})
             query = gs.get("query", {})
             players_raw = query.get("players", [])
+            # players_raw pode ser lista de dicts ou lista de strings dependendo do jogo
             if players_raw and isinstance(players_raw[0], dict):
                 nomes = [p.get("name", "?") for p in players_raw]
             else:
@@ -156,11 +164,36 @@ def get_players_online(nitrado_id: str) -> dict:
     except Exception as e:
         return {"players": [], "total": 0, "erro": str(e)}
 
+def get_server_info(nitrado_id: str) -> dict:
+    """
+    Busca informações gerais do servidor (nome, status, próximo restart).
+    """
+    if not NITRADO_TOKEN:
+        return {}
+    try:
+        url = f"{NITRADO_API}/services/{nitrado_id}/gameservers"
+        resp = requests.get(url, headers=nitrado_headers(), timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            gs = data.get("data", {}).get("gameserver", {})
+            return {
+                "nome": gs.get("query", {}).get("server_name", "Servidor DayZ"),
+                "status": gs.get("status", "unknown"),
+                "slots": gs.get("slots", 0),
+                "mapa": gs.get("query", {}).get("map", ""),
+            }
+    except Exception:
+        pass
+    return {}
+
 # =========================================================
-# 4.1 FUNÇÕES FTP + LOG ADM
+# 4.1 FUNÇÕES FTP + LOG ADM (Ranking / Conexão / PvE)
 # =========================================================
 
 def get_client_ftp_config(client_data: dict):
+    """
+    Retorna dict {host, user, pass, port} a partir de client_data["ftp"].
+    """
     ftp_cfg = client_data.get("ftp", {})
     host = ftp_cfg.get("host", "")
     user = ftp_cfg.get("user", "")
@@ -171,6 +204,11 @@ def get_client_ftp_config(client_data: dict):
     return {"host": host, "user": user, "pass": pwd, "port": port}
 
 def ftp_list_adm_files(ftp_cfg: dict):
+    """
+    Lista arquivos .ADM no diretório DAYZ_LOG_DIR via FTP.
+    Retorna lista de nomes de arquivo (str).
+    """
+    arquivos = []
     try:
         with FTP() as ftp:
             ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=10)
@@ -179,17 +217,24 @@ def ftp_list_adm_files(ftp_cfg: dict):
                 ftp.cwd(DAYZ_LOG_DIR)
             except Exception:
                 return []
+
             arquivos = ftp.nlst()
             arquivos = [a for a in arquivos if a.upper().endswith(".ADM")]
+            # Ordena por nome descendente (log mais recente geralmente tem nome maior)
             arquivos.sort(reverse=True)
             return arquivos
     except Exception:
         return []
 
 def ftp_download_latest_adm(ftp_cfg: dict):
+    """
+    Baixa o arquivo .ADM mais recente de DAYZ_LOG_DIR e retorna o conteúdo como string.
+    Se não encontrar, retorna None.
+    """
     arquivos = ftp_list_adm_files(ftp_cfg)
     if not arquivos:
         return None, "Nenhum arquivo .ADM encontrado em dayzxb/config."
+
     ultimo = arquivos[0]
     buffer = io.BytesIO()
     try:
@@ -203,16 +248,26 @@ def ftp_download_latest_adm(ftp_cfg: dict):
     except Exception as e:
         return None, f"Erro ao baixar .ADM: {e}"
 
+RESTART_LOG_FILENAME = "restart.log"
+
+
 def ftp_download_restart_log(ftp_cfg: dict):
+    """
+    Baixa o arquivo restart.log da raiz do FTP e retorna o conteúdo como string.
+    Se não encontrar, retorna (None, erro).
+    """
     buffer = io.BytesIO()
     try:
         with FTP() as ftp:
             ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=10)
             ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
+
             files = ftp.nlst()
             if RESTART_LOG_FILENAME not in files:
                 return None, f"{RESTART_LOG_FILENAME} não encontrado na raiz do FTP."
+
             ftp.retrbinary(f"RETR {RESTART_LOG_FILENAME}", buffer.write)
+
         texto = buffer.getvalue().decode("utf-8", errors="ignore")
         return texto, None
     except Exception as e:
@@ -221,22 +276,202 @@ def ftp_download_restart_log(ftp_cfg: dict):
 def parse_last_restart_from_restart_log(log_text: str):
     if not log_text:
         return None
+
     last_dt = None
     for line in log_text.splitlines():
         line = line.strip()
-        if not line or "Reiniciando o Servidor" not in line:
+        if not line:
             continue
+        if "Reiniciando o Servidor" not in line:
+            continue
+
         try:
-            data_str = line.split("Reiniciando")[0].strip()
+            data_str = line.split("Reiniciando")[0].strip()  # "2026-04-24 19:08:09"
             dt = datetime.strptime(data_str, "%Y-%m-%d %H:%M:%S")
             dt = dt.replace(tzinfo=FUSO_BR)
         except Exception:
             continue
-        if last_dt is None or dt > last_dt:
+
+        if (last_dt is None) or (dt > last_dt):
             last_dt = dt
+
     return last_dt
 
-def format_seconds_hhmmss(segundos: int) -> str:
+def parse_adm_sessions_and_pve(log_text: str):
+    """
+    Parser simples do ADM baseado nos exemplos enviados.
+    Extrai:
+      - sessões (tempo de jogo total)
+      - mortes/suicídios (para sobrevência aproximada)
+      - hits por Infected (PvE básico)
+
+    Retorna dict:
+    {
+      "players": {
+        "Gamertag": {
+           "total_play_seconds": int,
+           "session_count": int,
+           "last_connect": datetime|None,
+           "last_disconnect": datetime|None,
+           "last_death_time": datetime|None,
+           "pve_hits": int,
+           "pve_suicides": int,
+        }, ...
+      }
+    }
+    """
+    players = {}
+
+    # expressões simples para extrair dados
+    # Ex: 11:08:04 | Player "Tailander5536" ...
+    re_player_line = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)"')
+    # Eventos chave
+    key_connecting = "is connecting"
+    key_connected = "is connected"
+    key_disconnected = "has been disconnected"
+    key_suicide_emote = "performed EmoteSuicide"
+    key_committed_suicide = "committed suicide"
+    key_hit_infected = "hit by Infected"
+
+    # Para datas, usamos a data do cabeçalho "AdminLog started on YYYY-MM-DD"
+    log_date = None
+    for line in log_text.splitlines():
+        if "AdminLog started on " in line:
+            # Example: AdminLog started on 2026-04-24 at 11:07:02
+            try:
+                parte = line.split("AdminLog started on ")[1]
+                data_str = parte.split(" at ")[0].strip()
+                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
+            except Exception:
+                pass
+            break
+
+def parse_last_restart_from_adm(log_text: str):
+    """
+    Procura no ADM o último evento de reset/restart/shutdown do servidor.
+    Retorna datetime (timezone FUSO_BR) ou None.
+    Ajuste os padrões de texto conforme o formato real do seu ADM.
+    """
+    if not log_text:
+        return None
+
+    # Padrões comuns de restart/shutdown em logs DayZ (ajustável)
+    reset_keywords = [
+        "Server restart",          # exemplo genérico
+        "Server restarted",
+        "Server shutdown",
+        "Restarting server",
+        "scheduled restart",
+    ]
+
+    # Ex.: "18:00:01 | [XYZ] Server restart ..." -> captura HH:MM:SS
+    re_time_prefix = re.compile(r'^(\d{2}:\d{2}:\d{2})\s*\|')
+
+    # Tentamos inferir a data a partir da linha "AdminLog started on YYYY-MM-DD"
+    log_date = None
+    for line in log_text.splitlines():
+        if "AdminLog started on " in line:
+            try:
+                parte = line.split("AdminLog started on ")[1]
+                data_str = parte.split(" at ")[0].strip()
+                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
+            except Exception:
+                pass
+            break
+
+    if not log_date:
+        # fallback: hoje, se não achar a data no cabeçalho
+        log_date = datetime.now(FUSO_BR).date()
+
+    last_reset_dt = None
+
+    for line in log_text.splitlines():
+        if not any(k.lower() in line.lower() for k in reset_keywords):
+            continue
+
+        m = re_time_prefix.match(line)
+        if not m:
+            continue
+
+        hora_str = m.group(1)
+        try:
+            dt = datetime.strptime(f"{log_date} {hora_str}", "%Y-%m-%d %H:%M:%S")
+            dt = dt.replace(tzinfo=FUSO_BR)
+        except Exception:
+            continue
+
+        # Mantém sempre o mais recente
+        if (last_reset_dt is None) or (dt > last_reset_dt):
+            last_reset_dt = dt
+
+    return last_reset_dt
+
+    def ensure_player(name: str):
+        if name not in players:
+            players[name] = {
+                "total_play_seconds": 0,
+                "session_count": 0,
+                "last_connect": None,
+                "last_disconnect": None,
+                "last_death_time": None,
+                "pve_hits": 0,
+                "pve_suicides": 0,
+            }
+        return players[name]
+
+    def parse_datetime_from_time_str(tstr: str):
+        # Se não conseguir usar data do log, cai para hoje
+        base_date = log_date or datetime.now(FUSO_BR).date()
+        try:
+            dt = datetime.strptime(f"{base_date} {tstr}", "%Y-%m-%d %H:%M:%S")
+            return dt.replace(tzinfo=FUSO_BR)
+        except Exception:
+            return None
+
+    for line in log_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        m = re_player_line.match(line)
+        if not m:
+            continue
+
+        hora_str, nome = m.group(1), m.group(2)
+        dt_evento = parse_datetime_from_time_str(hora_str)
+        p = ensure_player(nome)
+
+        if key_connecting in line:
+            # Consideramos início de "sessão potencial"
+            pass
+
+        if key_connected in line:
+            # Marca início de sessão
+            p["last_connect"] = dt_evento
+
+        if key_disconnected in line:
+            # Fecha sessão, soma tempo
+            if p.get("last_connect") and dt_evento:
+                delta = (dt_evento - p["last_connect"]).total_seconds()
+                if delta > 0:
+                    p["total_play_seconds"] += int(delta)
+                    p["session_count"] += 1
+            p["last_disconnect"] = dt_evento
+            p["last_connect"] = None
+
+        if key_suicide_emote in line or key_committed_suicide in line:
+            # Consideramos suicídio como "morte" para sobrevivência
+            p["pve_suicides"] += 1
+            p["last_death_time"] = dt_evento
+
+        if key_hit_infected in line:
+            p["pve_hits"] += 1
+
+    # Se alguém estiver conectado sem disconnect até o final do log,
+    # podemos (opcionalmente) estimar tempo até a última linha; por enquanto não somamos.
+    return {"players": players}
+
+def format_seconds_hhmmss(segundos: int):
     if segundos < 0:
         segundos = 0
     h = segundos // 3600
@@ -248,804 +483,84 @@ def format_seconds_hhmmss(segundos: int) -> str:
         return f"{dias}d {h_rest:02d}:{m:02d}:{s:02d}"
     return f"{h:02d}:{m:02d}:{s:02d}"
 
-def parse_adm_sessions_and_pve(log_text: str) -> dict:
+def render_leaderboard_dzcoins(client_data: dict, gamertag_vinculada: str):
     """
-    Parser do arquivo .ADM do DayZ.
-    Extrai sessões de jogo, hits PvE e suicídios de cada jogador.
-    Retorna: {"players": {nome: {...stats...}}}
+    Renderiza leaderboard dos Magnatas (Top 10) de DzCoins.
+    Mostra carteira + banco, ordenado por total.
     """
-    if not log_text or not log_text.strip():
-        return {"players": {}}
-
-    players = {}
-
-    # Regex para linha de player
-    re_player_line = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)"')
-
-    # Palavras-chave de eventos
-    key_connected     = "is connected"
-    key_disconnected  = "has been disconnected"
-    key_suicide_emote = "performed EmoteSuicide"
-    key_committed_sui = "committed suicide"
-    key_hit_infected  = "hit by Infected"
-
-    # Tenta extrair a data do cabeçalho do log
-    log_date = None
-    for line in log_text.splitlines():
-        if "AdminLog started on " in line:
-            try:
-                parte = line.split("AdminLog started on ")[1]
-                data_str = parte.split(" at ")[0].strip()
-                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
-            except Exception:
-                pass
-            break
-
-    if not log_date:
-        log_date = datetime.now(FUSO_BR).date()
-
-    # ---- funções auxiliares ----
-
-    def ensure_player(name: str) -> dict:
-        if name not in players:
-            players[name] = {
-                "total_play_seconds": 0,
-                "session_count": 0,
-                "last_connect": None,
-                "last_disconnect": None,
-                "last_death_time": None,
-                "pve_hits": 0,
-                "pve_suicides": 0,
-            }
-        return players[name]
-
-    def parse_dt(tstr: str):
-        try:
-            dt = datetime.strptime(f"{log_date} {tstr}", "%Y-%m-%d %H:%M:%S")
-            return dt.replace(tzinfo=FUSO_BR)
-        except Exception:
-            return None
-
-    # ---- processamento linha a linha ----
-
-    for line in log_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-
-        m = re_player_line.match(line)
-        if not m:
-            continue
-
-        hora_str = m.group(1)
-        nome = m.group(2)
-        dt_evento = parse_dt(hora_str)
-        p = ensure_player(nome)
-
-        if key_connected in line and "is connecting" not in line:
-            p["last_connect"] = dt_evento
-
-        elif key_disconnected in line:
-            if p.get("last_connect") and dt_evento:
-                delta = (dt_evento - p["last_connect"]).total_seconds()
-                if delta > 0:
-                    p["total_play_seconds"] += int(delta)
-                    p["session_count"] += 1
-            p["last_disconnect"] = dt_evento
-            p["last_connect"] = None
-
-        if key_suicide_emote in line or key_committed_sui in line:
-            p["pve_suicides"] += 1
-            p["last_death_time"] = dt_evento
-
-        if key_hit_infected in line:
-            p["pve_hits"] += 1
-
-    return {"players": players}
-
-# =========================================================
-# 4.2 PARSERS KILLFEED PvE, PvP E CONEXÃO
-# =========================================================
-
-def parse_adm_killfeed_pve(log_text: str) -> list:
-    """
-    Extrai eventos de morte PvE do log .ADM.
-    Retorna lista de dicts com os eventos ordenados do mais recente.
-    Captura:
-    - Hits por Infected (dano real > 0)
-    - Mortes por suicídio / EmoteSuicide
-    - Mortes com died. Stats
-    """
-    eventos = []
-
-    # Data do log
-    log_date = None
-    for line in log_text.splitlines():
-        if "AdminLog started on " in line:
-            try:
-                parte = line.split("AdminLog started on ")[1]
-                data_str = parte.split(" at ")[0].strip()
-                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
-            except Exception:
-                pass
-            break
-    if not log_date:
-        log_date = datetime.now(FUSO_BR).date()
-
-    # Regex
-    re_hit_infected = re.compile(
-        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" '
-        r'\([^)]*\)\[HP: ([\d.]+)\] hit by Infected into (\w+)\(\d+\) '
-        r'for ([\d.]+) damage \((\w+)\)'
-    )
-    re_suicide_emote = re.compile(
-        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" '
-        r'\([^)]*\) performed EmoteSuicide with (.+)$'
-    )
-    re_died = re.compile(
-        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \(DEAD\) '
-        r'\([^)]*pos=<([\d., -]+)>\) died\. Stats> Water: ([\d.]+) Energy: ([\d.]+)'
-    )
-    re_committed_suicide = re.compile(
-        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \(DEAD\) '
-        r'\([^)]*\) committed suicide'
-    )
-
-    # Rastreia última arma de suicídio por jogador
-    ultima_arma_suicidio = {}
-    # Rastreia última posição conhecida por jogador
-    ultima_pos = {}
-
-    # Extrai posição de linhas genéricas
-    re_pos = re.compile(r'pos=<([\d., -]+)>')
-
-    for line in log_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-
-        # Atualiza última posição conhecida
-        m_pos = re_pos.search(line)
-        m_nome = re.search(r'Player "([^"]+)"', line)
-        if m_pos and m_nome:
-            ultima_pos[m_nome.group(1)] = m_pos.group(1)
-
-        def parse_dt(tstr):
-            try:
-                dt = datetime.strptime(f"{log_date} {tstr}", "%Y-%m-%d %H:%M:%S")
-                return dt.replace(tzinfo=FUSO_BR)
-            except Exception:
-                return None
-
-        # Hit por Infected (só dano real > 0)
-        m = re_hit_infected.match(line)
-        if m:
-            hora, nome, hp, parte_corpo, dano, tipo = (
-                m.group(1), m.group(2), float(m.group(3)),
-                m.group(4), float(m.group(5)), m.group(6)
-            )
-            if dano > 0:
-                eventos.append({
-                    "tipo": "hit_pve",
-                    "hora": hora,
-                    "dt": parse_dt(hora),
-                    "jogador": nome,
-                    "hp_restante": hp,
-                    "parte_corpo": parte_corpo,
-                    "dano": dano,
-                    "tipo_ataque": tipo,
-                    "posicao": ultima_pos.get(nome, ""),
-                    "icone": "🧟",
-                    "descricao": f"Atacado por Zumbi — {dano:.1f} dano em {parte_corpo} (HP: {hp:.1f})",
-                })
-            continue
-
-        # EmoteSuicide — rastreia arma
-        m = re_suicide_emote.match(line)
-        if m:
-            hora, nome, arma = m.group(1), m.group(2), m.group(3)
-            ultima_arma_suicidio[nome] = arma.strip()
-            continue
-
-        # Died (morte real)
-        m = re_died.match(line)
-        if m:
-            hora, nome, pos, water, energy = (
-                m.group(1), m.group(2), m.group(3),
-                float(m.group(4)), float(m.group(5))
-            )
-            arma = ultima_arma_suicidio.get(nome, "Desconhecida")
-            eventos.append({
-                "tipo": "morte_pve",
-                "hora": hora,
-                "dt": parse_dt(hora),
-                "jogador": nome,
-                "posicao": pos,
-                "water": water,
-                "energy": energy,
-                "arma": arma,
-                "icone": "💀",
-                "descricao": f"Morreu — Água: {water:.0f} | Energia: {energy:.0f} | Arma: {arma}",
-            })
-            ultima_arma_suicidio.pop(nome, None)
-            continue
-
-    # Ordena do mais recente para o mais antigo
-    eventos.sort(key=lambda x: x.get("dt") or datetime.min.replace(tzinfo=FUSO_BR), reverse=True)
-    return eventos
-
-
-def parse_adm_conexoes(log_text: str) -> list:
-    """
-    Extrai eventos de conexão e desconexão do log .ADM.
-    Retorna lista de dicts ordenada do mais recente.
-    """
-    eventos = []
-
-    log_date = None
-    for line in log_text.splitlines():
-        if "AdminLog started on " in line:
-            try:
-                parte = line.split("AdminLog started on ")[1]
-                data_str = parte.split(" at ")[0].strip()
-                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
-            except Exception:
-                pass
-            break
-    if not log_date:
-        log_date = datetime.now(FUSO_BR).date()
-
-    re_connecting   = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*\) is connecting')
-    re_connected    = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*pos=<([^>]+)>\) is connected')
-    re_disconnected = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*pos=<([^>]+)>\) has been disconnected')
-
-    # Rastreia horário de conexão para calcular duração
-    hora_connect = {}
-
-    def parse_dt(tstr):
-        try:
-            dt = datetime.strptime(f"{log_date} {tstr}", "%Y-%m-%d %H:%M:%S")
-            return dt.replace(tzinfo=FUSO_BR)
-        except Exception:
-            return None
-
-    for line in log_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-
-        m = re_connecting.match(line)
-        if m:
-            hora, nome = m.group(1), m.group(2)
-            eventos.append({
-                "tipo": "connecting",
-                "hora": hora,
-                "dt": parse_dt(hora),
-                "jogador": nome,
-                "posicao": "",
-                "duracao": "",
-                "icone": "🔄",
-                "descricao": "Conectando...",
-            })
-            continue
-
-        m = re_connected.match(line)
-        if m:
-            hora, nome, pos = m.group(1), m.group(2), m.group(3)
-            hora_connect[nome] = parse_dt(hora)
-            eventos.append({
-                "tipo": "connected",
-                "hora": hora,
-                "dt": parse_dt(hora),
-                "jogador": nome,
-                "posicao": pos,
-                "duracao": "",
-                "icone": "🟢",
-                "descricao": f"Conectou em {pos}",
-            })
-            continue
-
-        m = re_disconnected.match(line)
-        if m:
-            hora, nome, pos = m.group(1), m.group(2), m.group(3)
-            dt_disc = parse_dt(hora)
-            duracao = ""
-            if nome in hora_connect and dt_disc and hora_connect[nome]:
-                delta = int((dt_disc - hora_connect[nome]).total_seconds())
-                duracao = format_seconds_hhmmss(delta)
-                hora_connect.pop(nome, None)
-            eventos.append({
-                "tipo": "disconnected",
-                "hora": hora,
-                "dt": dt_disc,
-                "jogador": nome,
-                "posicao": pos,
-                "duracao": duracao,
-                "icone": "🔴",
-                "descricao": f"Desconectou de {pos}" + (f" — Sessão: {duracao}" if duracao else ""),
-            })
-            continue
-
-    eventos.sort(key=lambda x: x.get("dt") or datetime.min.replace(tzinfo=FUSO_BR), reverse=True)
-    return eventos
-
-
-def parse_adm_killfeed_pvp(log_text: str) -> list:
-    """
-    Extrai eventos de kill PvP do log .ADM.
-    Formato esperado:
-    HH:MM:SS | Player "Assassino" (...) killed Player "Vitima" (...)
-    ou
-    HH:MM:SS | Player "Vitima" (...)[HP: 0] hit by Player "Assassino" ... for X damage (Arma)
-    """
-    eventos = []
-
-    log_date = None
-    for line in log_text.splitlines():
-        if "AdminLog started on " in line:
-            try:
-                parte = line.split("AdminLog started on ")[1]
-                data_str = parte.split(" at ")[0].strip()
-                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
-            except Exception:
-                pass
-            break
-    if not log_date:
-        log_date = datetime.now(FUSO_BR).date()
-
-    def parse_dt(tstr):
-        try:
-            dt = datetime.strptime(f"{log_date} {tstr}", "%Y-%m-%d %H:%M:%S")
-            return dt.replace(tzinfo=FUSO_BR)
-        except Exception:
-            return None
-
-    # Padrão 1: killed
-    re_killed = re.compile(
-        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*\) killed Player "([^"]+)"'
-    )
-    # Padrão 2: hit by Player com HP 0
-    re_hit_pvp = re.compile(
-        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*\)\[HP: 0\] '
-        r'hit by Player "([^"]+)" .* for ([\d.]+) damage \(([^)]+)\)'
-    )
-    # Padrão 3: died após hit PvP
-    re_died_pvp = re.compile(
-        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \(DEAD\) '
-        r'\([^)]*pos=<([^>]+)>\) died'
-    )
-
-    ultima_arma_pvp = {}
-
-    for line in log_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-
-        m = re_killed.match(line)
-        if m:
-            hora, assassino, vitima = m.group(1), m.group(2), m.group(3)
-            arma = ultima_arma_pvp.pop(vitima, "Desconhecida")
-            eventos.append({
-                "tipo": "pvp_kill",
-                "hora": hora,
-                "dt": parse_dt(hora),
-                "assassino": assassino,
-                "vitima": vitima,
-                "arma": arma,
-                "dano": "",
-                "parte_corpo": "",
-                "posicao": "",
-                "icone": "💀",
-                "descricao": f"{assassino} eliminou {vitima}",
-            })
-            continue
-
-        m = re_hit_pvp.match(line)
-        if m:
-            hora, vitima, assassino, dano, arma = (
-                m.group(1), m.group(2), m.group(3),
-                m.group(4), m.group(5)
-            )
-            ultima_arma_pvp[vitima] = arma
-            eventos.append({
-                "tipo": "pvp_kill",
-                "hora": hora,
-                "dt": parse_dt(hora),
-                "assassino": assassino,
-                "vitima": vitima,
-                "arma": arma,
-                "dano": dano,
-                "parte_corpo": "",
-                "posicao": "",
-                "icone": "💀",
-                "descricao": f"{assassino} eliminou {vitima} com {arma} ({dano} dano)",
-            })
-            continue
-
-    eventos.sort(key=lambda x: x.get("dt") or datetime.min.replace(tzinfo=FUSO_BR), reverse=True)
-    return eventos
-
-    # ---- funções auxiliares (dentro do escopo correto) ----
-
-    def ensure_player(name: str) -> dict:
-        if name not in players:
-            players[name] = {
-                "total_play_seconds": 0,
-                "session_count": 0,
-                "last_connect": None,
-                "last_disconnect": None,
-                "last_death_time": None,
-                "pve_hits": 0,
-                "pve_suicides": 0,
-            }
-        return players[name]
-
-    def parse_dt(tstr: str):
-        try:
-            dt = datetime.strptime(f"{log_date} {tstr}", "%Y-%m-%d %H:%M:%S")
-            return dt.replace(tzinfo=FUSO_BR)
-        except Exception:
-            return None
-
-    # ---- processamento linha a linha ----
-
-    for line in log_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-
-        m = re_player_line.match(line)
-        if not m:
-            continue
-
-        hora_str = m.group(1)
-        nome = m.group(2)
-        dt_evento = parse_dt(hora_str)
-        p = ensure_player(nome)
-
-        if key_connected in line:
-            p["last_connect"] = dt_evento
-
-        elif key_disconnected in line:
-            if p.get("last_connect") and dt_evento:
-                delta = (dt_evento - p["last_connect"]).total_seconds()
-                if delta > 0:
-                    p["total_play_seconds"] += int(delta)
-                    p["session_count"] += 1
-            p["last_disconnect"] = dt_evento
-            p["last_connect"] = None
-
-        if key_suicide_emote in line or key_committed_sui in line:
-            p["pve_suicides"] += 1
-            p["last_death_time"] = dt_evento
-
-        if key_hit_infected in line:
-            p["pve_hits"] += 1
-
-    return {"players": players}
-
-# =========================================================
-# 4.3 RANKING SEMANAL — ACUMULADO 7 DIAS
-# =========================================================
-
-def ftp_download_adm_files_weekly(ftp_cfg: dict, max_files: int = 7) -> str:
-    """
-    Baixa os últimos max_files arquivos .ADM via FTP e concatena o conteúdo.
-    Retorna string com todos os logs unidos.
-    """
-    arquivos = ftp_list_adm_files(ftp_cfg)
-    if not arquivos:
-        return ""
-
-    # Pega os últimos max_files arquivos (mais recentes primeiro)
-    arquivos_semana = arquivos[:max_files]
-    conteudo_total = ""
-
-    try:
-        with FTP() as ftp:
-            ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=15)
-            ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
-            ftp.cwd(DAYZ_LOG_DIR)
-
-            for nome_arquivo in arquivos_semana:
-                buffer = io.BytesIO()
-                try:
-                    ftp.retrbinary(f"RETR {nome_arquivo}", buffer.write)
-                    texto = buffer.getvalue().decode("utf-8", errors="ignore")
-                    conteudo_total += texto + "\n"
-                except Exception:
-                    continue
-    except Exception:
-        pass
-
-    return conteudo_total
-
-
-def parse_adm_semanal(log_text: str) -> dict:
-    """
-    Parser completo para ranking semanal.
-    Processa múltiplos arquivos .ADM concatenados.
-    Retorna dict com stats acumulados por jogador:
-    {
-      "nome": {
-        "total_play_seconds": int,       # tempo total de jogo
-        "session_count": int,            # número de sessões
-        "max_survival_seconds": int,     # maior tempo sobrevivendo sem morrer
-        "current_survival_seconds": int, # tempo sobrevivendo atual (sessão em aberto)
-        "total_survival_seconds": int,   # acumulado de todos os períodos vivos
-        "pve_hits": int,                 # hits por zumbi
-        "pve_suicides": int,             # suicídios
-        "pvp_kills": int,                # kills PvP
-        "pvp_deaths": int,               # mortes PvP
-        "last_spawn_dt": datetime|None,  # último spawn (connect ou respawn)
-        "last_death_dt": datetime|None,  # última morte
-        "xp": float,                     # calculado: baseado em tempo de sobrevivência
-      }
-    }
-    """
-    if not log_text or not log_text.strip():
-        return {}
-
-    players = {}
-
-    # Regex
-    re_player_line   = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)"')
-    re_date_header   = re.compile(r'AdminLog started on (\d{4}-\d{2}-\d{2})')
-    re_hit_infected  = re.compile(r'hit by Infected .* for ([\d.]+) damage')
-    re_killed_pvp    = re.compile(r'\) killed Player "([^"]+)"')
-    re_died          = re.compile(r'\(DEAD\).*died\.')
-    re_pos           = re.compile(r'pos=<([\d., -]+)>')
-
-    # Palavras-chave
-    key_connected    = "is connected"
-    key_connecting   = "is connecting"
-    key_disconnected = "has been disconnected"
-    key_suicide_emote= "performed EmoteSuicide"
-    key_committed_sui= "committed suicide"
-    key_hit_infected = "hit by Infected"
-    key_killed       = ") killed Player"
-    key_died         = "(DEAD)"
-
-    # Data corrente do bloco sendo processado
-    current_date = datetime.now(FUSO_BR).date()
-
-    def parse_dt(tstr: str, date=None):
-        base = date or current_date
-        try:
-            dt = datetime.strptime(f"{base} {tstr}", "%Y-%m-%d %H:%M:%S")
-            return dt.replace(tzinfo=FUSO_BR)
-        except Exception:
-            return None
-
-    def ensure_player(name: str) -> dict:
-        if name not in players:
-            players[name] = {
-                "total_play_seconds": 0,
-                "session_count": 0,
-                "max_survival_seconds": 0,
-                "current_survival_seconds": 0,
-                "total_survival_seconds": 0,
-                "pve_hits": 0,
-                "pve_suicides": 0,
-                "pvp_kills": 0,
-                "pvp_deaths": 0,
-                "last_connect_dt": None,
-                "last_spawn_dt": None,
-                "last_death_dt": None,
-                "xp": 0.0,
-            }
-        return players[name]
-
-    def registrar_morte(p: dict, dt_morte):
-        """Registra morte: fecha período de sobrevivência e acumula XP."""
-        if p.get("last_spawn_dt") and dt_morte:
-            delta = (dt_morte - p["last_spawn_dt"]).total_seconds()
-            if delta > 0:
-                surv = int(delta)
-                p["total_survival_seconds"] += surv
-                if surv > p["max_survival_seconds"]:
-                    p["max_survival_seconds"] = surv
-        p["last_death_dt"] = dt_morte
-        p["last_spawn_dt"] = None
-        # XP = total de segundos sobrevivendo / 60 (minutos = pontos de XP)
-        p["xp"] = round(p["total_survival_seconds"] / 60, 2)
-
-    for line in log_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-
-        # Atualiza data do bloco
-        m_date = re_date_header.search(line)
-        if m_date:
-            try:
-                current_date = datetime.strptime(m_date.group(1), "%Y-%m-%d").date()
-            except Exception:
-                pass
-            continue
-
-        m = re_player_line.match(line)
-        if not m:
-            continue
-
-        hora_str = m.group(1)
-        nome = m.group(2)
-        # Ignora linhas de jogador morto para stats principais
-        is_dead_line = key_died in line
-
-        dt_evento = parse_dt(hora_str, current_date)
-        p = ensure_player(nome)
-
-        # Conexão
-        if key_connected in line and key_connecting not in line and not is_dead_line:
-            p["last_connect_dt"] = dt_evento
-            # Considera connect como novo spawn (novo personagem)
-            if p["last_spawn_dt"] is None:
-                p["last_spawn_dt"] = dt_evento
-
-        # Desconexão — fecha sessão de jogo
-        elif key_disconnected in line:
-            if p.get("last_connect_dt") and dt_evento:
-                delta = (dt_evento - p["last_connect_dt"]).total_seconds()
-                if delta > 0:
-                    p["total_play_seconds"] += int(delta)
-                    p["session_count"] += 1
-            p["last_connect_dt"] = None
-
-        # Hit por Infected (dano real)
-        if key_hit_infected in line and not is_dead_line:
-            m_hit = re_hit_infected.search(line)
-            if m_hit and float(m_hit.group(1)) > 0:
-                p["pve_hits"] += 1
-
-        # Suicídio / EmoteSuicide
-        if key_suicide_emote in line or key_committed_sui in line:
-            if not is_dead_line:
-                p["pve_suicides"] += 1
-            registrar_morte(p, dt_evento)
-
-        # Morte real (DEAD died)
-        if is_dead_line and "died." in line and key_committed_sui not in line:
-            registrar_morte(p, dt_evento)
-            p["pvp_deaths"] += 1
-
-        # Kill PvP — credita para o assassino
-        if key_killed in line and not is_dead_line:
-            m_kill = re_killed_pvp.search(line)
-            if m_kill:
-                p["pvp_kills"] += 1
-                # Registra morte para a vítima
-                vitima = m_kill.group(1)
-                pv = ensure_player(vitima)
-                registrar_morte(pv, dt_evento)
-                pv["pvp_deaths"] += 1
-
-    # Recalcula XP final para todos
-    for nome, p in players.items():
-        # Se jogador ainda está vivo (sem morte registrada), estima sobrevivência
-        if p.get("last_spawn_dt") and p.get("last_connect_dt"):
-            agora = datetime.now(FUSO_BR)
-            delta_atual = (agora - p["last_spawn_dt"]).total_seconds()
-            if delta_atual > 0:
-                p["current_survival_seconds"] = int(delta_atual)
-        p["xp"] = round(p["total_survival_seconds"] / 60, 2)
-
-    return players
-
-
-def get_magnata_ranking(clients_db: dict, server_id: str) -> list:
-    """
-    Retorna top 10 jogadores por saldo total (banco + carteira) em DzCoins.
-    """
-    client_data = clients_db.get(server_id, {})
     wallets = client_data.get("wallets", {})
     bank = client_data.get("bank", {})
-
-    ranking = []
-    todos_jogadores = set(list(wallets.keys()) + list(bank.keys()))
-
-    for gt in todos_jogadores:
-        saldo_w = wallets.get(gt, {}).get("balance", 0)
-        saldo_b = bank.get(gt, {}).get("balance", 0)
-        total = saldo_w + saldo_b
-        ranking.append({
-            "gamertag": gt,
-            "carteira": saldo_w,
-            "banco": saldo_b,
-            "total": total,
+    
+    # Monta lista de jogadores com saldos
+    players_saldos = []
+    for gamertag in wallets.keys():
+        wallet_bal = wallets.get(gamertag, {}).get("balance", 0)
+        bank_bal = bank.get(gamertag, {}).get("balance", 0)
+        total = wallet_bal + bank_bal
+        
+        players_saldos.append({
+            "Jogador": gamertag,
+            "Carteira": wallet_bal,
+            "Banco": bank_bal,
+            "Total": total,
+            "sou_eu": gamertag == gamertag_vinculada,
         })
-
-    ranking.sort(key=lambda x: x["total"], reverse=True)
-    return ranking[:10]
     
-# =========================================================
-# 4.4 FUNÇÕES DA LOJA VIRTUAL
-# =========================================================
-
-def registrar_compra(
-    clients_db: dict,
-    server_id: str,
-    gamertag: str,
-    item: dict,
-    origem: str,
-    coordenadas: str,
-    hora_br: str,
-) -> tuple[bool, str]:
-    """
-    Registra uma compra na loja:
-    - Debita DzCoins do banco ou carteira
-    - Salva pedido em client_data["pedidos"]
-    - Retorna (sucesso, mensagem)
-    """
-    client_data = clients_db.get(server_id, {})
-
-    if "wallets" not in client_data:
-        client_data["wallets"] = {}
-    if "bank" not in client_data:
-        client_data["bank"] = {}
-    if "pedidos" not in client_data:
-        client_data["pedidos"] = []
-
-    wallets = client_data["wallets"]
-    bank    = client_data["bank"]
-    preco   = int(item.get("preco", 0))
-
-    wallet_reg = wallets.get(gamertag, {"balance": 0, "historico": []})
-    bank_reg   = bank.get(gamertag,   {"balance": 0, "historico": []})
-
-    saldo_w = wallet_reg.get("balance", 0)
-    saldo_b = bank_reg.get("balance", 0)
-
-    # Valida saldo
-    if origem == "💰 Carteira":
-        if saldo_w < preco:
-            return False, f"Saldo insuficiente na carteira ({saldo_w} DzCoins)."
-        wallet_reg["balance"] = saldo_w - preco
-        wallet_reg.setdefault("historico", []).append(
-            f"[{hora_br}] COMPRA LOJA — {item['nome']} x{item.get('quantidade',1)} "
-            f"-{preco} DzCoins (carteira)"
-        )
-        wallets[gamertag] = wallet_reg
-
-    elif origem == "🏦 Banco":
-        if saldo_b < preco:
-            return False, f"Saldo insuficiente no banco ({saldo_b} DzCoins)."
-        bank_reg["balance"] = saldo_b - preco
-        bank_reg.setdefault("historico", []).append(
-            f"[{hora_br}] COMPRA LOJA — {item['nome']} x{item.get('quantidade',1)} "
-            f"-{preco} DzCoins (banco)"
-        )
-        bank[gamertag] = bank_reg
-
-    # Registra pedido
-    pedido = {
-        "id": f"{gamertag}_{hora_br.replace('/', '').replace(':', '').replace(' ', '_')}",
-        "gamertag": gamertag,
-        "item_id": item.get("id"),
-        "item_nome": item.get("nome"),
-        "item_classe": item.get("classe"),
-        "item_categoria": item.get("categoria"),
-        "quantidade": item.get("quantidade", 1),
-        "preco": preco,
-        "origem_pagamento": origem,
-        "coordenadas": coordenadas.strip(),
-        "data_compra": hora_br,
-        "status": "Aguardando Reset",
-    }
-
-    client_data["pedidos"].insert(0, pedido)
-    client_data["wallets"] = wallets
-    client_data["bank"]    = bank
-    clients_db[server_id]  = client_data
-
-    return True, "ok"
+    # Ordena por total (descendente)
+    players_saldos_sorted = sorted(
+        players_saldos, key=lambda x: x["Total"], reverse=True
+    )[:10]
     
+    if not players_saldos_sorted:
+        st.info("Nenhum jogador com DzCoins ainda.")
+        return
+    
+    # Cria tabela com emojis de posição
+    posicao_emojis = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    
+    tabela_data = []
+    for idx, p in enumerate(players_saldos_sorted):
+        emoji = posicao_emojis[idx] if idx < len(posicao_emojis) else f"{idx+1}."
+        
+        # Marca se é o próprio jogador
+        jogador_display = f"👤 {p['Jogador']}" if p["sou_eu"] else p["Jogador"]
+        
+        tabela_data.append({
+            "#": emoji,
+            "Jogador": jogador_display,
+            "💰 Carteira": f"{p['Carteira']:,}",
+            "🏦 Banco": f"{p['Banco']:,}",
+            "💎 Total": f"{p['Total']:,}",
+        })
+    
+    st.table(tabela_data)
+    
+    # Destaque para o jogador logado
+    meu_reg = next(
+        (p for p in players_saldos if p["sou_eu"]),
+        None,
+    )
+    
+    if meu_reg:
+        st.markdown("---")
+        st.markdown("#### 👤 Seu posicionamento")
+        
+        posicao = next(
+            (idx + 1 for idx, p in enumerate(players_saldos_sorted) if p["sou_eu"]),
+            len(players_saldos) + 1,
+        )
+        
+        col_pos1, col_pos2, col_pos3 = st.columns(3)
+        col_pos1.metric("🏅 Posição", f"#{posicao}")
+        col_pos2.metric("💰 Carteira", f"{meu_reg['Carteira']:,}")
+        col_pos3.metric("💎 Total", f"{meu_reg['Total']:,}")
+
 # =========================================================
 # 5. COMPONENTES DE UI
 # =========================================================
 
 def render_relogio():
+    """Relógio ao vivo de Brasília usando st.fragment."""
     @st.fragment(run_every="1s")
     def _clock():
         agora = datetime.now(FUSO_BR)
@@ -1068,6 +583,7 @@ def render_relogio():
     _clock()
 
 def render_players_online(nitrado_id: str):
+    """Card de Players Online com auto-refresh a cada 60s."""
     @st.fragment(run_every=60)
     def _players():
         dados = get_players_online(nitrado_id)
@@ -1101,6 +617,7 @@ def render_players_online(nitrado_id: str):
                 for nome in players:
                     st.markdown(f"◆ `{nome}`")
         elif total > 0 and not players:
+            # Temos contagem, mas não temos a lista nominal
             st.caption(f"{total} jogador(es) online, lista de nomes indisponível.")
         else:
             st.caption("Nenhum jogador online no momento.")
@@ -1108,9 +625,17 @@ def render_players_online(nitrado_id: str):
     _players()
 
 def render_reset_info(client_data: dict):
-    agora = datetime.now(FUSO_BR)
+    """
+    Mostra informações de reset do servidor:
+    - Último reset real, lido de restart.log via FTP.
+    - Próximo reset estimado pela regra: a cada 2h, em horas pares (00, 02, 04, ...).
+    """
+    agora = datetime.now(FUSO_BR)  # mesmo fuso do relógio interno
+
+    # Horários de reset em Brasília: 00, 02, 04, ..., 22
     horarios_reset = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22]
 
+    # Encontrar o próximo horário de reset no mesmo dia
     proximo_reset = None
     for h in horarios_reset:
         candidato = agora.replace(hour=h, minute=0, second=0, microsecond=0)
@@ -1118,6 +643,7 @@ def render_reset_info(client_data: dict):
             proximo_reset = candidato
             break
 
+    # Se não achou (passou de 22:00), próximo é 00:00 do dia seguinte
     if proximo_reset is None:
         proximo_reset = (agora + timedelta(days=1)).replace(
             hour=0, minute=0, second=0, microsecond=0
@@ -1126,7 +652,19 @@ def render_reset_info(client_data: dict):
     delta = proximo_reset - agora
     minutos_restantes = max(0, int(delta.total_seconds() // 60))
 
-    ultimo_reset_texto = "FTP não configurado — usando apenas regra de horário."
+    st.markdown(
+        """
+        <div style="background:#1a1a2e; border-radius:10px; padding:14px;
+                    border:1px solid #444; margin-bottom:8px;">
+            <div style="font-size:13px; color:#aaa; margin-bottom:8px;">
+                🔄 Reset do Servidor
+            </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+        # Tenta ler último reset real do restart.log
+    ultimo_reset_texto = "Não foi possível detectar o último reset em restart.log."
     try:
         ftp_cfg = get_client_ftp_config(client_data)
         if ftp_cfg:
@@ -1136,34 +674,36 @@ def render_reset_info(client_data: dict):
                 if last_reset_dt:
                     ultimo_reset_texto = (
                         f"Último reset detectado: "
-                        f"<b>{last_reset_dt.strftime('%d/%m/%Y %H:%M:%S')}</b>"
+                        f"<b>{last_reset_dt.strftime('%d/%m/%Y %H:%M:%S')}</b>."
                     )
                 else:
-                    ultimo_reset_texto = "Nenhuma linha de reset encontrada em restart.log."
+                    ultimo_reset_texto = (
+                        "Nenhuma linha de reset encontrada em restart.log."
+                    )
+        else:
+            ultimo_reset_texto = (
+                "FTP não configurado para este servidor, usando apenas a regra de horário."
+            )
     except Exception:
         pass
 
     st.markdown(
         f"""
-        <div style="background:#1a1a2e; border-radius:10px; padding:14px;
-                    border:1px solid #444; margin-bottom:8px;">
-            <div style="font-size:13px; color:#aaa; margin-bottom:8px;">
-                🔄 Reset do Servidor
-            </div>
-            <div style="font-size:14px; color:#ddd; margin-bottom:6px;">
-                Próximo reset (regra a cada 2h):<br>
-                <b>{proximo_reset.strftime("%d/%m/%Y %H:%M")}</b>
-            </div>
-            <div style="font-size:12px; color:#999; margin-bottom:6px;">
-                Falta aproximadamente <b>{minutos_restantes} minuto(s)</b>.
-            </div>
-            <div style="font-size:12px; color:#aaa;">
-                {ultimo_reset_texto}
-            </div>
+        <div style="font-size:14px; color:#ddd; margin-bottom:6px;">
+            Próximo reset automático (regra 2h / horas pares):<br>
+            <b>{proximo_reset.strftime("%d/%m/%Y %H:%M")}</b>
+        </div>
+        <div style="font-size:12px; color:#999; margin-bottom:6px;">
+            Falta aproximadamente <b>{minutos_restantes} minuto(s)</b>.
+        </div>
+        <div style="font-size:12px; color:#aaa;">
+            {ultimo_reset_texto}
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================================================
 # 6. ABA BANCO DZCOINS
@@ -1190,20 +730,18 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
     saldo_carteira = wallet_reg.get("balance", 0)
     saldo_banco = bank_reg.get("balance", 0)
 
+    # --- Saldos ---
     col1, col2 = st.columns(2)
     col1.metric("💰 Carteira", f"{saldo_carteira} DzCoins")
     col2.metric("🏦 Banco", f"{saldo_banco} DzCoins")
 
     st.divider()
 
+    # --- Operações ---
     op = st.radio(
         "Operação",
-        [
-            "📋 Extrato",
-            "➡️ Depositar (Carteira → Banco)",
-            "⬅️ Sacar (Banco → Carteira)",
-            "🔁 Transferir para outro jogador",
-        ],
+        ["📋 Extrato", "➡️ Depositar (Carteira → Banco)",
+         "⬅️ Sacar (Banco → Carteira)", "🔁 Transferir para outro jogador"],
         horizontal=False,
         label_visibility="collapsed",
     )
@@ -1289,6 +827,7 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
             "Debitar de:", ["💰 Carteira", "🏦 Banco"], horizontal=True
         )
         valor = st.number_input("Valor (DzCoins)", min_value=0, step=100, key="transf_val")
+
         saldo_origem = saldo_carteira if origem_op == "💰 Carteira" else saldo_banco
 
         if st.button("Confirmar transferência", use_container_width=True):
@@ -1297,6 +836,7 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
             elif valor > saldo_origem:
                 st.error(f"Saldo insuficiente ({saldo_origem} DzCoins).")
             else:
+                # Débito na origem
                 if origem_op == "💰 Carteira":
                     wallet_reg["balance"] = saldo_carteira - valor
                     wallet_reg.setdefault("historico", []).append(
@@ -1308,6 +848,7 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
                         f"[{hora_br}] TRANSF. → {destino} -{valor} (banco)"
                     )
 
+                # Crédito na carteira do destino
                 dest_wallet = wallets.get(destino, {"balance": 0, "historico": []})
                 dest_wallet["balance"] = dest_wallet.get("balance", 0) + valor
                 dest_wallet.setdefault("historico", []).append(
@@ -1325,294 +866,7 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
                 st.rerun()
 
 # =========================================================
-# 7. ABA RANKING
-# =========================================================
-
-def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict, server_id: str):
-    ftp_cfg = get_client_ftp_config(client_data)
-    if not ftp_cfg:
-        st.warning(
-            "FTP do servidor não está configurado. "
-            "Peça ao admin para configurar no painel."
-        )
-        return
-
-    @st.fragment(run_every=300)
-    def _ranking(ftp_cfg, gamertag_vinculada, clients_db, server_id):
-        with st.spinner("Carregando ranking semanal (últimos 7 dias)..."):
-            log_text_semanal = ftp_download_adm_files_weekly(ftp_cfg, max_files=7)
-
-        if not log_text_semanal.strip():
-            st.warning("Não foi possível carregar os logs do servidor.")
-            return
-
-        stats = parse_adm_semanal(log_text_semanal)
-
-        if not stats:
-            st.info("Nenhuma estatística encontrada nos logs da semana.")
-            return
-
-        st.caption(
-            f"📊 {len(stats)} jogadores encontrados nos logs dos últimos 7 dias "
-            f"— atualizado a cada 5 min"
-        )
-
-        # ---- Sub-abas de ranking ----
-        sub_play, sub_surv, sub_xp, sub_pvp, sub_pve, sub_dzcoins = st.tabs([
-            "⏱️ Tempo de Jogo",
-            "🏕️ Sobrevivência",
-            "⭐ XP",
-            "⚔️ PvP",
-            "🧟 PvE",
-            "💰 Magnata DzCoins",
-        ])
-
-        # ---- TEMPO DE JOGO TOP 10 ----
-        with sub_play:
-            st.markdown("#### ⏱️ Tempo de Jogo Total — Top 10")
-            ranking_play = sorted(
-                stats.items(),
-                key=lambda x: x[1]["total_play_seconds"],
-                reverse=True
-            )[:10]
-
-            if not ranking_play:
-                st.info("Sem dados de tempo de jogo.")
-            else:
-                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-                for idx, (nome, dados) in enumerate(ranking_play):
-                    destaque = nome == gamertag_vinculada
-                    cor = "#00d4ff" if destaque else "#e0e0e0"
-                    st.markdown(
-                        f"""
-                        <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
-                                    border-left:3px solid {'#00d4ff' if destaque else '#333'};
-                                    margin-bottom:5px;">
-                            <span style="font-size:16px;">{medalhas[idx]}</span>
-                            <span style="color:{cor}; font-weight:bold; margin-left:8px;">
-                                {nome}
-                            </span>
-                            <span style="color:#aaa; float:right;">
-                                ⏱️ {format_seconds_hhmmss(dados['total_play_seconds'])}
-                                &nbsp;|&nbsp; 🔁 {dados['session_count']} sessões
-                            </span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-        # ---- SOBREVIVÊNCIA TOP 10 ----
-        with sub_surv:
-            st.markdown("#### 🏕️ Maior Tempo Sobrevivendo — Top 10")
-            st.caption("Tempo máximo que o jogador ficou vivo sem morrer em uma única vida.")
-            ranking_surv = sorted(
-                stats.items(),
-                key=lambda x: x[1]["max_survival_seconds"],
-                reverse=True
-            )[:10]
-
-            if not ranking_surv:
-                st.info("Sem dados de sobrevivência.")
-            else:
-                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-                for idx, (nome, dados) in enumerate(ranking_surv):
-                    destaque = nome == gamertag_vinculada
-                    cor = "#00d4ff" if destaque else "#e0e0e0"
-                    total_surv = dados["total_survival_seconds"]
-                    max_surv = dados["max_survival_seconds"]
-                    st.markdown(
-                        f"""
-                        <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
-                                    border-left:3px solid {'#00d4ff' if destaque else '#333'};
-                                    margin-bottom:5px;">
-                            <span style="font-size:16px;">{medalhas[idx]}</span>
-                            <span style="color:{cor}; font-weight:bold; margin-left:8px;">
-                                {nome}
-                            </span>
-                            <span style="color:#aaa; float:right;">
-                                🏆 Melhor: {format_seconds_hhmmss(max_surv)}
-                                &nbsp;|&nbsp; Total: {format_seconds_hhmmss(total_surv)}
-                            </span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-        # ---- XP TOP 10 ----
-        with sub_xp:
-            st.markdown("#### ⭐ XP (Experiência) — Top 10")
-            st.caption("XP é calculado com base no tempo total sobrevivendo. 1 minuto vivo = 1 XP.")
-            ranking_xp = sorted(
-                stats.items(),
-                key=lambda x: x[1]["xp"],
-                reverse=True
-            )[:10]
-
-            if not ranking_xp:
-                st.info("Sem dados de XP.")
-            else:
-                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-                xp_max = ranking_xp[0][1]["xp"] if ranking_xp else 1
-                for idx, (nome, dados) in enumerate(ranking_xp):
-                    destaque = nome == gamertag_vinculada
-                    cor = "#00d4ff" if destaque else "#e0e0e0"
-                    xp = dados["xp"]
-                    nivel = max(1, int(xp // 100) + 1)
-                    barra_pct = int((xp / max(xp_max, 1)) * 100)
-                    st.markdown(
-                        f"""
-                        <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
-                                    border-left:3px solid {'#00d4ff' if destaque else '#333'};
-                                    margin-bottom:5px;">
-                            <span style="font-size:16px;">{medalhas[idx]}</span>
-                            <span style="color:{cor}; font-weight:bold; margin-left:8px;">
-                                {nome}
-                            </span>
-                            <span style="color:#aaa; float:right;">
-                                Nvl {nivel} &nbsp;|&nbsp; ⭐ {xp:.1f} XP
-                            </span>
-                            <div style="background:#333; border-radius:4px; height:4px;
-                                        margin-top:6px;">
-                                <div style="background:#00d4ff; width:{barra_pct}%;
-                                            height:4px; border-radius:4px;"></div>
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-        # ---- PVP TOP 10 ----
-        with sub_pvp:
-            st.markdown("#### ⚔️ PvP por Período — Top 10")
-
-            ranking_pvp = sorted(
-                stats.items(),
-                key=lambda x: x[1]["pvp_kills"],
-                reverse=True
-            )[:10]
-
-            tem_pvp = any(d["pvp_kills"] > 0 for _, d in ranking_pvp)
-
-            if not tem_pvp:
-                st.info("Nenhum evento PvP registrado nos últimos 7 dias.")
-                st.caption("O ranking será preenchido automaticamente quando ocorrerem kills PvP no servidor.")
-            else:
-                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-                for idx, (nome, dados) in enumerate(ranking_pvp):
-                    destaque = nome == gamertag_vinculada
-                    cor = "#00d4ff" if destaque else "#e0e0e0"
-                    kills = dados["pvp_kills"]
-                    deaths = dados["pvp_deaths"]
-                    kd = round(kills / max(deaths, 1), 2)
-                    st.markdown(
-                        f"""
-                        <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
-                                    border-left:3px solid {'#00d4ff' if destaque else '#ff4444'};
-                                    margin-bottom:5px;">
-                            <span style="font-size:16px;">{medalhas[idx]}</span>
-                            <span style="color:{cor}; font-weight:bold; margin-left:8px;">
-                                {nome}
-                            </span>
-                            <span style="color:#aaa; float:right;">
-                                ⚔️ K: {kills} &nbsp;|&nbsp; 💀 D: {deaths}
-                                &nbsp;|&nbsp; K/D: {kd}
-                            </span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-        # ---- PVE TOP 10 ----
-        with sub_pve:
-            st.markdown("#### 🧟 Hits PvE & Suicídios — Top 10")
-            ranking_pve = sorted(
-                stats.items(),
-                key=lambda x: x[1]["pve_hits"],
-                reverse=True
-            )[:10]
-
-            if not ranking_pve:
-                st.info("Sem dados de PvE.")
-            else:
-                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-                for idx, (nome, dados) in enumerate(ranking_pve):
-                    destaque = nome == gamertag_vinculada
-                    cor = "#00d4ff" if destaque else "#e0e0e0"
-                    st.markdown(
-                        f"""
-                        <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
-                                    border-left:3px solid {'#00d4ff' if destaque else '#ff8800'};
-                                    margin-bottom:5px;">
-                            <span style="font-size:16px;">{medalhas[idx]}</span>
-                            <span style="color:{cor}; font-weight:bold; margin-left:8px;">
-                                {nome}
-                            </span>
-                            <span style="color:#aaa; float:right;">
-                                🧟 Hits: {dados['pve_hits']}
-                                &nbsp;|&nbsp; 💀 Suicídios: {dados['pve_suicides']}
-                            </span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-        # ---- MAGNATA DZCOINS TOP 10 ----
-        with sub_dzcoins:
-            st.markdown("#### 💰 Magnata DzCoins — Top 10")
-            st.caption("Ranking baseado no saldo total (Carteira + Banco).")
-            ranking_mag = get_magnata_ranking(clients_db, server_id)
-
-            if not ranking_mag:
-                st.info("Nenhum jogador com DzCoins registrado ainda.")
-            else:
-                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-                total_max = ranking_mag[0]["total"] if ranking_mag else 1
-                for idx, r in enumerate(ranking_mag):
-                    destaque = r["gamertag"] == gamertag_vinculada
-                    cor = "#00d4ff" if destaque else "#e0e0e0"
-                    barra_pct = int((r["total"] / max(total_max, 1)) * 100)
-                    st.markdown(
-                        f"""
-                        <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
-                                    border-left:3px solid {'#00d4ff' if destaque else '#FFD700'};
-                                    margin-bottom:5px;">
-                            <span style="font-size:16px;">{medalhas[idx]}</span>
-                            <span style="color:{cor}; font-weight:bold; margin-left:8px;">
-                                {r['gamertag']}
-                            </span>
-                            <span style="color:#aaa; float:right;">
-                                💰 {r['carteira']} carteira
-                                &nbsp;|&nbsp; 🏦 {r['banco']} banco
-                                &nbsp;|&nbsp; 💎 {r['total']} total
-                            </span>
-                            <div style="background:#333; border-radius:4px; height:4px;
-                                        margin-top:6px;">
-                                <div style="background:#FFD700; width:{barra_pct}%;
-                                            height:4px; border-radius:4px;"></div>
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-        # ---- MEU DESEMPENHO ----
-        st.divider()
-        st.markdown("#### 👤 Meu desempenho na semana")
-        meu = stats.get(gamertag_vinculada)
-        if not meu:
-            st.info("Sua Gamertag ainda não aparece nos logs desta semana.")
-        else:
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("⏱️ Tempo de Jogo", format_seconds_hhmmss(meu["total_play_seconds"]))
-            col2.metric("🏕️ Melhor Vida", format_seconds_hhmmss(meu["max_survival_seconds"]))
-            col3.metric("⭐ XP", f"{meu['xp']:.1f}")
-            col4.metric("⚔️ Kills PvP", meu["pvp_kills"])
-            col5.metric("🧟 Hits PvE", meu["pve_hits"])
-
-    _ranking(ftp_cfg, gamertag_vinculada, clients_db, server_id)
-
-# =========================================================
-# 8. UI PRINCIPAL
+# 7. UI PRINCIPAL
 # =========================================================
 
 def main():
@@ -1622,43 +876,112 @@ def main():
         layout="wide",
     )
 
-    # --- TEMA ---
+    # ----------------------------------------------------------
+    # TEMA DINÂMICO (Claro / Escuro) - apenas estado + CSS
+    # ----------------------------------------------------------
     if "portal_tema" not in st.session_state:
-        st.session_state.portal_tema = "dark"
+        st.session_state.portal_tema = "dark"  # padrão inicial
 
-    tema = st.session_state.portal_tema
+    tema_escolhido = st.session_state.portal_tema
 
-    if tema == "dark":
+    if tema_escolhido == "dark":
+        # Dark: fundo escuro neutro, cartões azul petróleo, texto claro
         css = """
         <style>
         .stApp { background-color: #050510; color: #f0f0f0; }
-        .stTabs [data-baseweb="tab"] { font-size: 15px; font-weight: bold; color: #bbbbbb; }
-        .stTabs [aria-selected="true"] { color: #00e0ff !important; border-bottom: 2px solid #00e0ff !important; }
-        div[data-testid="metric-container"] { background: #111827; border-radius: 10px; padding: 12px; border: 1px solid #374151; }
-        .block-container { padding-top: 3.5rem; }
-        .stButton > button { color: #ffffff !important; background-color: #1d4ed8 !important; border-radius: 8px !important; border: 1px solid #1d4ed8 !important; }
-        .stButton > button:hover { background-color: #2563eb !important; }
-        thead tr th { color: #e5e7eb !important; font-weight: 700 !important; background-color: #111827 !important; }
-        tbody tr td { color: #e5e7eb !important; background-color: #020617 !important; }
+        .stTabs [data-baseweb="tab"] {
+            font-size: 15px; font-weight: bold; color: #bbbbbb;
+        }
+        .stTabs [aria-selected="true"] {
+            color: #00e0ff !important;
+            border-bottom: 2px solid #00e0ff !important;
+        }
+        div[data-testid="metric-container"] {
+            background: #111827;
+            border-radius: 10px;
+            padding: 12px;
+            border: 1px solid #374151;
+        }
+        .block-container {
+            padding-top: 3.5rem;
+        }
+        /* Botões no dark */
+        button[kind="primary"],
+        .stButton > button {
+            color: #ffffff !important;
+            background-color: #1d4ed8 !important;
+            border-radius: 8px !important;
+            border: 1px solid #1d4ed8 !important;
+        }
+        button[kind="primary"]:hover,
+        .stButton > button:hover {
+            background-color: #2563eb !important;
+            border-color: #2563eb !important;
+        }
+        /* Tabelas (Ranking/Banco) mais fortes no dark */
+        thead tr th {
+            color: #e5e7eb !important;
+            font-weight: 700 !important;
+            background-color: #111827 !important;
+        }
+        tbody tr td {
+            color: #e5e7eb !important;
+            background-color: #020617 !important;
+        }
+        tbody tr:nth-child(odd) td {
+            background-color: #030712 !important;
+        }
         </style>
         """
     else:
+        # Light: fundo claro neutro, cartões brancos, texto escuro (sem azul forte)
         css = """
         <style>
         .stApp { background-color: #f3f4f6; color: #1f2933; }
-        .stTabs [data-baseweb="tab"] { font-size: 15px; font-weight: bold; color: #4b5563; }
-        .stTabs [aria-selected="true"] { color: #0f766e !important; border-bottom: 2px solid #0f766e !important; }
-        div[data-testid="metric-container"] { background: #ffffff; border-radius: 10px; padding: 12px; border: 1px solid #d1d5db; }
-        .block-container { padding-top: 3.5rem; }
-        .stButton > button { color: #ffffff !important; background-color: #2563eb !important; border-radius: 8px !important; }
-        thead tr th { color: #111827 !important; font-weight: 700 !important; }
-        tbody tr td { color: #374151 !important; }
+        .stTabs [data-baseweb="tab"] {
+            font-size: 15px; font-weight: bold; color: #4b5563;
+        }
+        .stTabs [aria-selected="true"] {
+            color: #0f766e !important;
+            border-bottom: 2px solid #0f766e !important;
+        }
+        div[data-testid="metric-container"] {
+            background: #ffffff;
+            border-radius: 10px;
+            padding: 12px;
+            border: 1px solid #d1d5db;
+        }
+        .block-container {
+            padding-top: 3.5rem;
+        }
+        /* Botões no light, para aparecer melhor */
+        button[kind="primary"],
+        .stButton > button {
+            color: #ffffff !important;
+            background-color: #2563eb !important;
+            border-radius: 8px !important;
+            border: 1px solid #1d4ed8 !important;
+        }
+        button[kind="primary"]:hover,
+        .stButton > button:hover {
+            background-color: #1d4ed8 !important;
+            border-color: #1d4ed8 !important;
+        }
+        /* Títulos e textos em tabelas (Ranking/Banco) mais escuros */
+        thead tr th {
+            color: #111827 !important;
+            font-weight: 700 !important;
+        }
+        tbody tr td {
+            color: #374151 !important;
+        }
         </style>
         """
+
     st.markdown(css, unsafe_allow_html=True)
 
     # ----------------------------------------------------------
-    # 8.1 PROCESSAR RETORNO DISCORD
+    # 7.1 PROCESSAR RETORNO DISCORD (code na URL)
     # ----------------------------------------------------------
     query_params = st.query_params
     code = query_params.get("code")
@@ -1677,15 +1000,17 @@ def main():
             st.query_params.clear()
 
     # ----------------------------------------------------------
-    # 8.2 TELA DE LOGIN
+    # 7.2 TELA DE LOGIN (se não autenticado)
     # ----------------------------------------------------------
     if not st.session_state.get("portal_discord_id"):
-        col_c, _ = st.columns([1, 1])
+        col_c, col_r = st.columns([1, 1])
         with col_c:
             st.markdown(
                 """
                 <div style="text-align:center; padding: 60px 20px;">
-                    <h1 style="color:#00d4ff;">🎮 Titan Cloud Pro</h1>
+                    <h1 style="color:#00d4ff; white-space: nowrap;">
+                        🎮 Titan Cloud Pro
+                    </h1>
                     <h3 style="color:#aaa;">Portal do Jogador</h3>
                     <p style="color:#666; margin-bottom: 40px;">
                         Vincule sua Gamertag, acompanhe rankings,<br>
@@ -1695,6 +1020,7 @@ def main():
                 """,
                 unsafe_allow_html=True,
             )
+
             if not DISCORD_CLIENT_ID or not DISCORD_REDIRECT_URI:
                 st.warning("Login com Discord não configurado. Contate o administrador.")
             else:
@@ -1726,7 +1052,7 @@ def main():
         st.stop()
 
     # ----------------------------------------------------------
-    # 8.3 CARREGA DADOS
+    # 7.3 CARREGA DADOS
     # ----------------------------------------------------------
     users_db = load_db(DB_USERS, {"keys": {}})
     clients_db = load_db(DB_CLIENTS, {})
@@ -1735,7 +1061,7 @@ def main():
     discord_name = st.session_state.get("portal_discord_name", "Jogador")
 
     # ----------------------------------------------------------
-    # 8.4 SELEÇÃO DO SERVIDOR
+    # 7.4 SELEÇÃO / CONFIRMAÇÃO DO SERVIDOR
     # ----------------------------------------------------------
     nome_para_server_id = {}
     nitrado_id_map = {}
@@ -1771,7 +1097,7 @@ def main():
     nitrado_id = nitrado_id_map.get(server_id, server_id)
 
     # ----------------------------------------------------------
-    # 8.5 VALIDAÇÃO DISCORD GUILD
+    # 7.5 VALIDAÇÃO DISCORD GUILD
     # ----------------------------------------------------------
     discord_guild_id = None
     for key_data in users_db.get("keys", {}).values():
@@ -1786,7 +1112,7 @@ def main():
             st.stop()
 
     # ----------------------------------------------------------
-    # 8.6 VERIFICA GAMERTAG VINCULADA
+    # 7.6 VERIFICA SE JOGADOR JÁ TEM GAMERTAG VINCULADA
     # ----------------------------------------------------------
     gamertag_vinculada = None
     for gt, info in players.items():
@@ -1804,6 +1130,7 @@ def main():
             """,
             unsafe_allow_html=True,
         )
+
         with st.form("form_vinculo"):
             gamertag = st.text_input("🎮 Gamertag (exatamente como aparece no console)", "")
             apelido = st.text_input("Apelido (opcional)", "")
@@ -1832,7 +1159,7 @@ def main():
     st.session_state.portal_gamertag = gamertag_vinculada
 
     # ----------------------------------------------------------
-    # 8.7 HEADER DO JOGADOR
+    # 7.7 HEADER DO JOGADOR (botão Sair + seletor de tema)
     # ----------------------------------------------------------
     col_h1, col_h2, col_h3 = st.columns([3, 1, 1])
 
@@ -1845,7 +1172,8 @@ def main():
                 </span>
                 <span style="font-size:14px; color:#888; margin-left:12px;">
                     {server_nome}
-                </span><br>
+                </span>
+                <br>
                 <span style="font-size:13px; color:#666;">
                     Discord: {discord_name}
                 </span>
@@ -1859,17 +1187,20 @@ def main():
 
     with col_h3:
         if st.button("🚪 Sair", use_container_width=True):
-            for k in [
-                "portal_discord_id", "portal_discord_name", "portal_discord_guilds",
-                "portal_server_id", "portal_server_nome", "portal_gamertag",
-                "portal_discord_avatar",
-            ]:
+            for k in ["portal_discord_id", "portal_discord_name", "portal_discord_guilds",
+                      "portal_server_id", "portal_server_nome", "portal_gamertag",
+                      "portal_discord_avatar"]:
                 st.session_state.pop(k, None)
             st.rerun()
 
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
         tema_atual = st.session_state.portal_tema
+        label_atual = "Escuro" if tema_atual == "dark" else "Claro"
+        st.markdown(
+            f"<div style='font-size:11px; color:#888;'>Tema atual: <b>{label_atual}</b></div>",
+            unsafe_allow_html=True,
+        )
         novo_tema_label = st.selectbox(
             "",
             ["Escuro", "Claro"],
@@ -1886,16 +1217,13 @@ def main():
     st.divider()
 
     # ----------------------------------------------------------
-    # 8.8 ABAS PRINCIPAIS (todas dentro de main())
+    # 7.8 ABAS PRINCIPAIS
     # ----------------------------------------------------------
-    tab_inicio, tab_banco, tab_ranking, tab_pvp, tab_pve, tab_conexao, tab_loja = st.tabs([
+    tab_inicio, tab_banco, tab_ranking, tab_magnatas = st.tabs([
         "🏠 Início",
         "🏦 Banco DzCoins",
         "🏆 Ranking",
-        "⚔️ Killfeed PvP",
-        "🧟 Killfeed PvE",
-        "🔌 Conexão",
-        "🛒 Loja Virtual",
+        "💎 Magnatas DzCoins",
     ])
 
     # --- ABA INÍCIO ---
@@ -1930,397 +1258,138 @@ def main():
         render_banco(client_data_fresh, clients_db_fresh, server_id, gamertag_vinculada)
 
     # --- ABA RANKING ---
-    with tab_ranking:
-        st.markdown("### 🏆 Ranking Semanal")
-        render_ranking(client_data, gamertag_vinculada, clients_db_fresh, server_id)
+with tab_ranking:
+    st.markdown("### 🏆 Ranking — Tempo de Jogo & Sobrevivência")
 
-    # --- ABA KILLFEED PVP ---
-    with tab_pvp:
-        st.markdown("### ⚔️ Killfeed PvP")
+    ftp_cfg = get_client_ftp_config(client_data)
+    if not ftp_cfg:
+        st.warning(
+            "FTP do servidor não está configurado para este cliente. "
+            "Peça ao admin para configurar no painel."
+        )
+    else:
 
-        ftp_cfg = get_client_ftp_config(client_data)
-        if not ftp_cfg:
-            st.warning("FTP não configurado. Peça ao admin para configurar no painel.")
-        else:
-            @st.fragment(run_every=60)
-            def _killfeed_pvp(ftp_cfg):
-                with st.spinner("Carregando eventos PvP..."):
-                    log_text, err = ftp_download_latest_adm(ftp_cfg)
+        @st.fragment(run_every=300)
+        def _ranking_fragment(ftp_cfg, gamertag_vinculada: str):
+            with st.spinner("Carregando dados de ranking a partir dos logs do servidor..."):
+                log_text, err = ftp_download_latest_adm(ftp_cfg)
 
-                if err or not log_text:
-                    st.warning("Não foi possível carregar o log do servidor.")
-                    st.caption(f"Detalhes: {err or 'log vazio'}")
-                    return
+            if err or not log_text:
+                st.warning(
+                    "Ainda não foi possível carregar os dados de ranking a partir dos logs do servidor."
+                )
+                st.caption(f"Detalhes técnicos: {err or 'log vazio'}")
+                return
 
-                eventos = parse_adm_killfeed_pvp(log_text)
+            parsed = parse_adm_sessions_and_pve(log_text)
 
-                if not eventos:
-                    st.info("Nenhum evento PvP registrado no log atual.")
-                    st.caption("Os eventos aparecerão aqui assim que ocorrerem no servidor.")
-                    return
+            # Garante que parsed é um dict antes de usar .get
+            if not isinstance(parsed, dict):
+                st.warning(
+                    "Ainda não foi possível carregar os dados de ranking a partir dos logs do servidor."
+                )
+                return
 
-                st.caption(f"Total de eventos PvP: {len(eventos)} — atualizado a cada 60s")
-                st.divider()
+            pstats = parsed.get("players", {})
 
-                for ev in eventos:
-                    col_i, col_d = st.columns([1, 8])
-                    with col_i:
-                        st.markdown(
-                            f"<div style='font-size:28px; text-align:center;'>{ev['icone']}</div>",
-                            unsafe_allow_html=True,
-                        )
-                    with col_d:
-                        st.markdown(
-                            f"""
-                            <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
-                                        border-left:3px solid #ff4444; margin-bottom:6px;">
-                                <span style="font-size:13px; color:#ff6666; font-weight:bold;">
-                                    {ev['hora']} — {ev['descricao']}
-                                </span><br>
-                                <span style="font-size:11px; color:#888;">
-                                    🗡️ {ev.get('assassino','?')} → 💀 {ev.get('vitima','?')}
-                                    {f" | 🔫 {ev['arma']}" if ev.get('arma') and ev['arma'] != 'Desconhecida' else ""}
-                                    {f" | 📍 {ev['posicao']}" if ev.get('posicao') else ""}
-                                </span>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
+            if not pstats:
+                st.info("Nenhuma estatística encontrada no log .ADM mais recente.")
+                return
 
-            _killfeed_pvp(ftp_cfg)
+            # Monta listas para ranking
+            ranking_play = []
+            ranking_surv = []
 
-    # --- ABA KILLFEED PVE ---
-    with tab_pve:
-        st.markdown("### 🧟 Killfeed PvE")
+            for nome, dados in pstats.items():
+                total_play = dados.get("total_play_seconds", 0)
+                ranking_play.append({
+                    "Jogador": nome,
+                    "Tempo de jogo": format_seconds_hhmmss(total_play),
+                    "Tempo (segundos)": total_play,
+                    "Sessões": dados.get("session_count", 0),
+                    "Hits PvE": dados.get("pve_hits", 0),
+                    "Suicídios": dados.get("pve_suicides", 0),
+                })
 
-        ftp_cfg = get_client_ftp_config(client_data)
-        if not ftp_cfg:
-            st.warning("FTP não configurado. Peça ao admin para configurar no painel.")
-        else:
-            filtro_pve = st.radio(
-                "Filtrar por tipo:",
-                ["Todos", "💀 Apenas Mortes", "🧟 Apenas Hits"],
-                horizontal=True,
-                key="filtro_pve",
+                ranking_surv.append({
+                    "Jogador": nome,
+                    "Tempo de sobrevivência": format_seconds_hhmmss(total_play),
+                    "Tempo (segundos)": total_play,
+                    "Suicídios": dados.get("pve_suicides", 0),
+                })
+
+            ranking_play_sorted = sorted(
+                ranking_play, key=lambda x: x["Tempo (segundos)"], reverse=True
+            )[:10]
+            ranking_surv_sorted = sorted(
+                ranking_surv, key=lambda x: x["Tempo (segundos)"], reverse=True
+            )[:10]
+
+            col_r1, col_r2 = st.columns(2)
+
+            with col_r1:
+                st.markdown("#### ⏱️ Tempo de jogo total — Top 10")
+                if ranking_play_sorted:
+                    st.table([{
+                        "#": idx + 1,
+                        "Jogador": r["Jogador"],
+                        "Tempo de jogo": r["Tempo de jogo"],
+                        "Sessões": r["Sessões"],
+                        "Hits PvE": r["Hits PvE"],
+                        "Suicídios": r["Suicídios"],
+                    } for idx, r in enumerate(ranking_play_sorted)])
+                else:
+                    st.info("Sem dados de tempo de jogo ainda neste log.")
+
+            with col_r2:
+                st.markdown("#### 🧟 Tempo de sobrevivência (proxy) — Top 10")
+                if ranking_surv_sorted:
+                    st.table([{
+                        "#": idx + 1,
+                        "Jogador": r["Jogador"],
+                        "Tempo de sobrevivência": r["Tempo de sobrevivência"],
+                        "Suicídios": r["Suicídios"],
+                    } for idx, r in enumerate(ranking_surv_sorted)])
+                else:
+                    st.info("Sem dados de sobrevivência ainda neste log.")
+
+            # Destaque para o jogador logado
+            st.markdown("---")
+            st.markdown("#### 👤 Meu desempenho no log atual")
+
+            meu_reg = next(
+                (r for r in ranking_play if r["Jogador"] == gamertag_vinculada),
+                None,
             )
-
-            @st.fragment(run_every=60)
-            def _killfeed_pve(ftp_cfg, filtro_pve):
-                with st.spinner("Carregando eventos PvE..."):
-                    log_text, err = ftp_download_latest_adm(ftp_cfg)
-
-                if err or not log_text:
-                    st.warning("Não foi possível carregar o log do servidor.")
-                    st.caption(f"Detalhes: {err or 'log vazio'}")
-                    return
-
-                eventos = parse_adm_killfeed_pve(log_text)
-
-                if filtro_pve == "💀 Apenas Mortes":
-                    eventos = [e for e in eventos if e["tipo"] == "morte_pve"]
-                elif filtro_pve == "🧟 Apenas Hits":
-                    eventos = [e for e in eventos if e["tipo"] == "hit_pve"]
-
-                if not eventos:
-                    st.info("Nenhum evento PvE encontrado com esse filtro.")
-                    return
-
-                st.caption(f"Total de eventos: {len(eventos)} — atualizado a cada 60s")
-                st.divider()
-
-                for ev in eventos:
-                    cor_borda = "#ff4444" if ev["tipo"] == "morte_pve" else "#ff8800"
-                    col_i, col_d = st.columns([1, 8])
-                    with col_i:
-                        st.markdown(
-                            f"<div style='font-size:28px; text-align:center;'>{ev['icone']}</div>",
-                            unsafe_allow_html=True,
-                        )
-                    with col_d:
-                        st.markdown(
-                            f"""
-                            <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
-                                        border-left:3px solid {cor_borda}; margin-bottom:6px;">
-                                <span style="font-size:13px; color:#ffaa44; font-weight:bold;">
-                                    {ev['hora']} — {ev['jogador']}
-                                </span><br>
-                                <span style="font-size:12px; color:#ccc;">
-                                    {ev['descricao']}
-                                </span>
-                                {f"<br><span style='font-size:11px; color:#888;'>📍 {ev['posicao']}</span>" if ev.get('posicao') else ""}
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-            _killfeed_pve(ftp_cfg, filtro_pve)
-
-    # --- ABA CONEXÃO ---
-    with tab_conexao:
-        st.markdown("### 🔌 Conexões & Desconexões")
-
-        ftp_cfg = get_client_ftp_config(client_data)
-        if not ftp_cfg:
-            st.warning("FTP não configurado. Peça ao admin para configurar no painel.")
-        else:
-            filtro_con = st.radio(
-                "Filtrar por tipo:",
-                ["Todos", "🟢 Conectou", "🔴 Desconectou"],
-                horizontal=True,
-                key="filtro_con",
-            )
-
-            @st.fragment(run_every=60)
-            def _conexoes(ftp_cfg, filtro_con):
-                with st.spinner("Carregando eventos de conexão..."):
-                    log_text, err = ftp_download_latest_adm(ftp_cfg)
-
-                if err or not log_text:
-                    st.warning("Não foi possível carregar o log do servidor.")
-                    st.caption(f"Detalhes: {err or 'log vazio'}")
-                    return
-
-                eventos = parse_adm_conexoes(log_text)
-
-                if filtro_con == "🟢 Conectou":
-                    eventos = [e for e in eventos if e["tipo"] == "connected"]
-                elif filtro_con == "🔴 Desconectou":
-                    eventos = [e for e in eventos if e["tipo"] == "disconnected"]
-
-                if not eventos:
-                    st.info("Nenhum evento de conexão encontrado.")
-                    return
-
-                st.caption(f"Total de eventos: {len(eventos)} — atualizado a cada 60s")
-                st.divider()
-
-                for ev in eventos:
-                    cor_borda = (
-                        "#00ff88" if ev["tipo"] == "connected"
-                        else "#ff4444" if ev["tipo"] == "disconnected"
-                        else "#888888"
-                    )
-                    col_i, col_d = st.columns([1, 8])
-                    with col_i:
-                        st.markdown(
-                            f"<div style='font-size:24px; text-align:center;'>{ev['icone']}</div>",
-                            unsafe_allow_html=True,
-                        )
-                    with col_d:
-                        st.markdown(
-                            f"""
-                            <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
-                                        border-left:3px solid {cor_borda}; margin-bottom:6px;">
-                                <span style="font-size:13px; color:#00d4ff; font-weight:bold;">
-                                    {ev['hora']} — {ev['jogador']}
-                                </span><br>
-                                <span style="font-size:12px; color:#ccc;">
-                                    {ev['descricao']}
-                                </span>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-            _conexoes(ftp_cfg, filtro_con)
-
-    # --- ABA LOJA VIRTUAL ---
-    with tab_loja:
-        st.markdown("### 🛒 Loja Virtual")
-
-        # 1. Carrega o banco completo
-        clients_db_loja = load_db(DB_CLIENTS, {})
-        
-        # 2. Localiza o cliente pelo server_id que você já tem no portal
-        # O server_id aqui já deve estar vindo do login/seleção de servidor
-        client_data_loja = clients_db_loja.get(server_id, {})
-        
-        # 3. SEGURANÇA: Verifica se a chave 'loja' existe
-        loja = client_data_loja.get("loja", {})
-        
-        itens = [i for i in loja.get("itens", []) if i.get("ativo", True)]
-
-        if not itens:
-            st.info("A loja ainda não possui itens cadastrados ou ativos.")
-        else:
-            # ... (seu código de exibição da loja continua aqui)
-            hora_br = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
-
-            # Saldos do jogador
-            wallets_loja = client_data_loja.get("wallets", {})
-            bank_loja    = client_data_loja.get("bank", {})
-            saldo_w = wallets_loja.get(gamertag_vinculada, {}).get("balance", 0)
-            saldo_b = bank_loja.get(gamertag_vinculada, {}).get("balance", 0)
-
-            col_sw, col_sb, col_st = st.columns(3)
-            col_sw.metric("💰 Carteira", f"{saldo_w} DzCoins")
-            col_sb.metric("🏦 Banco",    f"{saldo_b} DzCoins")
-            col_st.metric("💎 Total",    f"{saldo_w + saldo_b} DzCoins")
-
-            st.divider()
-
-            # Filtro por categoria
-            categorias = sorted(set(i.get("categoria", "Geral") for i in itens))
-            categorias_opcoes = ["Todas"] + categorias
-            cat_sel = st.selectbox(
-                "Filtrar por categoria",
-                categorias_opcoes,
-                key="loja_cat_sel",
-            )
-
-            itens_filtrados = (
-                itens if cat_sel == "Todas"
-                else [i for i in itens if i.get("categoria") == cat_sel]
-            )
-
-            st.markdown(f"**{len(itens_filtrados)} item(ns) disponível(is)**")
-            st.divider()
-
-            # Grid de itens
-            for item in itens_filtrados:
-                with st.expander(
-                    f"🎒 {item['nome']} — {item['preco']} DzCoins "
-                    f"| Qtd: {item.get('quantidade', 1)} "
-                    f"| {item.get('categoria', '')}",
-                    expanded=False,
-                ):
-                    col_info, col_compra = st.columns([2, 3])
-
-                    with col_info:
-                        st.markdown(
-                            f"""
-                            <div style="background:#1a1a2e; border-radius:8px;
-                                        padding:12px; border:1px solid #333;">
-                                <div style="font-size:18px; font-weight:bold;
-                                            color:#00d4ff; margin-bottom:8px;">
-                                    {item['nome']}
-                                </div>
-                                <div style="font-size:13px; color:#aaa;">
-                                    🏷️ Classe: <b style="color:#fff;">{item.get('classe','')}</b><br>
-                                    📦 Quantidade: <b style="color:#fff;">{item.get('quantidade', 1)}</b><br>
-                                    🗂️ Categoria: <b style="color:#fff;">{item.get('categoria','')}</b><br>
-                                    💰 Preço: <b style="color:#FFD700;">{item['preco']} DzCoins</b>
-                                </div>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-                        # Indica se tem saldo suficiente
-                        tem_saldo_w = saldo_w >= item["preco"]
-                        tem_saldo_b = saldo_b >= item["preco"]
-                        if not tem_saldo_w and not tem_saldo_b:
-                            st.error(
-                                f"❌ Saldo insuficiente. Você precisa de {item['preco']} DzCoins."
-                            )
-                        elif tem_saldo_w and not tem_saldo_b:
-                            st.info("💰 Saldo disponível apenas na Carteira.")
-                        elif not tem_saldo_w and tem_saldo_b:
-                            st.info("🏦 Saldo disponível apenas no Banco.")
-                        else:
-                            st.success("✅ Saldo suficiente na Carteira e no Banco.")
-
-                    with col_compra:
-                        st.markdown("#### 🛍️ Finalizar Compra")
-
-                        origem_pag = st.radio(
-                            "Debitar de:",
-                            ["💰 Carteira", "🏦 Banco"],
-                            horizontal=True,
-                            key=f"origem_{item['id']}",
-                        )
-
-                        coordenadas = st.text_input(
-                            "📍 Coordenadas de entrega",
-                            placeholder="Ex: 8867.2 x 2267.4 x 8.0",
-                            help=(
-                                "Informe sua posição atual no mapa. "
-                                "No DayZ pressione ~ para ver as coordenadas. "
-                                "O item será entregue neste local no próximo reset."
-                            ),
-                            key=f"coord_{item['id']}",
-                        )
-
-                        st.markdown(
-                            """
-                            <div style="background:#1a1a2e; border-radius:6px;
-                                        padding:8px 12px; border:1px solid #444;
-                                        font-size:12px; color:#aaa; margin-bottom:10px;">
-                                ⏰ O item será incluído no servidor no
-                                <b style="color:#00d4ff;">próximo reset</b>
-                                após a confirmação da compra.
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-                        confirmar = st.button(
-                            f"✅ Confirmar Compra — {item['preco']} DzCoins",
-                            key=f"comprar_{item['id']}",
-                            use_container_width=True,
-                            type="primary",
-                        )
-
-                        if confirmar:
-                            if not coordenadas.strip():
-                                st.error("Informe as coordenadas de entrega antes de confirmar.")
-                            else:
-                                ok, msg = registrar_compra(
-                                    clients_db_loja,
-                                    server_id,
-                                    gamertag_vinculada,
-                                    item,
-                                    origem_pag,
-                                    coordenadas,
-                                    hora_br,
-                                )
-                                if ok:
-                                    save_db(DB_CLIENTS, clients_db_loja)
-                                    st.success(
-                                        f"✅ Compra confirmada! **{item['nome']}** x{item.get('quantidade',1)} "
-                                        f"será entregue em **{coordenadas.strip()}** no próximo reset."
-                                    )
-                                    st.balloons()
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
-
-            # --- Histórico de Compras do Jogador ---
-            st.divider()
-            st.markdown("### 📜 Minhas Compras")
-
-            pedidos = client_data_loja.get("pedidos", [])
-            meus_pedidos = [p for p in pedidos if p.get("gamertag") == gamertag_vinculada]
-
-            if not meus_pedidos:
-                st.info("Você ainda não realizou nenhuma compra.")
+            if not meu_reg:
+                st.info("Ainda não há dados seus neste log (nenhuma sessão registrada).")
             else:
-                for pedido in meus_pedidos[:20]:
-                    status = pedido.get("status", "Aguardando Reset")
-                    cor_status = (
-                        "#00ff88" if status == "Entregue"
-                        else "#FFD700" if status == "Aguardando Reset"
-                        else "#aaa"
-                    )
-                    st.markdown(
-                        f"""
-                        <div style="background:#1a1a2e; border-radius:8px;
-                                    padding:10px 14px; border-left:3px solid {cor_status};
-                                    margin-bottom:6px;">
-                            <span style="font-size:13px; color:#00d4ff; font-weight:bold;">
-                                {pedido.get('data_compra','--')} — {pedido.get('item_nome','?')}
-                                x{pedido.get('quantidade',1)}
-                            </span><br>
-                            <span style="font-size:12px; color:#aaa;">
-                                💰 {pedido.get('preco',0)} DzCoins ({pedido.get('origem_pagamento','?')})
-                                &nbsp;|&nbsp; 📍 {pedido.get('coordenadas','?')}
-                                &nbsp;|&nbsp;
-                                <span style="color:{cor_status};">● {status}</span>
-                            </span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                col_m1, col_m2, col_m3 = st.columns(3)
+                col_m1.metric("⏱️ Tempo de jogo", meu_reg["Tempo de jogo"])
+                col_m2.metric("🔁 Sessões", meu_reg["Sessões"])
+                col_m3.metric("🧟 Hits PvE", meu_reg["Hits PvE"])
+
+        # chama o fragmento passando os argumentos
+        _ranking_fragment(ftp_cfg, gamertag_vinculada)
+
+    # --- ABA MAGNATAS DZCOINS ---
+    with tab_magnatas:
+        st.markdown("### 💎 Ranking — Magnatas de DzCoins")
+        
+        st.info(
+            "Aqui você pode ver o ranking dos 10 maiores magnatas de DzCoins do servidor. "
+            "O total é a soma de carteira + banco. 👤 Marca sua posição."
+        )
+        
+        clients_db_fresh = load_db(DB_CLIENTS, {})
+        client_data_fresh = clients_db_fresh.get(server_id, {})
+        
+        @st.fragment(run_every=60)
+        def _leaderboard_fragment():
+            render_leaderboard_dzcoins(client_data_fresh, gamertag_vinculada)
+        
+        _leaderboard_fragment()
+
 
 if __name__ == "__main__":
     main()
