@@ -281,6 +281,329 @@ def parse_adm_sessions_and_pve(log_text: str) -> dict:
     if not log_date:
         log_date = datetime.now(FUSO_BR).date()
 
+# =========================================================
+# 4.2 PARSERS KILLFEED PvE, PvP E CONEXÃO
+# =========================================================
+
+def parse_adm_killfeed_pve(log_text: str) -> list:
+    """
+    Extrai eventos de morte PvE do log .ADM.
+    Retorna lista de dicts com os eventos ordenados do mais recente.
+    Captura:
+    - Hits por Infected (dano real > 0)
+    - Mortes por suicídio / EmoteSuicide
+    - Mortes com died. Stats
+    """
+    eventos = []
+
+    # Data do log
+    log_date = None
+    for line in log_text.splitlines():
+        if "AdminLog started on " in line:
+            try:
+                parte = line.split("AdminLog started on ")[1]
+                data_str = parte.split(" at ")[0].strip()
+                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
+            except Exception:
+                pass
+            break
+    if not log_date:
+        log_date = datetime.now(FUSO_BR).date()
+
+    # Regex
+    re_hit_infected = re.compile(
+        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" '
+        r'\([^)]*\)\[HP: ([\d.]+)\] hit by Infected into (\w+)\(\d+\) '
+        r'for ([\d.]+) damage \((\w+)\)'
+    )
+    re_suicide_emote = re.compile(
+        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" '
+        r'\([^)]*\) performed EmoteSuicide with (.+)$'
+    )
+    re_died = re.compile(
+        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \(DEAD\) '
+        r'\([^)]*pos=<([\d., -]+)>\) died\. Stats> Water: ([\d.]+) Energy: ([\d.]+)'
+    )
+    re_committed_suicide = re.compile(
+        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \(DEAD\) '
+        r'\([^)]*\) committed suicide'
+    )
+
+    # Rastreia última arma de suicídio por jogador
+    ultima_arma_suicidio = {}
+    # Rastreia última posição conhecida por jogador
+    ultima_pos = {}
+
+    # Extrai posição de linhas genéricas
+    re_pos = re.compile(r'pos=<([\d., -]+)>')
+
+    for line in log_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        # Atualiza última posição conhecida
+        m_pos = re_pos.search(line)
+        m_nome = re.search(r'Player "([^"]+)"', line)
+        if m_pos and m_nome:
+            ultima_pos[m_nome.group(1)] = m_pos.group(1)
+
+        def parse_dt(tstr):
+            try:
+                dt = datetime.strptime(f"{log_date} {tstr}", "%Y-%m-%d %H:%M:%S")
+                return dt.replace(tzinfo=FUSO_BR)
+            except Exception:
+                return None
+
+        # Hit por Infected (só dano real > 0)
+        m = re_hit_infected.match(line)
+        if m:
+            hora, nome, hp, parte_corpo, dano, tipo = (
+                m.group(1), m.group(2), float(m.group(3)),
+                m.group(4), float(m.group(5)), m.group(6)
+            )
+            if dano > 0:
+                eventos.append({
+                    "tipo": "hit_pve",
+                    "hora": hora,
+                    "dt": parse_dt(hora),
+                    "jogador": nome,
+                    "hp_restante": hp,
+                    "parte_corpo": parte_corpo,
+                    "dano": dano,
+                    "tipo_ataque": tipo,
+                    "posicao": ultima_pos.get(nome, ""),
+                    "icone": "🧟",
+                    "descricao": f"Atacado por Zumbi — {dano:.1f} dano em {parte_corpo} (HP: {hp:.1f})",
+                })
+            continue
+
+        # EmoteSuicide — rastreia arma
+        m = re_suicide_emote.match(line)
+        if m:
+            hora, nome, arma = m.group(1), m.group(2), m.group(3)
+            ultima_arma_suicidio[nome] = arma.strip()
+            continue
+
+        # Died (morte real)
+        m = re_died.match(line)
+        if m:
+            hora, nome, pos, water, energy = (
+                m.group(1), m.group(2), m.group(3),
+                float(m.group(4)), float(m.group(5))
+            )
+            arma = ultima_arma_suicidio.get(nome, "Desconhecida")
+            eventos.append({
+                "tipo": "morte_pve",
+                "hora": hora,
+                "dt": parse_dt(hora),
+                "jogador": nome,
+                "posicao": pos,
+                "water": water,
+                "energy": energy,
+                "arma": arma,
+                "icone": "💀",
+                "descricao": f"Morreu — Água: {water:.0f} | Energia: {energy:.0f} | Arma: {arma}",
+            })
+            ultima_arma_suicidio.pop(nome, None)
+            continue
+
+    # Ordena do mais recente para o mais antigo
+    eventos.sort(key=lambda x: x.get("dt") or datetime.min.replace(tzinfo=FUSO_BR), reverse=True)
+    return eventos
+
+
+def parse_adm_conexoes(log_text: str) -> list:
+    """
+    Extrai eventos de conexão e desconexão do log .ADM.
+    Retorna lista de dicts ordenada do mais recente.
+    """
+    eventos = []
+
+    log_date = None
+    for line in log_text.splitlines():
+        if "AdminLog started on " in line:
+            try:
+                parte = line.split("AdminLog started on ")[1]
+                data_str = parte.split(" at ")[0].strip()
+                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
+            except Exception:
+                pass
+            break
+    if not log_date:
+        log_date = datetime.now(FUSO_BR).date()
+
+    re_connecting   = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*\) is connecting')
+    re_connected    = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*pos=<([^>]+)>\) is connected')
+    re_disconnected = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*pos=<([^>]+)>\) has been disconnected')
+
+    # Rastreia horário de conexão para calcular duração
+    hora_connect = {}
+
+    def parse_dt(tstr):
+        try:
+            dt = datetime.strptime(f"{log_date} {tstr}", "%Y-%m-%d %H:%M:%S")
+            return dt.replace(tzinfo=FUSO_BR)
+        except Exception:
+            return None
+
+    for line in log_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        m = re_connecting.match(line)
+        if m:
+            hora, nome = m.group(1), m.group(2)
+            eventos.append({
+                "tipo": "connecting",
+                "hora": hora,
+                "dt": parse_dt(hora),
+                "jogador": nome,
+                "posicao": "",
+                "duracao": "",
+                "icone": "🔄",
+                "descricao": "Conectando...",
+            })
+            continue
+
+        m = re_connected.match(line)
+        if m:
+            hora, nome, pos = m.group(1), m.group(2), m.group(3)
+            hora_connect[nome] = parse_dt(hora)
+            eventos.append({
+                "tipo": "connected",
+                "hora": hora,
+                "dt": parse_dt(hora),
+                "jogador": nome,
+                "posicao": pos,
+                "duracao": "",
+                "icone": "🟢",
+                "descricao": f"Conectou em {pos}",
+            })
+            continue
+
+        m = re_disconnected.match(line)
+        if m:
+            hora, nome, pos = m.group(1), m.group(2), m.group(3)
+            dt_disc = parse_dt(hora)
+            duracao = ""
+            if nome in hora_connect and dt_disc and hora_connect[nome]:
+                delta = int((dt_disc - hora_connect[nome]).total_seconds())
+                duracao = format_seconds_hhmmss(delta)
+                hora_connect.pop(nome, None)
+            eventos.append({
+                "tipo": "disconnected",
+                "hora": hora,
+                "dt": dt_disc,
+                "jogador": nome,
+                "posicao": pos,
+                "duracao": duracao,
+                "icone": "🔴",
+                "descricao": f"Desconectou de {pos}" + (f" — Sessão: {duracao}" if duracao else ""),
+            })
+            continue
+
+    eventos.sort(key=lambda x: x.get("dt") or datetime.min.replace(tzinfo=FUSO_BR), reverse=True)
+    return eventos
+
+
+def parse_adm_killfeed_pvp(log_text: str) -> list:
+    """
+    Extrai eventos de kill PvP do log .ADM.
+    Formato esperado:
+    HH:MM:SS | Player "Assassino" (...) killed Player "Vitima" (...)
+    ou
+    HH:MM:SS | Player "Vitima" (...)[HP: 0] hit by Player "Assassino" ... for X damage (Arma)
+    """
+    eventos = []
+
+    log_date = None
+    for line in log_text.splitlines():
+        if "AdminLog started on " in line:
+            try:
+                parte = line.split("AdminLog started on ")[1]
+                data_str = parte.split(" at ")[0].strip()
+                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
+            except Exception:
+                pass
+            break
+    if not log_date:
+        log_date = datetime.now(FUSO_BR).date()
+
+    def parse_dt(tstr):
+        try:
+            dt = datetime.strptime(f"{log_date} {tstr}", "%Y-%m-%d %H:%M:%S")
+            return dt.replace(tzinfo=FUSO_BR)
+        except Exception:
+            return None
+
+    # Padrão 1: killed
+    re_killed = re.compile(
+        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*\) killed Player "([^"]+)"'
+    )
+    # Padrão 2: hit by Player com HP 0
+    re_hit_pvp = re.compile(
+        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*\)\[HP: 0\] '
+        r'hit by Player "([^"]+)" .* for ([\d.]+) damage \(([^)]+)\)'
+    )
+    # Padrão 3: died após hit PvP
+    re_died_pvp = re.compile(
+        r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \(DEAD\) '
+        r'\([^)]*pos=<([^>]+)>\) died'
+    )
+
+    ultima_arma_pvp = {}
+
+    for line in log_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        m = re_killed.match(line)
+        if m:
+            hora, assassino, vitima = m.group(1), m.group(2), m.group(3)
+            arma = ultima_arma_pvp.pop(vitima, "Desconhecida")
+            eventos.append({
+                "tipo": "pvp_kill",
+                "hora": hora,
+                "dt": parse_dt(hora),
+                "assassino": assassino,
+                "vitima": vitima,
+                "arma": arma,
+                "dano": "",
+                "parte_corpo": "",
+                "posicao": "",
+                "icone": "💀",
+                "descricao": f"{assassino} eliminou {vitima}",
+            })
+            continue
+
+        m = re_hit_pvp.match(line)
+        if m:
+            hora, vitima, assassino, dano, arma = (
+                m.group(1), m.group(2), m.group(3),
+                m.group(4), m.group(5)
+            )
+            ultima_arma_pvp[vitima] = arma
+            eventos.append({
+                "tipo": "pvp_kill",
+                "hora": hora,
+                "dt": parse_dt(hora),
+                "assassino": assassino,
+                "vitima": vitima,
+                "arma": arma,
+                "dano": dano,
+                "parte_corpo": "",
+                "posicao": "",
+                "icone": "💀",
+                "descricao": f"{assassino} eliminou {vitima} com {arma} ({dano} dano)",
+            })
+            continue
+
+    eventos.sort(key=lambda x: x.get("dt") or datetime.min.replace(tzinfo=FUSO_BR), reverse=True)
+    return eventos
+
     # ---- funções auxiliares (dentro do escopo correto) ----
 
     def ensure_player(name: str) -> dict:
@@ -997,10 +1320,13 @@ def main():
     # ----------------------------------------------------------
     # 8.8 ABAS PRINCIPAIS (todas dentro de main())
     # ----------------------------------------------------------
-    tab_inicio, tab_banco, tab_ranking = st.tabs([
+    tab_inicio, tab_banco, tab_ranking, tab_pvp, tab_pve, tab_conexao = st.tabs([
         "🏠 Início",
         "🏦 Banco DzCoins",
         "🏆 Ranking",
+        "⚔️ Killfeed PvP",
+        "🧟 Killfeed PvE",
+        "🔌 Conexão",
     ])
 
     # --- ABA INÍCIO ---
@@ -1039,6 +1365,195 @@ def main():
         st.markdown("### 🏆 Ranking — Tempo de Jogo & PvE")
         render_ranking(client_data, gamertag_vinculada)
 
+    # --- ABA KILLFEED PVP ---
+    with tab_pvp:
+        st.markdown("### ⚔️ Killfeed PvP")
+
+        ftp_cfg = get_client_ftp_config(client_data)
+        if not ftp_cfg:
+            st.warning("FTP não configurado. Peça ao admin para configurar no painel.")
+        else:
+            @st.fragment(run_every=60)
+            def _killfeed_pvp(ftp_cfg):
+                with st.spinner("Carregando eventos PvP..."):
+                    log_text, err = ftp_download_latest_adm(ftp_cfg)
+
+                if err or not log_text:
+                    st.warning("Não foi possível carregar o log do servidor.")
+                    st.caption(f"Detalhes: {err or 'log vazio'}")
+                    return
+
+                eventos = parse_adm_killfeed_pvp(log_text)
+
+                if not eventos:
+                    st.info("Nenhum evento PvP registrado no log atual.")
+                    st.caption("Os eventos aparecerão aqui assim que ocorrerem no servidor.")
+                    return
+
+                st.caption(f"Total de eventos PvP: {len(eventos)} — atualizado a cada 60s")
+                st.divider()
+
+                for ev in eventos:
+                    col_i, col_d = st.columns([1, 8])
+                    with col_i:
+                        st.markdown(
+                            f"<div style='font-size:28px; text-align:center;'>{ev['icone']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    with col_d:
+                        st.markdown(
+                            f"""
+                            <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
+                                        border-left:3px solid #ff4444; margin-bottom:6px;">
+                                <span style="font-size:13px; color:#ff6666; font-weight:bold;">
+                                    {ev['hora']} — {ev['descricao']}
+                                </span><br>
+                                <span style="font-size:11px; color:#888;">
+                                    🗡️ {ev.get('assassino','?')} → 💀 {ev.get('vitima','?')}
+                                    {f" | 🔫 {ev['arma']}" if ev.get('arma') and ev['arma'] != 'Desconhecida' else ""}
+                                    {f" | 📍 {ev['posicao']}" if ev.get('posicao') else ""}
+                                </span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+            _killfeed_pvp(ftp_cfg)
+
+    # --- ABA KILLFEED PVE ---
+    with tab_pve:
+        st.markdown("### 🧟 Killfeed PvE")
+
+        ftp_cfg = get_client_ftp_config(client_data)
+        if not ftp_cfg:
+            st.warning("FTP não configurado. Peça ao admin para configurar no painel.")
+        else:
+            filtro_pve = st.radio(
+                "Filtrar por tipo:",
+                ["Todos", "💀 Apenas Mortes", "🧟 Apenas Hits"],
+                horizontal=True,
+                key="filtro_pve",
+            )
+
+            @st.fragment(run_every=60)
+            def _killfeed_pve(ftp_cfg, filtro_pve):
+                with st.spinner("Carregando eventos PvE..."):
+                    log_text, err = ftp_download_latest_adm(ftp_cfg)
+
+                if err or not log_text:
+                    st.warning("Não foi possível carregar o log do servidor.")
+                    st.caption(f"Detalhes: {err or 'log vazio'}")
+                    return
+
+                eventos = parse_adm_killfeed_pve(log_text)
+
+                if filtro_pve == "💀 Apenas Mortes":
+                    eventos = [e for e in eventos if e["tipo"] == "morte_pve"]
+                elif filtro_pve == "🧟 Apenas Hits":
+                    eventos = [e for e in eventos if e["tipo"] == "hit_pve"]
+
+                if not eventos:
+                    st.info("Nenhum evento PvE encontrado com esse filtro.")
+                    return
+
+                st.caption(f"Total de eventos: {len(eventos)} — atualizado a cada 60s")
+                st.divider()
+
+                for ev in eventos:
+                    cor_borda = "#ff4444" if ev["tipo"] == "morte_pve" else "#ff8800"
+                    col_i, col_d = st.columns([1, 8])
+                    with col_i:
+                        st.markdown(
+                            f"<div style='font-size:28px; text-align:center;'>{ev['icone']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    with col_d:
+                        st.markdown(
+                            f"""
+                            <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
+                                        border-left:3px solid {cor_borda}; margin-bottom:6px;">
+                                <span style="font-size:13px; color:#ffaa44; font-weight:bold;">
+                                    {ev['hora']} — {ev['jogador']}
+                                </span><br>
+                                <span style="font-size:12px; color:#ccc;">
+                                    {ev['descricao']}
+                                </span>
+                                {f"<br><span style='font-size:11px; color:#888;'>📍 {ev['posicao']}</span>" if ev.get('posicao') else ""}
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+            _killfeed_pve(ftp_cfg, filtro_pve)
+
+    # --- ABA CONEXÃO ---
+    with tab_conexao:
+        st.markdown("### 🔌 Conexões & Desconexões")
+
+        ftp_cfg = get_client_ftp_config(client_data)
+        if not ftp_cfg:
+            st.warning("FTP não configurado. Peça ao admin para configurar no painel.")
+        else:
+            filtro_con = st.radio(
+                "Filtrar por tipo:",
+                ["Todos", "🟢 Conectou", "🔴 Desconectou"],
+                horizontal=True,
+                key="filtro_con",
+            )
+
+            @st.fragment(run_every=60)
+            def _conexoes(ftp_cfg, filtro_con):
+                with st.spinner("Carregando eventos de conexão..."):
+                    log_text, err = ftp_download_latest_adm(ftp_cfg)
+
+                if err or not log_text:
+                    st.warning("Não foi possível carregar o log do servidor.")
+                    st.caption(f"Detalhes: {err or 'log vazio'}")
+                    return
+
+                eventos = parse_adm_conexoes(log_text)
+
+                if filtro_con == "🟢 Conectou":
+                    eventos = [e for e in eventos if e["tipo"] == "connected"]
+                elif filtro_con == "🔴 Desconectou":
+                    eventos = [e for e in eventos if e["tipo"] == "disconnected"]
+
+                if not eventos:
+                    st.info("Nenhum evento de conexão encontrado.")
+                    return
+
+                st.caption(f"Total de eventos: {len(eventos)} — atualizado a cada 60s")
+                st.divider()
+
+                for ev in eventos:
+                    cor_borda = (
+                        "#00ff88" if ev["tipo"] == "connected"
+                        else "#ff4444" if ev["tipo"] == "disconnected"
+                        else "#888888"
+                    )
+                    col_i, col_d = st.columns([1, 8])
+                    with col_i:
+                        st.markdown(
+                            f"<div style='font-size:24px; text-align:center;'>{ev['icone']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    with col_d:
+                        st.markdown(
+                            f"""
+                            <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
+                                        border-left:3px solid {cor_borda}; margin-bottom:6px;">
+                                <span style="font-size:13px; color:#00d4ff; font-weight:bold;">
+                                    {ev['hora']} — {ev['jogador']}
+                                </span><br>
+                                <span style="font-size:12px; color:#ccc;">
+                                    {ev['descricao']}
+                                </span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+            _conexoes(ftp_cfg, filtro_con)
 
 if __name__ == "__main__":
     main()
