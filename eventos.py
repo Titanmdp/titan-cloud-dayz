@@ -891,18 +891,18 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         st.success(f"Estendido para {nova_data}!")
                         st.rerun()
 
-                # --- BOTÃO DE SALVAR LOJA INTEGRADO ---
                 st.divider()
                 st.markdown("#### 🛒 Ações Administrativas")
+                
                 if st.button("💾 Salvar/Sincronizar Loja", key=f"save_loja_{k}", use_container_width=True):
                     db_completo = load_db(DB_CLIENTS, {})
                     if k not in db_completo:
                         db_completo[k] = {}
                     
-                    # Recupera o estado atual da loja (se houver edição pendente)
-                    # Certifique-se de que o edited_df_loja esteja acessível aqui
-                    # ou use st.session_state[f"df_loja_{k}"]
-                    itens_atualizados = df_to_loja_itens(st.session_state.get(f"df_loja_{k}", pd.DataFrame()))
+                    # Busca o DataFrame editado que foi salvo com a chave única do cliente
+                    df_loja_key = f"df_loja_{k}"
+                    df_editado = st.session_state.get(df_loja_key, pd.DataFrame())
+                    itens_atualizados = df_to_loja_itens(df_editado)
                     
                     db_completo[k]["loja"] = {
                         "mapa_padrao": "Chernarus",
@@ -2311,48 +2311,44 @@ with tab6:
             st.success("Alterações aplicadas na sessão da Loja.")
 
     with col_loja2:
-        # A chave do botão precisa ser única usando 'k' para evitar conflitos no Streamlit
-        if st.button("Salvar Loja no Titan Cloud", key=f"btn_salvar_{k}", use_container_width=True):
-            
-            # Usamos 'k' diretamente do loop, que representa o server_id 
-            # cadastrado no seu banco users_db.json
-            server_id = k 
+        if st.button("Salvar Loja no Titan Cloud", key=f"btn_salvar_{user_id}", use_container_width=True):
 
-            # 0. DEBUG: Verifique se o server_id está correto
-            st.write(f"DEBUG: Tentando salvar loja no ID: {server_id}")
-            
+            # Busca o server_id real a partir da user_key logada
+            server_id_loja = st.session_state.db_users.get("keys", {}).get(
+                user_id, {}
+            ).get("server_id", user_id)
+
             # 1. Carrega o banco global atualizado do disco
             db_completo = load_db(DB_CLIENTS, {})
-            
+
             # 2. Garante que o servidor exista no banco
-            if server_id not in db_completo:
-                # Inicializa com a estrutura básica se não existir
-                db_completo[server_id] = {
+            if server_id_loja not in db_completo:
+                db_completo[server_id_loja] = {
                     "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
                     "agendas": [],
                     "logs": [],
                     "comunicados": [],
-                    "players": {}
+                    "players": {},
                 }
-            
+
             # 3. Prepara a estrutura da loja
             itens_atualizados = df_to_loja_itens(edited_df_loja)
             loja_obj = {
                 "mapa_padrao": loja_mapa_padrao,
                 "posicao_padrao": loja_posicao_padrao,
-                "itens": itens_atualizados
+                "itens": itens_atualizados,
             }
-            
-            # 4. SALVA ESPECIFICAMENTE NA CHAVE DO SERVIDOR
-            db_completo[server_id]["loja"] = loja_obj
-            
+
+            # 4. Salva na chave correta do servidor
+            db_completo[server_id_loja]["loja"] = loja_obj
+
             # 5. Persiste no arquivo JSON
             save_db(DB_CLIENTS, db_completo)
-            
-            # 6. Atualiza o session_state para refletir a mudança imediatamente
+
+            # 6. Atualiza o session_state
             st.session_state.db_clients = db_completo
-            
-            st.success(f"Catálogo salvo com sucesso para o Servidor {server_id}!")
+
+            st.success(f"✅ Catálogo salvo com sucesso para o Servidor {server_id_loja}!")
 
     with col_loja3:
         if st.button("⬇️ Baixar Loja (JSON)", use_container_width=True):
