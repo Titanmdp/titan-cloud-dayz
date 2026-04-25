@@ -1,9 +1,17 @@
 import streamlit as st
-st.set_page_config(
-    page_title="Titan Cloud Pro",
-    page_icon="🎮",
-    layout="wide",
+pages = {
+    "Portais": [
+        st.Page("pages/evento.py", title="Portal do Administrador", icon="🛡️"),
+        st.Page("pages/player_portal.py", title="Portal do Player", icon="🎮"),
+    ]
+}
+
+nav = st.navigation(
+    pages,
+    position="sidebar",   # garante que apareça na lateral
+    expanded=True,        # opcional
 )
+nav.run()
 import ftplib
 import os
 import json
@@ -16,6 +24,8 @@ import shutil
 import smtplib
 import xml.etree.ElementTree as ET
 import pandas as pd
+from streamlit import Page
+from streamlit.navigation import navigation
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
