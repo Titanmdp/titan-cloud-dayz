@@ -11,7 +11,6 @@ import shutil
 import smtplib
 import xml.etree.ElementTree as ET
 import pandas as pd
-from pages.player_portal import main as player_portal_main
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
@@ -2352,18 +2351,30 @@ with tab6:
             st.success("Alterações aplicadas na sessão da Loja.")
 
     with col_loja2:
-        if st.button("Salvar Loja no Titan Cloud", use_container_width=True):
-            # Converte DF para lista de itens e salva em client_data + disco
-            itens_atualizados = df_to_loja_itens(edited_df_loja)
-            loja["mapa_padrao"] = loja_mapa_padrao
-            loja["posicao_padrao"] = loja_posicao_padrao
-            loja["itens"] = itens_atualizados
+            if st.button("Salvar Loja no Titan Cloud", use_container_width=True):
+                # 1. Carrega o banco mais recente do arquivo para garantir consistência
+                db_atualizado = load_db(DB_CLIENTS, {})
+                
+                # 2. Converte os itens do editor para a estrutura correta
+                itens_atualizados = df_to_loja_itens(edited_df_loja)
+                
+                # 3. Garante que o cliente exista no banco
+                if user_id not in db_atualizado:
+                    db_atualizado[user_id] = {"ftp": {"host": "", "user": "", "pass": "", "port": "21"}, "agendas": [], "logs": [], "comunicados": [], "players": {}}
+                
+                # 4. Atualiza a estrutura da loja dentro do objeto do cliente
+                if "loja" not in db_atualizado[user_id]:
+                    db_atualizado[user_id]["loja"] = {}
+                
+                db_atualizado[user_id]["loja"]["mapa_padrao"] = loja_mapa_padrao
+                db_atualizado[user_id]["loja"]["posicao_padrao"] = loja_posicao_padrao
+                db_atualizado[user_id]["loja"]["itens"] = itens_atualizados
 
-            client_data["loja"] = loja
-            st.session_state.db_clients[user_id] = client_data
-            save_db(DB_CLIENTS, st.session_state.db_clients)
-
-            st.success("Catálogo da Loja salvo com sucesso no Titan Cloud!")
+                # 5. Salva o banco completo no arquivo e sincroniza o session_state
+                save_db(DB_CLIENTS, db_atualizado)
+                st.session_state.db_clients = db_atualizado
+                
+                st.success("Catálogo da Loja salvo com sucesso no Titan Cloud!")
 
     with col_loja3:
         if st.button("⬇️ Baixar Loja (JSON)", use_container_width=True):
