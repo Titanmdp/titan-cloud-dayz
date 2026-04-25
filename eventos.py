@@ -1156,9 +1156,9 @@ else:
 # =========================================================
 # 8. PORTAL DO JOGADOR (só se NÃO for admin)
 # =========================================================
-elif st.session_state.role != "admin":
-    player_portal_main()
 
+if st.session_state.role != "admin":
+    player_portal_main()
 
 # =========================================================
 # 9. ÁREA DO CLIENTE
