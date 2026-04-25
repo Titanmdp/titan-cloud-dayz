@@ -563,18 +563,28 @@ def render_reset_info(client_data: dict):
     - Último reset real, lido de restart.log via FTP.
     - Próximo reset estimado pela regra: a cada 2h, em horas pares.
     """
-    agora = datetime.now(FUSO_BR)
+        agora = datetime.now(FUSO_BR)
 
-    # Regra: resets nas horas pares (00, 02, 04, ..., 22)
-    proxima_hora_par = (agora.hour + 1) if (agora.hour % 2 == 1) else (agora.hour + 2)
-    proxima_hora_par = proxima_hora_par % 24
+    # Regra: resets nas horas pares (00, 02, 04, ..., 22) em horário de Brasília
+    hora_atual = agora.hour
+
+    if hora_atual % 2 == 0:
+        # Estamos em hora par, próximo reset é daqui 2h cravadas
+        proxima_hora_par = (hora_atual + 2) % 24
+    else:
+        # Estamos em hora ímpar, próximo reset é a próxima hora par
+        proxima_hora_par = (hora_atual + 1) % 24
+
     proximo_reset = agora.replace(
         hour=proxima_hora_par, minute=0, second=0, microsecond=0
     )
+
+    # Segurança: se por algum motivo ainda ficar no passado, soma 2h
     if proximo_reset <= agora:
         proximo_reset = proximo_reset + timedelta(hours=2)
 
-    minutos_restantes = int((proximo_reset - agora).total_seconds() // 60)
+    delta = proximo_reset - agora
+    minutos_restantes = max(0, int(delta.total_seconds() // 60))
 
     st.markdown(
         """
