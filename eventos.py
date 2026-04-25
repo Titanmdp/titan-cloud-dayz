@@ -1,4 +1,9 @@
 import streamlit as st
+st.set_page_config(
+    page_title="Titan Cloud Pro",
+    page_icon="🎮",
+    layout="wide",
+)
 import ftplib
 import os
 import json
@@ -2591,3 +2596,14 @@ with tab8:
 if "worker_started" not in st.session_state:
     threading.Thread(target=pro_worker, daemon=True).start()
     st.session_state["worker_started"] = True
+
+nav = navigation(
+    {
+        "Portais": [
+            Page("pages/evento.py", "Portal do Administrador", icon="🛡️"),
+            Page("pages/player_portal.py", "Portal do Player", icon="🎮"),
+        ]
+    }
+)
+
+nav.run()
