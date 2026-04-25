@@ -1736,6 +1736,11 @@ def main():
     st.write(f"DEBUG - Conteúdo clients_db encontrado: {bool(clients_db)}")
     st.write(f"DEBUG - Chaves no banco: {list(clients_db.keys())}")
     # -------------------------
+    
+    # Adicione este debug para inspecionar o servidor 18927875
+    server_id = '18927875' # ou a variável que você usa
+    dados_servidor = clients_db.get(server_id, {})
+    st.write(f"DEBUG - Conteúdo do servidor {server_id}:", dados_servidor.keys())
 
     discord_id = st.session_state.get("portal_discord_id")
     discord_name = st.session_state.get("portal_discord_name", "Jogador")
