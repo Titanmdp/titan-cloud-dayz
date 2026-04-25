@@ -272,16 +272,10 @@ def ftp_download_restart_log(ftp_cfg: dict):
         return None, f"Erro ao baixar {RESTART_LOG_FILENAME}: {e}"
 
 def parse_last_restart_from_restart_log(log_text: str):
-    """
-    Lê restart.log e retorna o último horário de reset como datetime (FUSO_BR) ou None.
-    Usa linhas no formato:
-    2026-04-24 19:08:09 Reiniciando o Servidor BR The Last World
-    """
     if not log_text:
         return None
 
     last_dt = None
-
     for line in log_text.splitlines():
         line = line.strip()
         if not line:
@@ -289,7 +283,6 @@ def parse_last_restart_from_restart_log(log_text: str):
         if "Reiniciando o Servidor" not in line:
             continue
 
-        # Espera algo como: 2026-04-24 19:08:09 Reiniciando...
         try:
             data_str = line.split("Reiniciando")[0].strip()  # "2026-04-24 19:08:09"
             dt = datetime.strptime(data_str, "%Y-%m-%d %H:%M:%S")
@@ -561,27 +554,26 @@ def render_reset_info(client_data: dict):
     """
     Mostra informações de reset do servidor:
     - Último reset real, lido de restart.log via FTP.
-    - Próximo reset estimado pela regra: a cada 2h, em horas pares.
+    - Próximo reset estimado pela regra: a cada 2h, em horas pares (00, 02, 04, ...).
     """
-    agora = datetime.now(FUSO_BR)
+    agora = datetime.now(FUSO_BR)  # mesmo fuso do relógio interno
 
-    # Regra: resets nas horas pares (00, 02, 04, ..., 22) em horário de Brasília
-    hora_atual = agora.hour
+    # Horários de reset em Brasília: 00, 02, 04, ..., 22
+    horarios_reset = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22]
 
-    if hora_atual % 2 == 0:
-        # Estamos em hora par, próximo reset é daqui 2h cravadas
-        proxima_hora_par = (hora_atual + 2) % 24
-    else:
-        # Estamos em hora ímpar, próximo reset é a próxima hora par
-        proxima_hora_par = (hora_atual + 1) % 24
+    # Encontrar o próximo horário de reset no mesmo dia
+    proximo_reset = None
+    for h in horarios_reset:
+        candidato = agora.replace(hour=h, minute=0, second=0, microsecond=0)
+        if candidato > agora:
+            proximo_reset = candidato
+            break
 
-    proximo_reset = agora.replace(
-        hour=proxima_hora_par, minute=0, second=0, microsecond=0
-    )
-
-    # Segurança: se por algum motivo ainda ficar no passado, soma 2h
-    if proximo_reset <= agora:
-        proximo_reset = proximo_reset + timedelta(hours=2)
+    # Se não achou (passou de 22:00), próximo é 00:00 do dia seguinte
+    if proximo_reset is None:
+        proximo_reset = (agora + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
 
     delta = proximo_reset - agora
     minutos_restantes = max(0, int(delta.total_seconds() // 60))
@@ -597,7 +589,7 @@ def render_reset_info(client_data: dict):
         unsafe_allow_html=True,
     )
 
-    # Tenta ler último reset real do restart.log
+        # Tenta ler último reset real do restart.log
     ultimo_reset_texto = "Não foi possível detectar o último reset em restart.log."
     try:
         ftp_cfg = get_client_ftp_config(client_data)
@@ -942,7 +934,9 @@ def main():
             st.markdown(
                 """
                 <div style="text-align:center; padding: 60px 20px;">
-                    <h1 style="color:#00d4ff;">🎮 Titan Cloud Pro</h1>
+                    <h1 style="color:#00d4ff; white-space: nowrap;">
+                        🎮 Titan Cloud Pro
+                    </h1>
                     <h3 style="color:#aaa;">Portal do Jogador</h3>
                     <p style="color:#666; margin-bottom: 40px;">
                         Vincule sua Gamertag, acompanhe rankings,<br>
