@@ -563,7 +563,7 @@ def render_reset_info(client_data: dict):
     - Último reset real, lido de restart.log via FTP.
     - Próximo reset estimado pela regra: a cada 2h, em horas pares.
     """
-        agora = datetime.now(FUSO_BR)
+    agora = datetime.now(FUSO_BR)
 
     # Regra: resets nas horas pares (00, 02, 04, ..., 22) em horário de Brasília
     hora_atual = agora.hour
