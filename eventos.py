@@ -44,6 +44,19 @@ FUSO_BR = timezone(timedelta(hours=-3))
 def get_hora_brasilia():
     return datetime.now(FUSO_BR)
 
+_WORKER_STARTED = False
+
+def str_to_time(data_str, hora_str):
+    try:
+        return datetime.strptime(f"{data_str} {hora_str}", "%d/%m/%Y %H:%M").replace(tzinfo=FUSO_BR)
+    except Exception:
+        return None
+
+def start_worker_once():
+    global _WORKER_STARTED
+    if not _WORKER_STARTED:
+        _WORKER_STARTED = True
+        threading.Thread(target=pro_worker, daemon=True).start()
 
 # --- DEFINIÇÃO DE LIMITES POR PLANO ---
 PLANOS = {
@@ -234,12 +247,15 @@ def pro_worker():
     while True:
         try:
             now = get_hora_brasilia()
-            hoje, agora = now.strftime("%d/%m/%Y"), now.strftime("%H:%M")
+            hoje = now.strftime("%d/%m/%Y")
+            agora = now.strftime("%H:%M")
             db_all = load_db(DB_CLIENTS, {})
             mudou = False
 
             for c_id, c_info in db_all.items():
                 for ag in c_info.get("agendas", []):
+
+                    # UPLOAD — hora exata de entrada
                     if (
                         ag["data"] == hoje
                         and ag["in"] == agora
@@ -251,21 +267,30 @@ def pro_worker():
                         ag["status"] = "Ativo" if success else "Erro"
                         mudou = True
 
+                    # DELETE — compara >= para não perder o minuto
+                    hora_saida = str_to_time(ag["data"], ag["out"])
                     if (
-                        ag["data"] == hoje
-                        and ag["out"] == agora
+                        hora_saida
+                        and now >= hora_saida
                         and ag.get("status") == "Ativo"
                     ):
                         disparar_ftp_pro(
                             c_id, "DELETE", ag["file"], ag["local_path"], ag["path"]
                         )
-                        ag["status"] = "Finalizado"
+                        if ag.get("rec") == "Diário":
+                            ag["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
+                            ag["status"] = "Aguardando"
+                        elif ag.get("rec") == "Semanal":
+                            ag["data"] = (now + timedelta(days=7)).strftime("%d/%m/%Y")
+                            ag["status"] = "Aguardando"
+                        else:
+                            ag["status"] = "Finalizado"
                         mudou = True
 
             if mudou:
                 save_db(DB_CLIENTS, db_all)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[pro_worker] erro: {e}")
 
         time.sleep(30)
 
@@ -1031,7 +1056,4 @@ with tab3:
                     save_db(DB_CLIENTS, st.session_state.db_clients)
                     st.rerun()
 
-# --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
-if "worker_started" not in st.session_state:
-    threading.Thread(target=pro_worker, daemon=True).start()
-    st.session_state["worker_started"] = True
+start_worker_once()
