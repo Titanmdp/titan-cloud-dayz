@@ -11,6 +11,7 @@ import shutil
 import smtplib
 import xml.etree.ElementTree as ET
 import pandas as pd
+from pages.player_portal import main as player_portal_main
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
@@ -36,10 +37,6 @@ else:
     else:
         DB_USERS = os.path.join(BASE_DIR, "users_db.json")
         DB_CLIENTS = os.path.join(BASE_DIR, "clients_data.json")
-
-# DEBUG TEMPORÁRIO PARA VER OS ARQUIVOS USADOS
-st.write("DEBUG DB_USERS path:", DB_USERS)
-st.write("DEBUG DB_CLIENTS path:", DB_CLIENTS)
 
 # --- CONFIGURAÇÃO DA PÁGINA (antes de qualquer sidebar) ---
 st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
@@ -365,11 +362,42 @@ def enviar_globals_via_ftp(client_id, local_path, mapa):
         ftp.connect(conf["host"], int(conf["port"]), timeout=15)
         ftp.login(conf["user"], conf["pass"])
         ftp.cwd(remote_dir)
-
-        filename = "globals.xml"  # nome padrão no servidor
+        filename = "globals.xml"
         with open(local_path, "rb") as f:
             ftp.storbinary(f"STOR {filename}", f)
+        ftp.quit()
+        return True, "Sucesso"
+    except Exception as e:
+        return False, str(e)
 
+
+def enviar_cfggameplay_via_ftp(client_id, local_path, mapa):
+    """
+    Envia o arquivo cfggameplay.json já salvo em local_path
+    para o caminho correto no servidor, de acordo com o mapa.
+    """
+    CFGGAMEPLAY_REMOTE_PATHS = {
+        "Chernarus": "mpmissions/dayzOffline.chernarusplus",
+        "Livonia":   "mpmissions/dayzOffline.enoch",
+    }
+
+    db_atual = load_db(DB_CLIENTS, {})
+    if client_id not in db_atual:
+        return False, "Cliente não encontrado"
+
+    conf = db_atual[client_id]["ftp"]
+    remote_dir = CFGGAMEPLAY_REMOTE_PATHS.get(mapa)
+    if not remote_dir:
+        return False, f"Caminho remoto não configurado para o mapa {mapa}"
+
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(conf["host"], int(conf["port"]), timeout=15)
+        ftp.login(conf["user"], conf["pass"])
+        ftp.cwd(remote_dir)
+        filename = "cfggameplay.json"
+        with open(local_path, "rb") as f:
+            ftp.storbinary(f"STOR {filename}", f)
         ftp.quit()
         return True, "Sucesso"
     except Exception as e:
@@ -615,19 +643,42 @@ if "view_mode" not in st.session_state:
 
 
 # =========================================================
-# 4. TELA DE LOGIN
+# 4. SELETOR DE PORTAL (ANTES DE QUALQUER LOGIN)
 # =========================================================
 
-if not st.session_state.authenticated:
-    st.title("🔑 Titan Cloud - Login")
+with st.sidebar:
+    st.subheader("Titan Cloud Pro")
+    portal = st.radio(
+        "Selecione o portal:",
+        ["Portal do Administrador", "Portal do Jogador"],
+        index=0,              # mude para 1 se quiser abrir direto no Jogador
+        key="portal_principal",
+    )
+
+# =========================================================
+# 5. ROTEAMENTO INICIAL: PORTAL DO JOGADOR NÃO USA KEY
+# =========================================================
+
+if portal == "Portal do Jogador":
+    # Vai direto para o portal do jogador (login Discord), sem KeyUser
+    player_portal_main()
+    st.stop()
+
+
+# =========================================================
+# 6. TELA DE LOGIN (APENAS PARA PORTAL DO ADMIN)
+# =========================================================
+
+if not st.session_state.get("authenticated") or st.session_state.get("role") != "admin":
+    st.title("🔑 Titan Cloud - Login (Admin)")
 
     dados_geo = buscar_localizacao_cliente()
-    login_key = st.text_input("Insira sua KeyUser", type="password")
+    login_key = st.text_input("Insira sua KeyUser de administrador", type="password")
 
     if st.button("Entrar no Painel", use_container_width=True):
         ok, cargo = validar_acesso(login_key)
 
-        if ok:
+        if ok and cargo == "admin":
             token_sessao = secrets.token_hex(8)
 
             if dados_geo:
@@ -635,41 +686,22 @@ if not st.session_state.authenticated:
             else:
                 local_final = "Localização não capturada"
 
-            # Se for cliente, atualiza informações de acesso no users_db
-            if cargo == "client":
-                # Garante que db_users está carregado
-                db_users = st.session_state.db_users
+            # Opcional: registrar log de acesso do admin
+            db_users = st.session_state.db_users
+            db_users["admin_last_session"] = token_sessao
+            db_users["admin_local"] = local_final
+            db_users["admin_last_login"] = get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
+            save_db(DB_USERS, db_users)
 
-                # Recupera dados da key e o server_id associado
-                key_data = db_users.get("keys", {}).get(login_key, {})
-                server_id = key_data.get("server_id")
-
-                if not server_id:
-                    st.error(
-                        "Esta KeyUser não possui um ID de servidor associado (server_id).\n"
-                        "Registre ou atualize o cliente pelo painel de administração."
-                    )
-                    st.stop()
-
-                # Atualiza logs de acesso
-                db_users["keys"][login_key]["last_session"] = token_sessao
-                db_users["keys"][login_key]["local"] = local_final
-                db_users["keys"][login_key]["last_login"] = (
-                    get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
-                )
-                save_db(DB_USERS, db_users)
-
-                # Guarda server_id na sessão (ponte para clients_data.json)
-                st.session_state.server_id = server_id
-
-            # Para admin, pode não haver server_id direto
             st.session_state.authenticated = True
             st.session_state.user_key = login_key
-            st.session_state.role = cargo
+            st.session_state.role = "admin"
             st.session_state.session_token = token_sessao
-            st.session_state.view_mode = "admin" if cargo == "admin" else "client"
+            st.session_state.view_mode = "admin"
 
             st.rerun()
+        elif ok and cargo == "client":
+            st.error("Essa KeyUser é de cliente. Use o Portal do Jogador.")
         else:
             st.error(cargo)
 
@@ -677,7 +709,7 @@ if not st.session_state.authenticated:
 
 
 # =========================================================
-# 5. ÁREA DO ADMINISTRADOR
+# 7. ÁREA DO ADMINISTRADOR
 # =========================================================
 
 if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
@@ -688,6 +720,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             st.rerun()
         if st.button("🔴 Logout (Admin)", use_container_width=True):
             st.session_state.authenticated = False
+            st.session_state.role = None
             st.rerun()
 
     st.title("🛡️ Painel de Controle - Administrador")
@@ -749,7 +782,6 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                         st.error("Preencha o nome do servidor/cliente e a KeyUser.")
                     else:
                         # 1) Definir ID interno do servidor (server_id)
-                        #    Se tiver ID Nitrado, usa ele; senão gera aleatório
                         if nitrado_id.strip():
                             server_id = nitrado_id.strip()
                         else:
@@ -933,223 +965,223 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     save_db(DB_CLIENTS, st.session_state.db_clients)
                     st.rerun()
 
-    # --- TAB 3: CONFIG PLANOS ---
-    with tab_adm3:
-        st.subheader("⚙️ Configuração Global de Limites")
-        if "config_planos" not in st.session_state.db_users:
-            st.session_state.db_users["config_planos"] = PLANOS.copy()
-        conf_planos = st.session_state.db_users["config_planos"]
+        # --- TAB 3: CONFIG PLANOS ---
+        with tab_adm3:
+            st.subheader("⚙️ Configuração Global de Limites")
+            if "config_planos" not in st.session_state.db_users:
+                st.session_state.db_users["config_planos"] = PLANOS.copy()
+            conf_planos = st.session_state.db_users["config_planos"]
 
-        col_p1, col_p2, col_p3 = st.columns(3)
-        with col_p1:
-            novo_starter = st.number_input(
-                "Starter",
-                min_value=1,
-                value=conf_planos.get("Starter", 2),
-                key="conf_starter",
-            )
-        with col_p2:
-            novo_pro = st.number_input(
-                "Pro",
-                min_value=1,
-                value=conf_planos.get("Pro", 10),
-                key="conf_pro",
-            )
-        with col_p3:
-            novo_ent = st.number_input(
-                "Enterprise",
-                min_value=1,
-                value=conf_planos.get("Enterprise", 999),
-                key="conf_ent",
-            )
+            col_p1, col_p2, col_p3 = st.columns(3)
+            with col_p1:
+                novo_starter = st.number_input(
+                    "Starter",
+                    min_value=1,
+                    value=conf_planos.get("Starter", 2),
+                    key="conf_starter",
+                )
+            with col_p2:
+                novo_pro = st.number_input(
+                    "Pro",
+                    min_value=1,
+                    value=conf_planos.get("Pro", 10),
+                    key="conf_pro",
+                )
+            with col_p3:
+                novo_ent = st.number_input(
+                    "Enterprise",
+                    min_value=1,
+                    value=conf_planos.get("Enterprise", 999),
+                    key="conf_ent",
+                )
 
-        if st.button("🚀 Aplicar Limites Globais", use_container_width=True):
-            st.session_state.db_users["config_planos"] = {
-                "Starter": novo_starter,
-                "Pro": novo_pro,
-                "Enterprise": novo_ent,
-            }
-            save_db(DB_USERS, st.session_state.db_users)
-            st.success("Limites globais atualizados!")
-            time.sleep(1)
-            st.rerun()
+            if st.button("🚀 Aplicar Limites Globais", use_container_width=True):
+                st.session_state.db_users["config_planos"] = {
+                    "Starter": novo_starter,
+                    "Pro": novo_pro,
+                    "Enterprise": novo_ent,
+                }
+                save_db(DB_USERS, st.session_state.db_users)
+                st.success("Limites globais atualizados!")
+                time.sleep(1)
+                st.rerun()
 
-    # --- TAB 4: BACKUP / RESTORE ---
-    with tab_adm4:
-        st.subheader("📦 Central de Migração de Dados")
-        st.info("Faça backup antes de atualizar e restaure logo após o deploy.")
-        col_back, col_rest = st.columns(2)
-        with col_back:
-            st.markdown("### ⬇️ Exportar Backup")
-            dados_totais = {
-                "users": st.session_state.db_users,
-                "clients": st.session_state.db_clients,
-            }
-            json_string = json.dumps(dados_totais, indent=4, ensure_ascii=False)
-            st.download_button(
-                label="💾 Baixar Backup Geral (JSON)",
-                data=json_string,
-                file_name=f"backup_titan_{get_hora_brasilia().strftime('%d_%m_%Y')}.json",
-                mime="application/json",
-                use_container_width=True,
-            )
-        with col_rest:
-            st.markdown("### ⬆️ Importar/Restaurar")
-            arquivo_upload = st.file_uploader(
-                "Selecione o arquivo de backup", type="json"
-            )
-            if st.button(
-                "🚀 Restaurar Dados Agora", use_container_width=True, type="primary"
-            ):
-                if arquivo_upload is not None:
-                    try:
-                        backup_data = json.load(arquivo_upload)
-                        if "users" in backup_data and "clients" in backup_data:
-                            st.session_state.db_users = backup_data["users"]
-                            st.session_state.db_clients = backup_data["clients"]
-                            save_db(DB_USERS, st.session_state.db_users)
-                            save_db(DB_CLIENTS, st.session_state.db_clients)
-                            st.success("✅ Restauração concluída!")
-                            time.sleep(2)
-                            st.rerun()
-                        else:
-                            st.error("❌ Arquivo inválido!")
-                    except Exception as e:
-                        st.error(f"❌ Erro: {e}")
+        # --- TAB 4: BACKUP / RESTORE ---
+        with tab_adm4:
+            st.subheader("📦 Central de Migração de Dados")
+            st.info("Faça backup antes de atualizar e restaure logo após o deploy.")
+            col_back, col_rest = st.columns(2)
+            with col_back:
+                st.markdown("### ⬇️ Exportar Backup")
+                dados_totais = {
+                    "users": st.session_state.db_users,
+                    "clients": st.session_state.db_clients,
+                }
+                json_string = json.dumps(dados_totais, indent=4, ensure_ascii=False)
+                st.download_button(
+                    label="💾 Baixar Backup Geral (JSON)",
+                    data=json_string,
+                    file_name=f"backup_titan_{get_hora_brasilia().strftime('%d_%m_%Y')}.json",
+                    mime="application/json",
+                    use_container_width=True,
+                )
+            with col_rest:
+                st.markdown("### ⬆️ Importar/Restaurar")
+                arquivo_upload = st.file_uploader(
+                    "Selecione o arquivo de backup", type="json"
+                )
+                if st.button(
+                    "🚀 Restaurar Dados Agora", use_container_width=True, type="primary"
+                ):
+                    if arquivo_upload is not None:
+                        try:
+                            backup_data = json.load(arquivo_upload)
+                            if "users" in backup_data and "clients" in backup_data:
+                                st.session_state.db_users = backup_data["users"]
+                                st.session_state.db_clients = backup_data["clients"]
+                                save_db(DB_USERS, st.session_state.db_users)
+                                save_db(DB_CLIENTS, st.session_state.db_clients)
+                                st.success("✅ Restauração concluída!")
+                                time.sleep(2)
+                                st.rerun()
+                            else:
+                                st.error("❌ Arquivo inválido!")
+                        except Exception as e:
+                            st.error(f"❌ Erro: {e}")
 
-    # --- TAB 5: COMUNICADOS ---
-    with tab_adm5:
-        st.subheader("📢 Enviar Comunicado Oficial")
-        col_c1, col_c2 = st.columns([1, 2])
+        # --- TAB 5: COMUNICADOS ---
+        with tab_adm5:
+            st.subheader("📢 Enviar Comunicado Oficial")
+            col_c1, col_c2 = st.columns([1, 2])
 
-        with col_c1:
-            opcoes_clientes = {
-                v["server"]: k for k, v in st.session_state.db_users["keys"].items()
-            }
-            alvos = st.multiselect(
-                "Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos"
-            )
+            with col_c1:
+                opcoes_clientes = {
+                    v["server"]: k for k, v in st.session_state.db_users["keys"].items()
+                }
+                alvos = st.multiselect(
+                    "Enviar para:", options=["Todos"] + list(opcoes_clientes.keys()), default="Todos"
+                )
 
-            st.write("**Enviar via:**")
-            send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
-            send_mail = st.checkbox("E-mail")
-            send_wa = st.checkbox("WhatsApp")
-            send_disc = st.checkbox("Discord (Webhook do Cliente)")
+                st.write("**Enviar via:**")
+                send_sys = st.checkbox("Painel (Sistema)", value=True, disabled=True)
+                send_mail = st.checkbox("E-mail")
+                send_wa = st.checkbox("WhatsApp")
+                send_disc = st.checkbox("Discord (Webhook do Cliente)")
 
-        with col_c2:
-            titulo_com = st.text_input(
-                "Título do Comunicado",
-                placeholder="Ex: Manutenção Programada",
-                key="input_tit_com",
-            )
-            corpo_com = st.text_area(
-                "Mensagem",
-                height=200,
-                placeholder="Escreva aqui os detalhes...",
-                key="input_msg_com",
-            )
+            with col_c2:
+                titulo_com = st.text_input(
+                    "Título do Comunicado",
+                    placeholder="Ex: Manutenção Programada",
+                    key="input_tit_com",
+                )
+                corpo_com = st.text_area(
+                    "Mensagem",
+                    height=200,
+                    placeholder="Escreva aqui os detalhes...",
+                    key="input_msg_com",
+                )
 
-            if st.button(
-                "🚀 Disparar Comunicado", use_container_width=True, type="primary"
-            ):
-                if titulo_com and corpo_com:
-                    st.session_state.db_users = load_db(
-                        DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}}
-                    )
-                    st.session_state.db_clients = load_db(DB_CLIENTS, {})
-
-                    if "Todos" in alvos:
-                        destinatarios = list(st.session_state.db_users["keys"].keys())
-                    else:
-                        destinatarios = [
-                            opcoes_clientes[nome] for nome in alvos
-                        ]
-
-                    comunicado_obj = {
-                        "id": str(time.time()),
-                        "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
-                        "titulo": titulo_com,
-                        "mensagem": corpo_com,
-                        "lido": False,
-                    }
-
-                    for d_id in destinatarios:
-                        if d_id not in st.session_state.db_clients:
-                            st.session_state.db_clients[d_id] = {
-                                "ftp": {
-                                    "host": "",
-                                    "user": "",
-                                    "pass": "",
-                                    "port": "21",
-                                },
-                                "agendas": [],
-                                "logs": [],
-                                "comunicados": [],
-                            }
-                        if "comunicados" not in st.session_state.db_clients[d_id]:
-                            st.session_state.db_clients[d_id]["comunicados"] = []
-
-                        st.session_state.db_clients[d_id]["comunicados"].insert(
-                            0, comunicado_obj
+                if st.button(
+                    "🚀 Disparar Comunicado", use_container_width=True, type="primary"
+                ):
+                    if titulo_com and corpo_com:
+                        st.session_state.db_users = load_db(
+                            DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}}
                         )
+                        st.session_state.db_clients = load_db(DB_CLIENTS, {})
 
-                        if send_disc:
-                            webhook_url = st.session_state.db_clients.get(d_id, {}).get(
-                                "discord_webhook"
+                        if "Todos" in alvos:
+                            destinatarios = list(st.session_state.db_users["keys"].keys())
+                        else:
+                            destinatarios = [
+                                opcoes_clientes[nome] for nome in alvos
+                            ]
+
+                        comunicado_obj = {
+                            "id": str(time.time()),
+                            "data": get_hora_brasilia().strftime("%d/%m/%Y %H:%M"),
+                            "titulo": titulo_com,
+                            "mensagem": corpo_com,
+                            "lido": False,
+                        }
+
+                        for d_id in destinatarios:
+                            if d_id not in st.session_state.db_clients:
+                                st.session_state.db_clients[d_id] = {
+                                    "ftp": {
+                                        "host": "",
+                                        "user": "",
+                                        "pass": "",
+                                        "port": "21",
+                                    },
+                                    "agendas": [],
+                                    "logs": [],
+                                    "comunicados": [],
+                                }
+                            if "comunicados" not in st.session_state.db_clients[d_id]:
+                                st.session_state.db_clients[d_id]["comunicados"] = []
+
+                            st.session_state.db_clients[d_id]["comunicados"].insert(
+                                0, comunicado_obj
                             )
-                            if webhook_url:
-                                try:
-                                    payload = {
-                                        "embeds": [
-                                            {
-                                                "title": f"📢 {titulo_com}",
-                                                "description": corpo_com,
-                                                "color": 16711680,
-                                            }
-                                        ]
-                                    }
-                                    requests.post(
-                                        webhook_url, json=payload, timeout=5
-                                    )
-                                except Exception:
-                                    pass
 
-                        if send_mail:
-                            email_cli = (
-                                st.session_state.db_users["keys"]
-                                .get(d_id, {})
-                                .get("email")
-                            )
-                            if email_cli:
-                                enviar_email(email_cli, titulo_com, corpo_com)
+                            if send_disc:
+                                webhook_url = st.session_state.db_clients.get(d_id, {}).get(
+                                    "discord_webhook"
+                                )
+                                if webhook_url:
+                                    try:
+                                        payload = {
+                                            "embeds": [
+                                                {
+                                                    "title": f"📢 {titulo_com}",
+                                                    "description": corpo_com,
+                                                    "color": 16711680,
+                                                }
+                                            ]
+                                        }
+                                        requests.post(
+                                            webhook_url, json=payload, timeout=5
+                                        )
+                                    except Exception:
+                                        pass
 
-                        if send_wa:
-                            wpp_cli = (
-                                st.session_state.db_users["keys"]
-                                .get(d_id, {})
-                                .get("whatsapp")
-                            )
-                            if wpp_cli:
-                                enviar_whatsapp(wpp_cli, corpo_com)
+                            if send_mail:
+                                email_cli = (
+                                    st.session_state.db_users["keys"]
+                                    .get(d_id, {})
+                                    .get("email")
+                                )
+                                if email_cli:
+                                    enviar_email(email_cli, titulo_com, corpo_com)
 
-                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                            if send_wa:
+                                wpp_cli = (
+                                    st.session_state.db_users["keys"]
+                                    .get(d_id, {})
+                                    .get("whatsapp")
+                                )
+                                if wpp_cli:
+                                    enviar_whatsapp(wpp_cli, corpo_com)
 
-                    if "input_tit_com" in st.session_state:
-                        del st.session_state["input_tit_com"]
-                    if "input_msg_com" in st.session_state:
-                        del st.session_state["input_msg_com"]
+                        save_db(DB_CLIENTS, st.session_state.db_clients)
 
-                    st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("Preencha o título e a mensagem.")
+                        if "input_tit_com" in st.session_state:
+                            del st.session_state["input_tit_com"]
+                        if "input_msg_com" in st.session_state:
+                            del st.session_state["input_msg_com"]
 
-    st.stop()
-
+                        st.success(f"✅ Enviado para {len(destinatarios)} clientes!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Preencha o título e a mensagem.")
+else:
+    # PORTAL DO JOGADOR
+    player_portal_main()
 
 # =========================================================
-# 6. ÁREA DO CLIENTE
+# 8. ÁREA DO CLIENTE
 # =========================================================
 
 user_id = st.session_state.user_key
@@ -2333,8 +2365,9 @@ with tab7:
         "Esses dados serão usados pela Loja, Banco DzCoins e estatísticas."
     )
 
-    # Garante que o cliente está autenticado e possui um server_id vinculado
-    server_id = st.session_state.get("server_id")
+    # Busca o server_id a partir da user_key logada
+    user_key = st.session_state.get("user_key", "")
+    server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
     if not server_id:
         st.error(
             "Nenhum servidor vinculado a este login.\n"
@@ -2430,7 +2463,8 @@ with tab8:
     )
 
     # 1) Garante que há um servidor válido na sessão
-    server_id = st.session_state.get("server_id")
+    user_key = st.session_state.get("user_key", "")
+    server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
     if not server_id:
         st.error(
             "Nenhum servidor vinculado a este login.\n"
