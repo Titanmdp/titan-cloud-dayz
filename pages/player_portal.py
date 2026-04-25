@@ -246,6 +246,62 @@ def ftp_download_latest_adm(ftp_cfg: dict):
     except Exception as e:
         return None, f"Erro ao baixar .ADM: {e}"
 
+RESTART_LOG_FILENAME = "restart.log"
+
+
+def ftp_download_restart_log(ftp_cfg: dict):
+    """
+    Baixa o arquivo restart.log da raiz do FTP e retorna o conteúdo como string.
+    Se não encontrar, retorna (None, erro).
+    """
+    buffer = io.BytesIO()
+    try:
+        with FTP() as ftp:
+            ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=10)
+            ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
+
+            files = ftp.nlst()
+            if RESTART_LOG_FILENAME not in files:
+                return None, f"{RESTART_LOG_FILENAME} não encontrado na raiz do FTP."
+
+            ftp.retrbinary(f"RETR {RESTART_LOG_FILENAME}", buffer.write)
+
+        texto = buffer.getvalue().decode("utf-8", errors="ignore")
+        return texto, None
+    except Exception as e:
+        return None, f"Erro ao baixar {RESTART_LOG_FILENAME}: {e}"
+
+def parse_last_restart_from_restart_log(log_text: str):
+    """
+    Lê restart.log e retorna o último horário de reset como datetime (FUSO_BR) ou None.
+    Usa linhas no formato:
+    2026-04-24 19:08:09 Reiniciando o Servidor BR The Last World
+    """
+    if not log_text:
+        return None
+
+    last_dt = None
+
+    for line in log_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if "Reiniciando o Servidor" not in line:
+            continue
+
+        # Espera algo como: 2026-04-24 19:08:09 Reiniciando...
+        try:
+            data_str = line.split("Reiniciando")[0].strip()  # "2026-04-24 19:08:09"
+            dt = datetime.strptime(data_str, "%Y-%m-%d %H:%M:%S")
+            dt = dt.replace(tzinfo=FUSO_BR)
+        except Exception:
+            continue
+
+        if (last_dt is None) or (dt > last_dt):
+            last_dt = dt
+
+    return last_dt
+
 def parse_adm_sessions_and_pve(log_text: str):
     """
     Parser simples do ADM baseado nos exemplos enviados.
@@ -503,13 +559,13 @@ def render_players_online(nitrado_id: str):
 
 def render_reset_info(client_data: dict):
     """
-    Mostra informações de reset do servidor.
-    - Último reset detectado no ADM (se conseguir ler o log).
+    Mostra informações de reset do servidor:
+    - Último reset real, lido de restart.log via FTP.
     - Próximo reset estimado pela regra: a cada 2h, em horas pares.
     """
     agora = datetime.now(FUSO_BR)
 
-    # Cálculo da próxima hora par (00, 02, 04, ..., 22)
+    # Regra: resets nas horas pares (00, 02, 04, ..., 22)
     proxima_hora_par = (agora.hour + 1) if (agora.hour % 2 == 1) else (agora.hour + 2)
     proxima_hora_par = proxima_hora_par % 24
     proximo_reset = agora.replace(
@@ -531,35 +587,34 @@ def render_reset_info(client_data: dict):
         unsafe_allow_html=True,
     )
 
-    # Tenta ler o último reset real a partir do ADM mais recente
-    ultimo_reset_texto = "Não foi possível detectar o último reset no log."
+    # Tenta ler último reset real do restart.log
+    ultimo_reset_texto = "Não foi possível detectar o último reset em restart.log."
     try:
         ftp_cfg = get_client_ftp_config(client_data)
         if ftp_cfg:
-            log_text, err = ftp_download_latest_adm(ftp_cfg)
-            if not err and log_text:
-                last_reset_dt = parse_last_restart_from_adm(log_text)
+            restart_text, err = ftp_download_restart_log(ftp_cfg)
+            if not err and restart_text:
+                last_reset_dt = parse_last_restart_from_restart_log(restart_text)
                 if last_reset_dt:
                     ultimo_reset_texto = (
-                        f"Último reset detectado no log: "
+                        f"Último reset detectado: "
                         f"<b>{last_reset_dt.strftime('%d/%m/%Y %H:%M:%S')}</b>."
                     )
                 else:
                     ultimo_reset_texto = (
-                        "Ainda não encontramos um evento de reset no log mais recente."
+                        "Nenhuma linha de reset encontrada em restart.log."
                     )
         else:
             ultimo_reset_texto = (
-                "FTP não configurado para este servidor, usando apenas regra de horário."
+                "FTP não configurado para este servidor, usando apenas a regra de horário."
             )
     except Exception:
-        # fallback silencioso
         pass
 
     st.markdown(
         f"""
         <div style="font-size:14px; color:#ddd; margin-bottom:6px;">
-            Próximo reset automático (regra 2h/horas pares):<br>
+            Próximo reset automático (regra 2h / horas pares):<br>
             <b>{proximo_reset.strftime("%d/%m/%Y %H:%M")}</b>
         </div>
         <div style="font-size:12px; color:#999; margin-bottom:6px;">
