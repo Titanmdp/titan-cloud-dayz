@@ -2351,33 +2351,33 @@ with tab6:
             st.success("Alterações aplicadas na sessão da Loja.")
 
     with col_loja2:
-            if st.button("Salvar Loja no Titan Cloud", use_container_width=True):
-                # 1. Carrega o banco global
-                db_completo = load_db(DB_CLIENTS, {})
-        
-                # 2. Garante que o servidor 18927875 exista no banco
-                # Usamos a variável 'server_id' que já deve estar definida no seu escopo
-                if server_id not in db_completo:
+        if st.button("Salvar Loja no Titan Cloud", use_container_width=True):
+            # 1. Carrega o banco global
+            db_completo = load_db(DB_CLIENTS, {})
+            
+            # 2. Garante que o servidor exista no banco
+            # A linha abaixo agora está devidamente recuada (indentada)
+            if server_id not in db_completo:
                 db_completo[server_id] = {}
             
-                # 3. Prepara a estrutura da loja
-                itens_atualizados = df_to_loja_itens(edited_df_loja)
-                loja_obj = {
-                    "mapa_padrao": loja_mapa_padrao,
-                    "posicao_padrao": loja_posicao_padrao,
-                    "itens": itens_atualizados
-                }
-        
-                # 4. SALVA ESPECIFICAMENTE NO ID DO SERVIDOR
-                db_completo[server_id]["loja"] = loja_obj
-        
-                # 5. Persiste no arquivo JSON
-                save_db(DB_CLIENTS, db_completo)
-        
-                # 6. Atualiza o session_state para refletir a mudança
-                st.session_state.db_clients = db_completo
-        
-                st.success(f"Catálogo salvo com sucesso para o Servidor {server_id}!")
+            # 3. Prepara a estrutura da loja
+            itens_atualizados = df_to_loja_itens(edited_df_loja)
+            loja_obj = {
+                "mapa_padrao": loja_mapa_padrao,
+                "posicao_padrao": loja_posicao_padrao,
+                "itens": itens_atualizados
+            }
+            
+            # 4. SALVA ESPECIFICAMENTE NO ID DO SERVIDOR
+            db_completo[server_id]["loja"] = loja_obj
+            
+            # 5. Persiste no arquivo JSON
+            save_db(DB_CLIENTS, db_completo)
+            
+            # 6. Atualiza o session_state para refletir a mudança
+            st.session_state.db_clients = db_completo
+            
+            st.success(f"Catálogo salvo com sucesso para o Servidor {server_id}!")
 
     with col_loja3:
         if st.button("⬇️ Baixar Loja (JSON)", use_container_width=True):
