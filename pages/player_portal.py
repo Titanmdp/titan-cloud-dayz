@@ -5,8 +5,6 @@ import requests
 import urllib.parse
 import io
 import re
-import sys, os
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from eventos import enviar_pedidos_via_ftp
 from datetime import datetime, timezone, timedelta
 from ftplib import FTP
