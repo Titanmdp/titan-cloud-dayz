@@ -46,7 +46,6 @@ def converter_pedidos_para_dayz_json(pedidos):
             z = float(coords[1].strip())
             y = 0.0  # altura padrão
 
-            # Pega a quantidade do item (default = 1)
             qtd = int(pedido.get("quantidade", 1))
 
             for i in range(qtd):
@@ -66,7 +65,7 @@ def converter_pedidos_para_dayz_json(pedidos):
 def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus") -> bool:
     """
     Envia os pedidos convertidos para formato DayZ como arquivo JSON via FTP.
-    Arquivo é enviado para: dayzxb_missions/dayzOffline.{mapa}/custom/loja_spawn.json
+    Apenas o arquivo loja_spawn.json é enviado para o servidor.
     """
     try:
         db_atual = load_db(DB_CLIENTS, {})
