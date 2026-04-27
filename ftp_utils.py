@@ -6,10 +6,10 @@ from datetime import datetime, timezone, timedelta
 # Ajuste de fuso horário
 FUSO_BR = timezone(timedelta(hours=-3))
 
-# Altura fixa temporária para a região de Zelenogorsk (~173m de altitude)
+# Altura fixa temporária para a região de Zelenogorsk (~172.62m de altitude)
 # TODO: substituir por lookup dinâmico via heightmap quando disponível
-TERRAIN_Y = 173.0
-OFFSET_Y = 2.0  # offset adicional para o item não ficar enterrado
+TERRAIN_Y = 172.62
+OFFSET_Y = 0.0  # offset adicional (0.0 = altura exata do terreno, DayZ aplica gravidade sozinho)
 
 def get_hora_brasilia():
     return datetime.now(FUSO_BR)
