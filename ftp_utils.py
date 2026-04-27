@@ -33,10 +33,36 @@ def save_db(file, data):
     except Exception as e:
         print(f"Erro ao salvar banco de dados: {e}")
 
+def converter_pedidos_para_dayz_json(pedidos):
+    """
+    Converte lista de pedidos da loja para formato DayZ (Objects).
+    Cada pedido vira um objeto com name, pos, ypr, scale, etc.
+    """
+    objetos = []
+    for pedido in pedidos:
+        try:
+            coords = pedido.get("coordenadas", "0 / 0").split("/")
+            x = float(coords[0].strip())
+            z = float(coords[1].strip())
+            y = 0.0  # altura padrão
+
+            objetos.append({
+                "name": pedido.get("item_classe", "Unknown"),
+                "pos": [x, y, z],
+                "ypr": [0.0, 0.0, 0.0],
+                "scale": 1.0,
+                "enableCEPersistency": 0,
+                "customString": f"Pedido {pedido.get('id')}"
+            })
+        except Exception as e:
+            print(f"Erro ao converter pedido {pedido.get('id')}: {e}")
+
+    return {"Objects": objetos}
+
 def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus") -> bool:
     """
-    Envia um arquivo JSON com os pedidos para o servidor via FTP.
-    Arquivo é enviado para: dayzxb_missions/dayzOffline.{mapa}/custom/loja_pedidos.json
+    Envia os pedidos convertidos para formato DayZ como arquivo JSON via FTP.
+    Arquivo é enviado para: dayzxb_missions/dayzOffline.{mapa}/custom/loja_spawn.json
     """
     try:
         db_atual = load_db(DB_CLIENTS, {})
@@ -56,16 +82,13 @@ def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus
         
         remote_dir = f"{remote_base}/custom"
         
-        # Cria JSON com pedidos
-        pedidos_data = {
-            "timestamp": get_hora_brasilia().isoformat(),
-            "pedidos": pedidos
-        }
+        # Converte pedidos para formato DayZ
+        pedidos_dayz = converter_pedidos_para_dayz_json(pedidos)
         
         # Salva em arquivo temporário
-        temp_file = f"/tmp/loja_pedidos_{client_id}.json"
+        temp_file = f"/tmp/loja_spawn_{client_id}.json"
         with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(pedidos_data, f, indent=4, ensure_ascii=False)
+            json.dump(pedidos_dayz, f, indent=4, ensure_ascii=False)
         
         # Envia via FTP
         ftp = ftplib.FTP()
@@ -74,7 +97,7 @@ def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus
         ftp.cwd(remote_dir)
         
         with open(temp_file, "rb") as f:
-            ftp.storbinary(f"STOR loja_pedidos.json", f)
+            ftp.storbinary(f"STOR loja_spawn.json", f)
         
         ftp.quit()
         
@@ -88,4 +111,3 @@ def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus
     except Exception as e:
         print(f"Erro ao enviar pedidos via FTP: {e}")
         return False
-
