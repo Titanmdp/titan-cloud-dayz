@@ -5,11 +5,19 @@ import requests
 import urllib.parse
 import io
 import re
-import sys, os
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from eventos import enviar_pedidos_via_ftp
+import sys
 from datetime import datetime, timezone, timedelta
 from ftplib import FTP
+
+# Ajuste seguro para importar enviar_pedidos_via_ftp
+try:
+    # adiciona a raiz do projeto ao path
+    sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+    from eventos import enviar_pedidos_via_ftp
+except ImportError as e:
+    st.error(f"Erro ao importar função enviar_pedidos_via_ftp: {e}")
+    enviar_pedidos_via_ftp = None
+
 
 # =========================================================
 # 1. CONFIG / AMBIENTE / CONSTANTES
