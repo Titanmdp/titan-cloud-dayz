@@ -556,6 +556,101 @@ def render_leaderboard_dzcoins(client_data: dict, gamertag_vinculada: str):
         col_pos3.metric("💎 Total", f"{meu_reg['Total']:,}")
 
 # =========================================================
+# 5.1 ABA LOJA
+# =========================================================
+
+def render_loja(client_data: dict, clients_db: dict, server_id: str, gamertag: str):
+    loja = client_data.get("loja", {})
+    itens = loja.get("itens", [])
+    
+    # Garante que exista a lista de pedidos dentro da loja
+    if "pedidos" not in loja:
+        loja["pedidos"] = []
+    pedidos = loja["pedidos"]
+    
+    # Filtra apenas os itens marcados como ativos pelo Admin
+    itens_ativos = [i for i in itens if i.get("ativo", True)]
+    
+    if not itens_ativos:
+        st.info("A loja está vazia ou fechada no momento.")
+    else:
+        st.markdown(f"### 🛒 Loja de Itens — Mapa: {loja.get('mapa_padrao', 'Desconhecido')}")
+        if loja.get("posicao_padrao"):
+            st.write(f"**📍 Local de Entrega Padrão:** `{loja['posicao_padrao']}`")
+            
+        # Verifica os saldos
+        wallets = client_data.get("wallets", {})
+        bank = client_data.get("bank", {})
+        
+        wallet_reg = wallets.get(gamertag, {"balance": 0, "historico": []})
+        bank_reg = bank.get(gamertag, {"balance": 0, "historico": []})
+        
+        saldo_carteira = wallet_reg.get("balance", 0)
+        saldo_banco = bank_reg.get("balance", 0)
+        saldo_total = saldo_carteira + saldo_banco
+        
+        st.success(f"**Seu Saldo Disponível:** {saldo_total} DzCoins (Carteira: {saldo_carteira} | Banco: {saldo_banco})")
+        st.divider()
+        
+        for item in itens_ativos:
+            col_info, col_btn = st.columns([3, 1])
+            with col_info:
+                st.markdown(f"**{item.get('nome', 'Item')}** (x{item.get('quantidade', 1)})")
+                st.caption(f"Classe: `{item.get('classe', '')}` | Categoria: {item.get('categoria', '')}")
+            with col_btn:
+                preco = item.get("preco", 0)
+                if st.button(f"Comprar por {preco} 🪙", key=f"buy_{item.get('id')}", use_container_width=True):
+                    if preco > saldo_total:
+                        st.error("Saldo insuficiente.")
+                    else:
+                        # Lógica de cobrança: Prioriza a carteira. Se faltar, tira do banco.
+                        restante = preco
+                        if saldo_carteira >= restante:
+                            wallet_reg["balance"] -= restante
+                        else:
+                            restante -= wallet_reg["balance"]
+                            wallet_reg["balance"] = 0
+                            bank_reg["balance"] -= restante
+                            
+                        hora_br = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
+                        if preco > 0:
+                            wallet_reg.setdefault("historico", []).append(f"[{hora_br}] COMPRA NA LOJA: {item.get('nome')} -{preco}")
+                        
+                        # Monta e adiciona o Pedido
+                        novo_pedido = {
+                            "id": f"PED-{int(time.time())}",
+                            "gamertag": gamertag,
+                            "item_id": item.get("id"),
+                            "item_nome": item.get("nome"),
+                            "item_classe": item.get("classe"),
+                            "quantidade": item.get("quantidade"),
+                            "preco": preco,
+                            "data": hora_br,
+                            "status": "Aguardando Reset"
+                        }
+                        pedidos.append(novo_pedido)
+                        
+                        # Atualiza os dados persistentes
+                        client_data["loja"]["pedidos"] = pedidos
+                        client_data["wallets"][gamertag] = wallet_reg
+                        client_data["bank"][gamertag] = bank_reg
+                        clients_db[server_id] = client_data
+                        save_db(DB_CLIENTS, clients_db)
+                        
+                        st.success(f"Pedido realizado com sucesso! O item será entregue no próximo reset do servidor.")
+                        time.sleep(1.5)
+                        st.rerun()
+            st.divider()
+
+    # --- Histórico de Pedidos Pessoais ---
+    meus_pedidos = [p for p in pedidos if p.get("gamertag") == gamertag]
+    if meus_pedidos:
+        st.markdown("### 📦 Seus Pedidos Recentes")
+        for p in reversed(meus_pedidos[-5:]): # Mostra apenas os 5 mais recentes
+            cor_status = "🟠" if p.get("status") == "Aguardando Reset" else ("🟢" if p.get("status") == "Entregue" else "🔴")
+            st.write(f"{cor_status} **{p.get('item_nome')}** (x{p.get('quantidade')}) - Status: **{p.get('status')}** | {p.get('data')}")
+
+# =========================================================
 # 5. COMPONENTES DE UI
 # =========================================================
 
@@ -1219,8 +1314,9 @@ def main():
     # ----------------------------------------------------------
     # 7.8 ABAS PRINCIPAIS
     # ----------------------------------------------------------
-    tab_inicio, tab_banco, tab_ranking, tab_magnatas = st.tabs([
+    tab_inicio, tab_loja, tab_banco, tab_ranking, tab_magnatas = st.tabs([
         "🏠 Início",
+        "🛒 Loja",
         "🏦 Banco DzCoins",
         "🏆 Ranking",
         "💎 Magnatas DzCoins",
@@ -1250,6 +1346,12 @@ def main():
             st.metric("🏦 Banco", f"{bank_saldo} DzCoins")
             st.metric("💎 Total", f"{wallet_saldo + bank_saldo} DzCoins")
 
+    # --- ABA LOJA ---
+    with tab_loja:
+        clients_db_fresh = load_db(DB_CLIENTS, {})
+        client_data_fresh = clients_db_fresh.get(server_id, {})
+        render_loja(client_data_fresh, clients_db_fresh, server_id, gamertag_vinculada)
+
     # --- ABA BANCO ---
     with tab_banco:
         st.markdown(f"### 🏦 Banco DzCoins — {gamertag_vinculada}")
@@ -1258,119 +1360,119 @@ def main():
         render_banco(client_data_fresh, clients_db_fresh, server_id, gamertag_vinculada)
 
     # --- ABA RANKING ---
-with tab_ranking:
-    st.markdown("### 🏆 Ranking — Tempo de Jogo & Sobrevivência")
+    with tab_ranking:
+        st.markdown("### 🏆 Ranking — Tempo de Jogo & Sobrevivência")
 
-    ftp_cfg = get_client_ftp_config(client_data)
-    if not ftp_cfg:
-        st.warning(
-            "FTP do servidor não está configurado para este cliente. "
-            "Peça ao admin para configurar no painel."
-        )
-    else:
-
-        @st.fragment(run_every=300)
-        def _ranking_fragment(ftp_cfg, gamertag_vinculada: str):
-            with st.spinner("Carregando dados de ranking a partir dos logs do servidor..."):
-                log_text, err = ftp_download_latest_adm(ftp_cfg)
-
-            if err or not log_text:
-                st.warning(
-                    "Ainda não foi possível carregar os dados de ranking a partir dos logs do servidor."
-                )
-                st.caption(f"Detalhes técnicos: {err or 'log vazio'}")
-                return
-
-            parsed = parse_adm_sessions_and_pve(log_text)
-
-            # Garante que parsed é um dict antes de usar .get
-            if not isinstance(parsed, dict):
-                st.warning(
-                    "Ainda não foi possível carregar os dados de ranking a partir dos logs do servidor."
-                )
-                return
-
-            pstats = parsed.get("players", {})
-
-            if not pstats:
-                st.info("Nenhuma estatística encontrada no log .ADM mais recente.")
-                return
-
-            # Monta listas para ranking
-            ranking_play = []
-            ranking_surv = []
-
-            for nome, dados in pstats.items():
-                total_play = dados.get("total_play_seconds", 0)
-                ranking_play.append({
-                    "Jogador": nome,
-                    "Tempo de jogo": format_seconds_hhmmss(total_play),
-                    "Tempo (segundos)": total_play,
-                    "Sessões": dados.get("session_count", 0),
-                    "Hits PvE": dados.get("pve_hits", 0),
-                    "Suicídios": dados.get("pve_suicides", 0),
-                })
-
-                ranking_surv.append({
-                    "Jogador": nome,
-                    "Tempo de sobrevivência": format_seconds_hhmmss(total_play),
-                    "Tempo (segundos)": total_play,
-                    "Suicídios": dados.get("pve_suicides", 0),
-                })
-
-            ranking_play_sorted = sorted(
-                ranking_play, key=lambda x: x["Tempo (segundos)"], reverse=True
-            )[:10]
-            ranking_surv_sorted = sorted(
-                ranking_surv, key=lambda x: x["Tempo (segundos)"], reverse=True
-            )[:10]
-
-            col_r1, col_r2 = st.columns(2)
-
-            with col_r1:
-                st.markdown("#### ⏱️ Tempo de jogo total — Top 10")
-                if ranking_play_sorted:
-                    st.table([{
-                        "#": idx + 1,
-                        "Jogador": r["Jogador"],
-                        "Tempo de jogo": r["Tempo de jogo"],
-                        "Sessões": r["Sessões"],
-                        "Hits PvE": r["Hits PvE"],
-                        "Suicídios": r["Suicídios"],
-                    } for idx, r in enumerate(ranking_play_sorted)])
-                else:
-                    st.info("Sem dados de tempo de jogo ainda neste log.")
-
-            with col_r2:
-                st.markdown("#### 🧟 Tempo de sobrevivência (proxy) — Top 10")
-                if ranking_surv_sorted:
-                    st.table([{
-                        "#": idx + 1,
-                        "Jogador": r["Jogador"],
-                        "Tempo de sobrevivência": r["Tempo de sobrevivência"],
-                        "Suicídios": r["Suicídios"],
-                    } for idx, r in enumerate(ranking_surv_sorted)])
-                else:
-                    st.info("Sem dados de sobrevivência ainda neste log.")
-
-            # Destaque para o jogador logado
-            st.markdown("---")
-            st.markdown("#### 👤 Meu desempenho no log atual")
-
-            meu_reg = next(
-                (r for r in ranking_play if r["Jogador"] == gamertag_vinculada),
-                None,
+        ftp_cfg = get_client_ftp_config(client_data)
+        if not ftp_cfg:
+            st.warning(
+                "FTP do servidor não está configurado para este cliente. "
+                "Peça ao admin para configurar no painel."
             )
-            if not meu_reg:
-                st.info("Ainda não há dados seus neste log (nenhuma sessão registrada).")
-            else:
-                col_m1, col_m2, col_m3 = st.columns(3)
-                col_m1.metric("⏱️ Tempo de jogo", meu_reg["Tempo de jogo"])
-                col_m2.metric("🔁 Sessões", meu_reg["Sessões"])
-                col_m3.metric("🧟 Hits PvE", meu_reg["Hits PvE"])
+        else:
 
-        # chama o fragmento passando os argumentos
-        _ranking_fragment(ftp_cfg, gamertag_vinculada)
+            @st.fragment(run_every=300)
+            def _ranking_fragment(ftp_cfg, gamertag_vinculada: str):
+                with st.spinner("Carregando dados de ranking a partir dos logs do servidor..."):
+                    log_text, err = ftp_download_latest_adm(ftp_cfg)
+
+                if err or not log_text:
+                    st.warning(
+                        "Ainda não foi possível carregar os dados de ranking a partir dos logs do servidor."
+                    )
+                    st.caption(f"Detalhes técnicos: {err or 'log vazio'}")
+                    return
+
+                parsed = parse_adm_sessions_and_pve(log_text)
+
+                # Garante que parsed é um dict antes de usar .get
+                if not isinstance(parsed, dict):
+                    st.warning(
+                        "Ainda não foi possível carregar os dados de ranking a partir dos logs do servidor."
+                    )
+                    return
+
+                pstats = parsed.get("players", {})
+
+                if not pstats:
+                    st.info("Nenhuma estatística encontrada no log .ADM mais recente.")
+                    return
+
+                # Monta listas para ranking
+                ranking_play = []
+                ranking_surv = []
+
+                for nome, dados in pstats.items():
+                    total_play = dados.get("total_play_seconds", 0)
+                    ranking_play.append({
+                        "Jogador": nome,
+                        "Tempo de jogo": format_seconds_hhmmss(total_play),
+                        "Tempo (segundos)": total_play,
+                        "Sessões": dados.get("session_count", 0),
+                        "Hits PvE": dados.get("pve_hits", 0),
+                        "Suicídios": dados.get("pve_suicides", 0),
+                    })
+
+                    ranking_surv.append({
+                        "Jogador": nome,
+                        "Tempo de sobrevivência": format_seconds_hhmmss(total_play),
+                        "Tempo (segundos)": total_play,
+                        "Suicídios": dados.get("pve_suicides", 0),
+                    })
+
+                ranking_play_sorted = sorted(
+                    ranking_play, key=lambda x: x["Tempo (segundos)"], reverse=True
+                )[:10]
+                ranking_surv_sorted = sorted(
+                    ranking_surv, key=lambda x: x["Tempo (segundos)"], reverse=True
+                )[:10]
+
+                col_r1, col_r2 = st.columns(2)
+
+                with col_r1:
+                    st.markdown("#### ⏱️ Tempo de jogo total — Top 10")
+                    if ranking_play_sorted:
+                        st.table([{
+                            "#": idx + 1,
+                            "Jogador": r["Jogador"],
+                            "Tempo de jogo": r["Tempo de jogo"],
+                            "Sessões": r["Sessões"],
+                            "Hits PvE": r["Hits PvE"],
+                            "Suicídios": r["Suicídios"],
+                        } for idx, r in enumerate(ranking_play_sorted)])
+                    else:
+                        st.info("Sem dados de tempo de jogo ainda neste log.")
+
+                with col_r2:
+                    st.markdown("#### 🧟 Tempo de sobrevivência (proxy) — Top 10")
+                    if ranking_surv_sorted:
+                        st.table([{
+                            "#": idx + 1,
+                            "Jogador": r["Jogador"],
+                            "Tempo de sobrevivência": r["Tempo de sobrevivência"],
+                            "Suicídios": r["Suicídios"],
+                        } for idx, r in enumerate(ranking_surv_sorted)])
+                    else:
+                        st.info("Sem dados de sobrevivência ainda neste log.")
+
+                # Destaque para o jogador logado
+                st.markdown("---")
+                st.markdown("#### 👤 Meu desempenho no log atual")
+
+                meu_reg = next(
+                    (r for r in ranking_play if r["Jogador"] == gamertag_vinculada),
+                    None,
+                )
+                if not meu_reg:
+                    st.info("Ainda não há dados seus neste log (nenhuma sessão registrada).")
+                else:
+                    col_m1, col_m2, col_m3 = st.columns(3)
+                    col_m1.metric("⏱️ Tempo de jogo", meu_reg["Tempo de jogo"])
+                    col_m2.metric("🔁 Sessões", meu_reg["Sessões"])
+                    col_m3.metric("🧟 Hits PvE", meu_reg["Hits PvE"])
+
+            # chama o fragmento passando os argumentos
+            _ranking_fragment(ftp_cfg, gamertag_vinculada)
 
     # --- ABA MAGNATAS DZCOINS ---
     with tab_magnatas:
@@ -1389,7 +1491,3 @@ with tab_ranking:
             render_leaderboard_dzcoins(client_data_fresh, gamertag_vinculada)
         
         _leaderboard_fragment()
-
-
-if __name__ == "__main__":
-    main()
