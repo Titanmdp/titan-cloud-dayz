@@ -6,8 +6,10 @@ from datetime import datetime, timezone, timedelta
 # Ajuste de fuso horário
 FUSO_BR = timezone(timedelta(hours=-3))
 
-# Offset de altura para evitar que itens fiquem enterrados
-OFFSET_Y = 2.0  
+# Altura fixa temporária para a região de Zelenogorsk (~173m de altitude)
+# TODO: substituir por lookup dinâmico via heightmap quando disponível
+TERRAIN_Y = 173.0
+OFFSET_Y = 2.0  # offset adicional para o item não ficar enterrado
 
 def get_hora_brasilia():
     return datetime.now(FUSO_BR)
@@ -43,7 +45,7 @@ def converter_pedidos_para_dayz_json(pedidos):
             coords = pedido.get("coordenadas", "0 / 0").split("/")
             x = float(coords[0].strip())
             z = float(coords[1].strip())
-            y = OFFSET_Y  # usa offset configurável
+            y = TERRAIN_Y + OFFSET_Y  # altura do terreno + offset para não enterrar
 
             # Separa classes (kit ou item solo)
             classes = [c.strip() for c in pedido.get("item_classe", "Unknown").split(",")]
