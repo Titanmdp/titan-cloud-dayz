@@ -36,7 +36,7 @@ def save_db(file, data):
 def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus") -> bool:
     """
     Envia um arquivo JSON com os pedidos para o servidor via FTP.
-    Arquivo é enviado para: mpmissions/dayzOffline.{mapa}/custom/loja_pedidos.json
+    Arquivo é enviado para: dayzxb_missions/dayzOffline.{mapa}/custom/loja_pedidos.json
     """
     try:
         db_atual = load_db(DB_CLIENTS, {})
@@ -50,9 +50,9 @@ def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus
         # Define caminho remoto de acordo com o mapa
         mapa_lower = mapa.lower()
         if "enoch" in mapa_lower or "livonia" in mapa_lower:
-            remote_base = "mpmissions/dayzOffline.enoch"
+            remote_base = "dayzxb_missions/dayzOffline.enoch"
         else:
-            remote_base = "mpmissions/dayzOffline.chernarusplus"
+            remote_base = "dayzxb_missions/dayzOffline.chernarusplus"
         
         remote_dir = f"{remote_base}/custom"
         
