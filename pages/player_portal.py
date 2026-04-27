@@ -1042,7 +1042,7 @@ def registrar_compra(
 
     # >>> NOVO PASSO: envia imediatamente o arquivo loja_pedidos.json via FTP
     mapa = client_data.get("loja", {}).get("mapa_padrao", "Chernarus")
-    success = enviar_pedidos_via_ftp(server_id, client_data["pedidos"], mapa)
+    success = enviar_pedidos_via_ftp(client_id=server_id, pedidos=client_data["pedidos"], mapa=mapa)
 
     if success:
         return True, "Pedido registrado e arquivo enviado via FTP."
