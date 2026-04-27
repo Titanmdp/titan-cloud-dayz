@@ -6,6 +6,9 @@ from datetime import datetime, timezone, timedelta
 # Ajuste de fuso horário
 FUSO_BR = timezone(timedelta(hours=-3))
 
+# Offset de altura para evitar que itens fiquem enterrados
+OFFSET_Y = 2.0  
+
 def get_hora_brasilia():
     return datetime.now(FUSO_BR)
 
@@ -34,29 +37,29 @@ def save_db(file, data):
         print(f"Erro ao salvar banco de dados: {e}")
 
 def converter_pedidos_para_dayz_json(pedidos):
-    """
-    Converte lista de pedidos da loja para formato DayZ (Objects).
-    Usa a coluna 'quantidade' do item para gerar múltiplos objetos.
-    """
     objetos = []
     for pedido in pedidos:
         try:
             coords = pedido.get("coordenadas", "0 / 0").split("/")
             x = float(coords[0].strip())
             z = float(coords[1].strip())
-            y = 0.0  # altura padrão
+            y = OFFSET_Y  # usa offset configurável
+
+            # Separa classes (kit ou item solo)
+            classes = [c.strip() for c in pedido.get("item_classe", "Unknown").split(",")]
 
             qtd = int(pedido.get("quantidade", 1))
 
-            for i in range(qtd):
-                objetos.append({
-                    "name": pedido.get("item_classe", "Unknown"),
-                    "pos": [x, y, z],
-                    "ypr": [0.0, 0.0, 0.0],
-                    "scale": 1.0,
-                    "enableCEPersistency": 0,
-                    "customString": f"Pedido {pedido.get('id')} #{i+1}"
-                })
+            for classe in classes:
+                for i in range(qtd):
+                    objetos.append({
+                        "name": classe,
+                        "pos": [x, y, z],
+                        "ypr": [0.0, 0.0, 0.0],
+                        "scale": 1.0,
+                        "enableCEPersistency": 0,
+                        "customString": f"Pedido {pedido.get('id')} #{i+1}"
+                    })
         except Exception as e:
             print(f"Erro ao converter pedido {pedido.get('id')}: {e}")
 
