@@ -36,7 +36,7 @@ def save_db(file, data):
 def converter_pedidos_para_dayz_json(pedidos):
     """
     Converte lista de pedidos da loja para formato DayZ (Objects).
-    Cada pedido vira um objeto com name, pos, ypr, scale, etc.
+    Usa a coluna 'quantidade' do item para gerar múltiplos objetos.
     """
     objetos = []
     for pedido in pedidos:
@@ -46,14 +46,18 @@ def converter_pedidos_para_dayz_json(pedidos):
             z = float(coords[1].strip())
             y = 0.0  # altura padrão
 
-            objetos.append({
-                "name": pedido.get("item_classe", "Unknown"),
-                "pos": [x, y, z],
-                "ypr": [0.0, 0.0, 0.0],
-                "scale": 1.0,
-                "enableCEPersistency": 0,
-                "customString": f"Pedido {pedido.get('id')}"
-            })
+            # Pega a quantidade do item (default = 1)
+            qtd = int(pedido.get("quantidade", 1))
+
+            for i in range(qtd):
+                objetos.append({
+                    "name": pedido.get("item_classe", "Unknown"),
+                    "pos": [x, y, z],
+                    "ypr": [0.0, 0.0, 0.0],
+                    "scale": 1.0,
+                    "enableCEPersistency": 0,
+                    "customString": f"Pedido {pedido.get('id')} #{i+1}"
+                })
         except Exception as e:
             print(f"Erro ao converter pedido {pedido.get('id')}: {e}")
 
