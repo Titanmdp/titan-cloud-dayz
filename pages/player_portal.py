@@ -976,6 +976,7 @@ def registrar_compra(
     Registra uma compra na loja:
     - Debita DzCoins do banco ou carteira
     - Salva pedido em client_data["pedidos"]
+    - Envia imediatamente o arquivo loja_pedidos.json via FTP
     - Retorna (sucesso, mensagem)
     """
     client_data = clients_db.get(server_id, {})
@@ -1039,7 +1040,15 @@ def registrar_compra(
     client_data["bank"]    = bank
     clients_db[server_id]  = client_data
 
-    return True, "ok"
+    # >>> NOVO PASSO: envia imediatamente o arquivo loja_pedidos.json via FTP
+    mapa = client_data.get("loja", {}).get("mapa_padrao", "Chernarus")
+    success = enviar_pedidos_via_ftp(server_id, client_data["pedidos"], mapa)
+
+    if success:
+        return True, "Pedido registrado e arquivo enviado via FTP."
+    else:
+        return False, "Pedido registrado, mas falha ao enviar via FTP."
+
     
 # =========================================================
 # 5. COMPONENTES DE UI
