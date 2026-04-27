@@ -491,7 +491,8 @@ def apply_globals_changes(tree, root, vars_dict):
 LOJA_DEFAULT = {
     "mapa_padrao": "Chernarus",
     "posicao_padrao": "",
-    "itens": []  # cada item: {id, nome, classe, categoria, preco, quantidade, ativo}
+    "itens": [],  # cada item: {id, nome, classe, categoria, preco, quantidade, ativo}
+    "pedidos": [] # histórico de pedidos dos jogadores
 }
 
 
@@ -509,6 +510,8 @@ def load_loja_for_client(client_data_obj):
             client_data_obj["loja"]["posicao_padrao"] = ""
         if "itens" not in client_data_obj["loja"]:
             client_data_obj["loja"]["itens"] = []
+    if "pedidos" not in client_data_obj["loja"]:
+        client_data_obj["loja"]["pedidos"] = []
     return client_data_obj["loja"]
 
 
@@ -800,6 +803,67 @@ def _get_players_online_helper(nitrado_id: str):
             return None
     except Exception:
         return None
+
+def worker_entregas_loja_thread():
+    """
+    Worker que verifica pedidos da loja com status 'Aguardando Reset'.
+    Quando o servidor entra em restart/stopped, envia o arquivo de spawn via FTP
+    e muda o status para 'Entregue'.
+    """
+    import time
+    
+    while True:
+        try:
+            clients_data = load_db(DB_CLIENTS, {})
+            mudou = False
+            
+            for server_id, client_data in clients_data.items():
+                loja = client_data.get("loja", {})
+                pedidos = loja.get("pedidos", [])
+                pendentes = [p for p in pedidos if p.get("status") == "Aguardando Reset"]
+                
+                if not pendentes:
+                    continue
+                    
+                # Verifica status do servidor via Nitrado
+                status_servidor = "started"
+                if NITRADO_TOKEN:
+                    try:
+                        headers = {"Authorization": f"Bearer {NITRADO_TOKEN}"}
+                        url = f"{NITRADO_API}/services/{server_id}/gameservers"
+                        resp = requests.get(url, headers=headers, timeout=10)
+                        if resp.status_code == 200:
+                            status_servidor = resp.json().get("data", {}).get("gameserver", {}).get("status", "started")
+                    except Exception:
+                        pass
+                
+                # Se o servidor estiver offline/reiniciando, enviamos o arquivo para spawn
+                if status_servidor in ["restarting", "stopped", "stopping"]:
+                    mapa = loja.get("mapa_padrao", "Chernarus")
+                    
+                    # Gera um arquivo JSON genérico de entregas.
+                    # Nota: Se o mod de loja usar um XML específico (ex: events.xml), adapte a serialização aqui.
+                    nome_arquivo = f"entregas_{server_id}.json"
+                    caminho_local = os.path.join(UPLOAD_DIR, nome_arquivo)
+                    with open(caminho_local, "w", encoding="utf-8") as f:
+                        json.dump(pendentes, f, indent=4, ensure_ascii=False)
+                        
+                    caminho_remoto = "/dayzxb_missions/dayzOffline.chernarusplus/custom" if mapa == "Chernarus" else "/dayzxb_missions/dayzOffline.enoch/custom"
+                    ok, msg = disparar_ftp_pro(server_id, "UPLOAD", "entregas_loja.json", caminho_local, caminho_remoto)
+                    
+                    if ok:
+                        for p in pedidos:
+                            if p.get("status") == "Aguardando Reset":
+                                p["status"] = "Entregue"
+                        mudou = True
+                        registrar_log(server_id, f"Loja: {len(pendentes)} pedidos entregues via FTP.", "sucesso")
+                        
+            if mudou:
+                save_db(DB_CLIENTS, clients_data)
+        except Exception as e:
+            print(f"[LOJA WORKER ERROR] {e}")
+            
+        time.sleep(60)  # Verifica os servidores a cada minuto
 
 # =========================================================
 # 3. INICIALIZAÇÃO DE ESTADO
@@ -2542,6 +2606,41 @@ with tab6:
                 use_container_width=True,
             )
 
+    st.divider()
+    st.markdown("### 📦 Pedidos da Loja (Painel do Admin)")
+    
+    pedidos = loja.get("pedidos", [])
+    if not pedidos:
+        st.info("Nenhum pedido registrado até o momento.")
+    else:
+        df_pedidos = pd.DataFrame(pedidos)
+        
+        col_filtro1, col_filtro2 = st.columns(2)
+        status_filtro = col_filtro1.selectbox("Filtrar Status", ["Todos", "Aguardando Reset", "Entregue", "Cancelado"])
+        if status_filtro != "Todos":
+            df_pedidos = df_pedidos[df_pedidos["status"] == status_filtro]
+            
+        st.dataframe(df_pedidos, use_container_width=True, hide_index=True)
+        
+        st.markdown("#### 🛠️ Ação Manual")
+        pendentes_ids = [p.get("id") for p in pedidos if p.get("status") == "Aguardando Reset" and "id" in p]
+        if pendentes_ids:
+            col_act1, col_act2 = st.columns([2, 1])
+            pedido_id_acao = col_act1.selectbox("Selecione o ID do Pedido para ação manual", ["Nenhum"] + pendentes_ids)
+            
+            if pedido_id_acao != "Nenhum":
+                if col_act2.button("Forçar Status como 'Entregue'"):
+                    for p in pedidos:
+                        if p.get("id") == pedido_id_acao:
+                            p["status"] = "Entregue"
+                    client_data["loja"]["pedidos"] = pedidos
+                    st.session_state.db_clients[user_id] = client_data
+                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                    st.success(f"Pedido {pedido_id_acao} forçado como Entregue!")
+                    st.rerun()
+        else:
+            st.success("Todos os pedidos já foram processados.")
+
 with tab7:
     st.subheader("👤 Jogadores / Vínculos")
     st.info(
@@ -2984,3 +3083,7 @@ if "worker_started" not in st.session_state:
 if "worker_dzcoins_started" not in st.session_state:
     threading.Thread(target=worker_dzcoins_thread, daemon=True).start()
     st.session_state["worker_dzcoins_started"] = True
+
+if "worker_loja_started" not in st.session_state:
+    threading.Thread(target=worker_entregas_loja_thread, daemon=True).start()
+    st.session_state["worker_loja_started"] = True
