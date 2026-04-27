@@ -346,66 +346,6 @@ def parse_adm_sessions_and_pve(log_text: str):
                 pass
             break
 
-def parse_last_restart_from_adm(log_text: str):
-    """
-    Procura no ADM o último evento de reset/restart/shutdown do servidor.
-    Retorna datetime (timezone FUSO_BR) ou None.
-    Ajuste os padrões de texto conforme o formato real do seu ADM.
-    """
-    if not log_text:
-        return None
-
-    # Padrões comuns de restart/shutdown em logs DayZ (ajustável)
-    reset_keywords = [
-        "Server restart",          # exemplo genérico
-        "Server restarted",
-        "Server shutdown",
-        "Restarting server",
-        "scheduled restart",
-    ]
-
-    # Ex.: "18:00:01 | [XYZ] Server restart ..." -> captura HH:MM:SS
-    re_time_prefix = re.compile(r'^(\d{2}:\d{2}:\d{2})\s*\|')
-
-    # Tentamos inferir a data a partir da linha "AdminLog started on YYYY-MM-DD"
-    log_date = None
-    for line in log_text.splitlines():
-        if "AdminLog started on " in line:
-            try:
-                parte = line.split("AdminLog started on ")[1]
-                data_str = parte.split(" at ")[0].strip()
-                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
-            except Exception:
-                pass
-            break
-
-    if not log_date:
-        # fallback: hoje, se não achar a data no cabeçalho
-        log_date = datetime.now(FUSO_BR).date()
-
-    last_reset_dt = None
-
-    for line in log_text.splitlines():
-        if not any(k.lower() in line.lower() for k in reset_keywords):
-            continue
-
-        m = re_time_prefix.match(line)
-        if not m:
-            continue
-
-        hora_str = m.group(1)
-        try:
-            dt = datetime.strptime(f"{log_date} {hora_str}", "%Y-%m-%d %H:%M:%S")
-            dt = dt.replace(tzinfo=FUSO_BR)
-        except Exception:
-            continue
-
-        # Mantém sempre o mais recente
-        if (last_reset_dt is None) or (dt > last_reset_dt):
-            last_reset_dt = dt
-
-    return last_reset_dt
-
     def ensure_player(name: str):
         if name not in players:
             players[name] = {
@@ -470,6 +410,66 @@ def parse_last_restart_from_adm(log_text: str):
     # Se alguém estiver conectado sem disconnect até o final do log,
     # podemos (opcionalmente) estimar tempo até a última linha; por enquanto não somamos.
     return {"players": players}
+
+def parse_last_restart_from_adm(log_text: str):
+    """
+    Procura no ADM o último evento de reset/restart/shutdown do servidor.
+    Retorna datetime (timezone FUSO_BR) ou None.
+    Ajuste os padrões de texto conforme o formato real do seu ADM.
+    """
+    if not log_text:
+        return None
+
+    # Padrões comuns de restart/shutdown em logs DayZ (ajustável)
+    reset_keywords = [
+        "Server restart",          # exemplo genérico
+        "Server restarted",
+        "Server shutdown",
+        "Restarting server",
+        "scheduled restart",
+    ]
+
+    # Ex.: "18:00:01 | [XYZ] Server restart ..." -> captura HH:MM:SS
+    re_time_prefix = re.compile(r'^(\d{2}:\d{2}:\d{2})\s*\|')
+
+    # Tentamos inferir a data a partir da linha "AdminLog started on YYYY-MM-DD"
+    log_date = None
+    for line in log_text.splitlines():
+        if "AdminLog started on " in line:
+            try:
+                parte = line.split("AdminLog started on ")[1]
+                data_str = parte.split(" at ")[0].strip()
+                log_date = datetime.strptime(data_str, "%Y-%m-%d").date()
+            except Exception:
+                pass
+            break
+
+    if not log_date:
+        # fallback: hoje, se não achar a data no cabeçalho
+        log_date = datetime.now(FUSO_BR).date()
+
+    last_reset_dt = None
+
+    for line in log_text.splitlines():
+        if not any(k.lower() in line.lower() for k in reset_keywords):
+            continue
+
+        m = re_time_prefix.match(line)
+        if not m:
+            continue
+
+        hora_str = m.group(1)
+        try:
+            dt = datetime.strptime(f"{log_date} {hora_str}", "%Y-%m-%d %H:%M:%S")
+            dt = dt.replace(tzinfo=FUSO_BR)
+        except Exception:
+            continue
+
+        # Mantém sempre o mais recente
+        if (last_reset_dt is None) or (dt > last_reset_dt):
+            last_reset_dt = dt
+
+    return last_reset_dt
 
 def format_seconds_hhmmss(segundos: int):
     if segundos < 0:
@@ -1476,18 +1476,22 @@ def main():
 
     # --- ABA MAGNATAS DZCOINS ---
     with tab_magnatas:
-        st.markdown("### 💎 Ranking — Magnatas de DzCoins")
-        
-        st.info(
-            "Aqui você pode ver o ranking dos 10 maiores magnatas de DzCoins do servidor. "
-            "O total é a soma de carteira + banco. 👤 Marca sua posição."
-        )
-        
-        clients_db_fresh = load_db(DB_CLIENTS, {})
-        client_data_fresh = clients_db_fresh.get(server_id, {})
-        
-        @st.fragment(run_every=60)
-        def _leaderboard_fragment():
-            render_leaderboard_dzcoins(client_data_fresh, gamertag_vinculada)
-        
-        _leaderboard_fragment()
+            st.markdown("### 💎 Ranking — Magnatas de DzCoins")
+            
+            st.info(
+                "Aqui você pode ver o ranking dos 10 maiores magnatas de DzCoins do servidor. "
+                "O total é a soma de carteira + banco. 👤 Marca sua posição."
+            )
+            
+            clients_db_fresh = load_db(DB_CLIENTS, {})
+            client_data_fresh = clients_db_fresh.get(server_id, {})
+            
+            @st.fragment(run_every=60)
+            def _leaderboard_fragment():
+                render_leaderboard_dzcoins(client_data_fresh, gamertag_vinculada)
+            
+            _leaderboard_fragment()
+
+
+if __name__ == "__main__":
+    main()
