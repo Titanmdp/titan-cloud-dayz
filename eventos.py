@@ -402,6 +402,142 @@ def enviar_cfggameplay_via_ftp(client_id, local_path, mapa):
     except Exception as e:
         return False, str(e)
 
+def get_server_status_nitrado(client_id: str, nitrado_id: str) -> str:
+    """
+    Obtém o status do servidor via API Nitrado.
+    Retorna: "stopped", "restarting", "online", ou "unknown"
+    """
+    try:
+        NITRADO_TOKEN = os.environ.get("NITRADO_TOKEN", "")
+        NITRADO_API = "https://api.nitrado.net"
+        
+        if not NITRADO_TOKEN or not nitrado_id:
+            return "unknown"
+        
+        headers = {"Authorization": f"Bearer {NITRADO_TOKEN}"}
+        url = f"{NITRADO_API}/services/{nitrado_id}/gameservers"
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            gs = data.get("data", {}).get("gameserver", {})
+            status = gs.get("status", "unknown")
+            return status  # "stopped", "starting", "online", etc
+        return "unknown"
+    except Exception:
+        return "unknown"
+
+
+def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus") -> bool:
+    """
+    Envia um arquivo JSON com os pedidos para o servidor via FTP.
+    Arquivo é enviado para: mpmissions/dayzOffline.{mapa}/custom/loja_pedidos.json
+    """
+    try:
+        db_atual = load_db(DB_CLIENTS, {})
+        if client_id not in db_atual:
+            return False
+        
+        conf = db_atual[client_id].get("ftp", {})
+        if not conf or not conf.get("host"):
+            return False
+        
+        # Define caminho remoto de acordo com o mapa
+        mapa_lower = mapa.lower()
+        if "enoch" in mapa_lower or "livonia" in mapa_lower:
+            remote_base = "mpmissions/dayzOffline.enoch"
+        else:
+            remote_base = "mpmissions/dayzOffline.chernarusplus"
+        
+        remote_dir = f"{remote_base}/custom"
+        
+        # Cria JSON com pedidos
+        pedidos_data = {
+            "timestamp": get_hora_brasilia().isoformat(),
+            "pedidos": pedidos
+        }
+        
+        # Salva em arquivo temporário
+        temp_file = f"/tmp/loja_pedidos_{client_id}.json"
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(pedidos_data, f, indent=4, ensure_ascii=False)
+        
+        # Envia via FTP
+        ftp = ftplib.FTP()
+        ftp.connect(conf["host"], int(conf.get("port", 21)), timeout=15)
+        ftp.login(conf["user"], conf["pass"])
+        ftp.cwd(remote_dir)
+        
+        with open(temp_file, "rb") as f:
+            ftp.storbinary(f"STOR loja_pedidos.json", f)
+        
+        ftp.quit()
+        
+        # Remove arquivo temporário
+        try:
+            os.remove(temp_file)
+        except:
+            pass
+        
+        return True
+    except Exception as e:
+        print(f"Erro ao enviar pedidos via FTP: {e}")
+        return False
+
+
+def worker_processar_pedidos():
+    """
+    Worker que processa pedidos de loja quando servidor está em restart/stopped.
+    Executa a cada 30 segundos.
+    """
+    while True:
+        try:
+            db_all = load_db(DB_CLIENTS, {})
+            mudou = False
+            
+            for client_id, client_info in db_all.items():
+                # Obtém dados do cliente
+                pedidos_list = client_info.get("pedidos", [])
+                nitrado_id = client_info.get("nitrado_id", "")
+                mapa = client_info.get("loja", {}).get("mapa_padrao", "Chernarus")
+                ftp_config = client_info.get("ftp", {})
+                
+                if not pedidos_list or not ftp_config or not ftp_config.get("host"):
+                    continue
+                
+                # Filtra apenas pedidos aguardando reset
+                pedidos_pendentes = [p for p in pedidos_list if p.get("status") == "Aguardando Reset"]
+                
+                if not pedidos_pendentes:
+                    continue
+                
+                # Obtém status do servidor
+                server_status = get_server_status_nitrado(client_id, nitrado_id)
+                
+                # Se servidor está stopped ou restarting, processa pedidos
+                if server_status in ["stopped", "restarting", "restart"]:
+                    # Tenta enviar pedidos
+                    success = enviar_pedidos_via_ftp(client_id, pedidos_pendentes, mapa)
+                    
+                    if success:
+                        # Marca todos os pedidos como entregues
+                        for pedido in pedidos_pendentes:
+                            pedido["status"] = "Entregue"
+                            pedido["data_entrega"] = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
+                        
+                        client_info["pedidos"] = pedidos_list
+                        mudou = True
+                        print(f"✅ Pedidos do cliente {client_id} entregues com sucesso via FTP")
+            
+            if mudou:
+                save_db(DB_CLIENTS, db_all)
+        
+        except Exception as e:
+            print(f"Erro no worker de pedidos: {e}")
+        
+        time.sleep(30)
+
+
 def pro_worker():
     while True:
         try:
