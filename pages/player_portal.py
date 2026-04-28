@@ -750,8 +750,9 @@ def parse_adm_semanal(log_text: str) -> dict:
         "pve_suicides": int,             # suicídios
         "pvp_kills": int,                # kills PvP
         "pvp_deaths": int,               # mortes PvP
-        "last_spawn_dt": datetime|None,  # último spawn (connect ou respawn)
-        "last_death_dt": datetime|None,  # última morte
+        "last_connect_dt": datetime|None,
+        "last_spawn_dt": datetime|None,
+        "last_death_dt": datetime|None,
         "xp": float,                     # calculado: baseado em tempo de sobrevivência
       }
     }
@@ -761,7 +762,7 @@ def parse_adm_semanal(log_text: str) -> dict:
 
     players = {}
 
-    # Regex
+    # Regex (forma correta em raw strings)
     re_player_line   = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)"')
     re_date_header   = re.compile(r'AdminLog started on (\d{4}-\d{2}-\d{2})')
     re_hit_infected  = re.compile(r'hit by Infected .* for ([\d.]+) damage')
@@ -770,14 +771,14 @@ def parse_adm_semanal(log_text: str) -> dict:
     re_pos           = re.compile(r'pos=<([\d., -]+)>')
 
     # Palavras-chave
-    key_connected    = "is connected"
-    key_connecting   = "is connecting"
-    key_disconnected = "has been disconnected"
-    key_suicide_emote= "performed EmoteSuicide"
-    key_committed_sui= "committed suicide"
-    key_hit_infected = "hit by Infected"
-    key_killed       = ") killed Player"
-    key_died         = "(DEAD)"
+    key_connected     = "is connected"
+    key_connecting    = "is connecting"
+    key_disconnected  = "has been disconnected"
+    key_suicide_emote = "performed EmoteSuicide"
+    key_committed_sui = "committed suicide"
+    key_hit_infected  = "hit by Infected"
+    key_killed        = ") killed Player"
+    key_died          = "(DEAD)"
 
     # Data corrente do bloco sendo processado
     current_date = datetime.now(FUSO_BR).date()
@@ -820,7 +821,7 @@ def parse_adm_semanal(log_text: str) -> dict:
                     p["max_survival_seconds"] = surv
         p["last_death_dt"] = dt_morte
         p["last_spawn_dt"] = None
-        # XP = total de segundos sobrevivendo / 60 (minutos = pontos de XP)
+        # XP provisório (será recalculado no final também)
         p["xp"] = round(p["total_survival_seconds"] / 60, 2)
 
     for line in log_text.splitlines():
@@ -843,7 +844,6 @@ def parse_adm_semanal(log_text: str) -> dict:
 
         hora_str = m.group(1)
         nome = m.group(2)
-        # Ignora linhas de jogador morto para stats principais
         is_dead_line = key_died in line
 
         dt_evento = parse_dt(hora_str, current_date)
@@ -868,8 +868,12 @@ def parse_adm_semanal(log_text: str) -> dict:
         # Hit por Infected (dano real)
         if key_hit_infected in line and not is_dead_line:
             m_hit = re_hit_infected.search(line)
-            if m_hit and float(m_hit.group(1)) > 0:
-                p["pve_hits"] += 1
+            if m_hit:
+                try:
+                    if float(m_hit.group(1)) > 0:
+                        p["pve_hits"] += 1
+                except Exception:
+                    pass
 
         # Suicídio / EmoteSuicide
         if key_suicide_emote in line or key_committed_sui in line:
@@ -887,7 +891,6 @@ def parse_adm_semanal(log_text: str) -> dict:
             m_kill = re_killed_pvp.search(line)
             if m_kill:
                 p["pvp_kills"] += 1
-                # Registra morte para a vítima
                 vitima = m_kill.group(1)
                 pv = ensure_player(vitima)
                 registrar_morte(pv, dt_evento)
@@ -895,12 +898,13 @@ def parse_adm_semanal(log_text: str) -> dict:
 
     # Recalcula XP final para todos
     for nome, p in players.items():
-        # Se jogador ainda está vivo (sem morte registrada), estima sobrevivência
+        # Se jogador ainda está vivo (sem morte registrada), estima sobrevivência atual
         if p.get("last_spawn_dt") and p.get("last_connect_dt"):
             agora = datetime.now(FUSO_BR)
             delta_atual = (agora - p["last_spawn_dt"]).total_seconds()
             if delta_atual > 0:
                 p["current_survival_seconds"] = int(delta_atual)
+        # XP final baseado em total_survival_seconds
         p["xp"] = round(p["total_survival_seconds"] / 60, 2)
 
     return players
