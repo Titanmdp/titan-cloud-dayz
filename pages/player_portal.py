@@ -367,6 +367,9 @@ def parse_adm_killfeed_pve(log_text: str) -> list:
     """
     eventos = []
 
+    if not log_text or not log_text.strip():
+        return eventos
+
     # Data do log
     log_date = None
     for line in log_text.splitlines():
@@ -381,7 +384,7 @@ def parse_adm_killfeed_pve(log_text: str) -> list:
     if not log_date:
         log_date = datetime.now(FUSO_BR).date()
 
-    # Regex
+    # Regex (sem escape duplo no arquivo real)
     re_hit_infected = re.compile(
         r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" '
         r'\([^)]*\)\[HP: ([\d.]+)\] hit by Infected into (\w+)\(\d+\) '
@@ -400,31 +403,27 @@ def parse_adm_killfeed_pve(log_text: str) -> list:
         r'\([^)]*\) committed suicide'
     )
 
-    # Rastreia última arma de suicídio por jogador
     ultima_arma_suicidio = {}
-    # Rastreia última posição conhecida por jogador
     ultima_pos = {}
 
-    # Extrai posição de linhas genéricas
     re_pos = re.compile(r'pos=<([\d., -]+)>')
+
+    def parse_dt(tstr):
+        try:
+            dt = datetime.strptime(f"{log_date} {tstr}", "%Y-%m-%d %H:%M:%S")
+            return dt.replace(tzinfo=FUSO_BR)
+        except Exception:
+            return None
 
     for line in log_text.splitlines():
         line = line.strip()
         if not line:
             continue
 
-        # Atualiza última posição conhecida
         m_pos = re_pos.search(line)
         m_nome = re.search(r'Player "([^"]+)"', line)
         if m_pos and m_nome:
             ultima_pos[m_nome.group(1)] = m_pos.group(1)
-
-        def parse_dt(tstr):
-            try:
-                dt = datetime.strptime(f"{log_date} {tstr}", "%Y-%m-%d %H:%M:%S")
-                return dt.replace(tzinfo=FUSO_BR)
-            except Exception:
-                return None
 
         # Hit por Infected (só dano real > 0)
         m = re_hit_infected.match(line)
@@ -479,7 +478,6 @@ def parse_adm_killfeed_pve(log_text: str) -> list:
             ultima_arma_suicidio.pop(nome, None)
             continue
 
-    # Ordena do mais recente para o mais antigo
     eventos.sort(key=lambda x: x.get("dt") or datetime.min.replace(tzinfo=FUSO_BR), reverse=True)
     return eventos
 
@@ -490,6 +488,9 @@ def parse_adm_conexoes(log_text: str) -> list:
     Retorna lista de dicts ordenada do mais recente.
     """
     eventos = []
+
+    if not log_text or not log_text.strip():
+        return eventos
 
     log_date = None
     for line in log_text.splitlines():
@@ -508,7 +509,6 @@ def parse_adm_conexoes(log_text: str) -> list:
     re_connected    = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*pos=<([^>]+)>\) is connected')
     re_disconnected = re.compile(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*pos=<([^>]+)>\) has been disconnected')
 
-    # Rastreia horário de conexão para calcular duração
     hora_connect = {}
 
     def parse_dt(tstr):
@@ -589,6 +589,9 @@ def parse_adm_killfeed_pvp(log_text: str) -> list:
     """
     eventos = []
 
+    if not log_text or not log_text.strip():
+        return eventos
+
     log_date = None
     for line in log_text.splitlines():
         if "AdminLog started on " in line:
@@ -609,16 +612,13 @@ def parse_adm_killfeed_pvp(log_text: str) -> list:
         except Exception:
             return None
 
-    # Padrão 1: killed
     re_killed = re.compile(
         r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*\) killed Player "([^"]+)"'
     )
-    # Padrão 2: hit by Player com HP 0
     re_hit_pvp = re.compile(
         r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \([^)]*\)\[HP: 0\] '
         r'hit by Player "([^"]+)" .* for ([\d.]+) damage \(([^)]+)\)'
     )
-    # Padrão 3: died após hit PvP
     re_died_pvp = re.compile(
         r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)" \(DEAD\) '
         r'\([^)]*pos=<([^>]+)>\) died'
@@ -631,6 +631,7 @@ def parse_adm_killfeed_pvp(log_text: str) -> list:
         if not line:
             continue
 
+        # Padrão 1: killed
         m = re_killed.match(line)
         if m:
             hora, assassino, vitima = m.group(1), m.group(2), m.group(3)
@@ -650,6 +651,7 @@ def parse_adm_killfeed_pvp(log_text: str) -> list:
             })
             continue
 
+        # Padrão 2: hit by Player com HP 0
         m = re_hit_pvp.match(line)
         if m:
             hora, vitima, assassino, dano, arma = (
@@ -672,67 +674,28 @@ def parse_adm_killfeed_pvp(log_text: str) -> list:
             })
             continue
 
+        # (Opcional) Padrão 3: died PvP com posição
+        m = re_died_pvp.match(line)
+        if m:
+            hora, vitima, pos = m.group(1), m.group(2), m.group(3)
+            arma = ultima_arma_pvp.pop(vitima, "Desconhecida")
+            eventos.append({
+                "tipo": "pvp_kill",
+                "hora": hora,
+                "dt": parse_dt(hora),
+                "assassino": "",
+                "vitima": vitima,
+                "arma": arma,
+                "dano": "",
+                "parte_corpo": "",
+                "posicao": pos,
+                "icone": "💀",
+                "descricao": f"{vitima} morreu (PvP) em {pos} — arma: {arma}",
+            })
+            continue
+
     eventos.sort(key=lambda x: x.get("dt") or datetime.min.replace(tzinfo=FUSO_BR), reverse=True)
     return eventos
-
-    # ---- funções auxiliares (dentro do escopo correto) ----
-
-    def ensure_player(name: str) -> dict:
-        if name not in players:
-            players[name] = {
-                "total_play_seconds": 0,
-                "session_count": 0,
-                "last_connect": None,
-                "last_disconnect": None,
-                "last_death_time": None,
-                "pve_hits": 0,
-                "pve_suicides": 0,
-            }
-        return players[name]
-
-    def parse_dt(tstr: str):
-        try:
-            dt = datetime.strptime(f"{log_date} {tstr}", "%Y-%m-%d %H:%M:%S")
-            return dt.replace(tzinfo=FUSO_BR)
-        except Exception:
-            return None
-
-    # ---- processamento linha a linha ----
-
-    for line in log_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-
-        m = re_player_line.match(line)
-        if not m:
-            continue
-
-        hora_str = m.group(1)
-        nome = m.group(2)
-        dt_evento = parse_dt(hora_str)
-        p = ensure_player(nome)
-
-        if key_connected in line:
-            p["last_connect"] = dt_evento
-
-        elif key_disconnected in line:
-            if p.get("last_connect") and dt_evento:
-                delta = (dt_evento - p["last_connect"]).total_seconds()
-                if delta > 0:
-                    p["total_play_seconds"] += int(delta)
-                    p["session_count"] += 1
-            p["last_disconnect"] = dt_evento
-            p["last_connect"] = None
-
-        if key_suicide_emote in line or key_committed_sui in line:
-            p["pve_suicides"] += 1
-            p["last_death_time"] = dt_evento
-
-        if key_hit_infected in line:
-            p["pve_hits"] += 1
-
-    return {"players": players}
 
 # =========================================================
 # 4.3 RANKING SEMANAL — ACUMULADO 7 DIAS
