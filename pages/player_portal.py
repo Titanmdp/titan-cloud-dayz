@@ -227,6 +227,63 @@ def ftp_download_restart_log(ftp_cfg: dict):
     except Exception as e:
         return None, f"Erro ao baixar {RESTART_LOG_FILENAME}: {e}"
 
+def ftp_buscar_y_por_coordenadas(ftp_cfg: dict, x: float, z: float, mapa: str = "Chernarus") -> tuple[float | None, float]:
+    """
+    Baixa o cfgeventspawns.xml via FTP, varre todos os pontos com y definido
+    e retorna o y do ponto mais próximo + a distância em metros.
+    Retorna (y, distancia) ou (None, 0) se não encontrar.
+    """
+    import math
+    import xml.etree.ElementTree as ET
+
+    # Caminho baseado no mapa
+    if mapa == "Livonia":
+        caminho = "dayzxb_missions/dayzOffline.enoch"
+    else:
+        caminho = "dayzxb_missions/dayzOffline.chernarusplus"
+
+    arquivo = "cfgeventspawns.xml"
+    buffer = io.BytesIO()
+
+    try:
+        with FTP() as ftp:
+            ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=10)
+            ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
+            ftp.cwd(caminho)
+            ftp.retrbinary(f"RETR {arquivo}", buffer.write)
+    except Exception as e:
+        print(f"[Y-Finder] Erro ao baixar {arquivo}: {e}")
+        return None, 0.0
+
+    try:
+        conteudo = buffer.getvalue().decode("utf-8", errors="ignore")
+        root = ET.fromstring(conteudo)
+    except Exception as e:
+        print(f"[Y-Finder] Erro ao parsear XML: {e}")
+        return None, 0.0
+
+    melhor_y = None
+    melhor_dist = float("inf")
+
+    for pos in root.iter("pos"):
+        try:
+            px = float(pos.get("x", 0))
+            py = float(pos.get("y", 0))
+            pz = float(pos.get("z", 0))
+
+            # Ignora pontos sem y definido (y == 0 geralmente = não definido)
+            if py == 0.0:
+                continue
+
+            dist = math.sqrt((px - x) ** 2 + (pz - z) ** 2)
+            if dist < melhor_dist:
+                melhor_dist = dist
+                melhor_y = py
+        except Exception:
+            continue
+
+    return melhor_y, melhor_dist
+
 def parse_last_restart_from_restart_log(log_text: str):
     if not log_text:
         return None
@@ -2040,16 +2097,72 @@ def main():
                             key=f"origem_{item['id']}",
                         )
 
-                        coordenadas = st.text_input(
-                            "📍 Coordenadas de entrega",
-                            placeholder="Ex: 8867.2 x 2267.4 x 8.0",
-                            help=(
-                                "Informe sua posição atual no mapa. "
-                                "No DayZ pressione ~ para ver as coordenadas. "
-                                "O item será entregue neste local no próximo reset."
-                            ),
-                            key=f"coord_{item['id']}",
-                        )
+                        st.markdown("#### 📍 Localização de entrega")
+                        col_cx, col_cz = st.columns(2)
+                        with col_cx:
+                            coord_x = st.text_input(
+                                "Eixo X",
+                                placeholder="Ex: 4106.11",
+                                key=f"coord_x_{item['id']}",
+                            )
+                        with col_cz:
+                            coord_z = st.text_input(
+                                "Eixo Z",
+                                placeholder="Ex: 5179.62",
+                                key=f"coord_z_{item['id']}",
+                            )
+
+                        # Calcula Y em background quando X e Z forem preenchidos
+                        coord_y = None
+                        dist_ref = None
+                        if coord_x.strip() and coord_z.strip():
+                            try:
+                                fx = float(coord_x.strip())
+                                fz = float(coord_z.strip())
+                                cache_key = f"y_cache_{server_id}_{fx:.1f}_{fz:.1f}"
+
+                                if cache_key not in st.session_state:
+                                    ftp_cfg_loja = get_client_ftp_config(client_data_loja)
+                                    mapa_loja = loja.get("mapa_padrao", "Chernarus")
+                                    if ftp_cfg_loja:
+                                        y_val, dist_val = ftp_buscar_y_por_coordenadas(
+                                            ftp_cfg_loja, fx, fz, mapa_loja
+                                        )
+                                        st.session_state[cache_key] = (y_val, dist_val)
+                                    else:
+                                        st.session_state[cache_key] = (None, 0.0)
+
+                                coord_y, dist_ref = st.session_state[cache_key]
+
+                                if coord_y is not None:
+                                    qualidade = (
+                                        "✅ Alta precisão"   if dist_ref < 300  else
+                                        "⚠️ Precisão média" if dist_ref < 800  else
+                                        "🔴 Precisão baixa"
+                                    )
+                                    st.markdown(
+                                        f"""
+                                        <div style="background:#0d1f0d; border-radius:6px;
+                                                    padding:8px 12px; border:1px solid #1a4a1a;
+                                                    font-size:12px; color:#aaa; margin-bottom:6px;">
+                                            🧭 Eixo Y calculado automaticamente: 
+                                            <b style="color:#00ff88;">{coord_y:.4f}</b>
+                                            &nbsp;|&nbsp; Referência a <b>{dist_ref:.0f}m</b>
+                                            &nbsp;|&nbsp; {qualidade}
+                                        </div>
+                                        """,
+                                        unsafe_allow_html=True,
+                                    )
+                                else:
+                                    st.warning("⚠️ Não foi possível calcular o Y. Verifique se o FTP está configurado.")
+                            except ValueError:
+                                st.error("❌ X e Z devem ser números. Ex: 4106.11")
+
+                        # Monta string final de coordenadas
+                        if coord_x.strip() and coord_z.strip() and coord_y is not None:
+                            coordenadas = f"{coord_x.strip()} {coord_y:.4f} {coord_z.strip()}"
+                        else:
+                            coordenadas = ""
 
                         st.markdown(
                             """
@@ -2072,8 +2185,10 @@ def main():
                         )
 
                         if confirmar:
-                            if not coordenadas.strip():
-                                st.error("Informe as coordenadas de entrega antes de confirmar.")
+                            if not coord_x.strip() or not coord_z.strip():
+                                st.error("Informe o Eixo X e o Eixo Z antes de confirmar.")
+                            elif coord_y is None:
+                                st.error("Aguarde o cálculo do Eixo Y ou verifique se o FTP está configurado.")
                             else:
                                 ok, msg = registrar_compra(
                                     clients_db_loja,
@@ -2085,10 +2200,15 @@ def main():
                                     hora_br,
                                 )
                                 if ok:
+                                    # Limpa cache das coordenadas após compra confirmada
+                                    cache_key = f"y_cache_{server_id}_{float(coord_x.strip()):.1f}_{float(coord_z.strip()):.1f}"
+                                    st.session_state.pop(cache_key, None)
                                     save_db(DB_CLIENTS, clients_db_loja)
                                     st.success(
                                         f"✅ Compra confirmada! **{item['nome']}** x{item.get('quantidade',1)} "
-                                        f"será entregue em **{coordenadas.strip()}** no próximo reset."
+                                        f"será entregue em **X:{coord_x.strip()} "
+                                        f"Y:{coord_y:.4f} "
+                                        f"Z:{coord_z.strip()}** no próximo reset."
                                     )
                                     st.balloons()
                                     st.rerun()
