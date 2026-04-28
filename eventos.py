@@ -11,6 +11,7 @@ import shutil
 import smtplib
 import xml.etree.ElementTree as ET
 import pandas as pd
+import base64
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
@@ -94,6 +95,15 @@ if not os.path.exists(UPLOAD_DIR):
 # =========================================================
 # 2. FUNÇÕES UTILITÁRIAS / INFRA
 # =========================================================
+
+def str_to_time(data_str, hora_str):
+    try:
+        return datetime.strptime(
+            f"{data_str} {hora_str}",
+            "%d/%m/%Y %H:%M"
+        ).replace(tzinfo=FUSO_BR)
+    except Exception:
+        return None
 
 def buscar_localizacao_cliente():
     url_api = "https://ipapi.co/json/"
@@ -311,7 +321,7 @@ def applydftotypesxml(tree, root, df):
     return header + xmlbytes
 
 
-def dispararftppro(clientid, acao, filename, local_path, mapapath):
+def dispararftppro(clientid, acao, filename, localpath, mapapath):
     dbatual = load_db(DBCLIENTS, {})
     if clientid not in dbatual:
         return False, "Erro"
@@ -323,7 +333,7 @@ def dispararftppro(clientid, acao, filename, local_path, mapapath):
         ftp.login(conf["user"], conf["pass"])
         ftp.cwd(mapapath)
         if acao == "UPLOAD":
-            with open(local_path, "rb") as f:
+            with open(localpath, "rb") as f:
                 ftp.storbinary(f"STOR {filename}", f)
         elif acao == "DELETE":
             try:
@@ -334,6 +344,80 @@ def dispararftppro(clientid, acao, filename, local_path, mapapath):
         return True, "Sucesso"
     except Exception:
         return False, "Erro"
+
+def pro_worker():
+    while True:
+        try:
+            now = get_hora_brasilia()
+            db_all = load_db(DB_CLIENTS, {})
+            mudou = False
+
+            for cid, cinfo in db_all.items():
+                for ag in cinfo.get("agendas", []):
+                    hora_entrada = str_to_time(ag.get("data"), ag.get("in"))
+                    hora_saida = str_to_time(ag.get("data"), ag.get("out"))
+
+                    if hora_entrada and now >= hora_entrada and ag.get("status") == "Aguardando":
+                        if not os.path.exists(ag["localpath"]) and ag.get("filecontent"):
+                            try:
+                                os.makedirs(os.path.dirname(ag["localpath"]), exist_ok=True)
+                                with open(ag["localpath"], "wb") as f:
+                                    f.write(base64.b64decode(ag["filecontent"]))
+                            except Exception as e:
+                                print("Erro ao recriar arquivo:", e)
+
+                        if not os.path.exists(ag["localpath"]):
+                            ag["status"] = "Erro"
+                            registrar_log(cid, f"Arquivo perdido: {ag['file']}", "erro")
+                            mudou = True
+                        else:
+                            ok, msg = dispararftppro(
+                                cid,
+                                "UPLOAD",
+                                ag["file"],
+                                ag["localpath"],
+                                ag["path"],
+                            )
+                            ag["status"] = "Ativo" if ok else "Erro"
+                            registrar_log(
+                                cid,
+                                f"UPLOAD {ag['file']} {'OK' if ok else msg}",
+                                "sucesso" if ok else "erro",
+                            )
+                            mudou = True
+
+                    if hora_saida and now >= hora_saida and ag.get("status") == "Ativo":
+                        ok, msg = dispararftppro(
+                            cid,
+                            "DELETE",
+                            ag["file"],
+                            ag["localpath"],
+                            ag["path"],
+                        )
+                        registrar_log(
+                            cid,
+                            f"DELETE {ag['file']} {'OK' if ok else msg}",
+                            "sucesso" if ok else "erro",
+                        )
+
+                        if ag.get("rec") == "Diário":
+                            ag["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
+                            ag["status"] = "Aguardando"
+                        elif ag.get("rec") == "Semanal":
+                            ag["data"] = (now + timedelta(days=7)).strftime("%d/%m/%Y")
+                            ag["status"] = "Aguardando"
+                        else:
+                            ag["status"] = "Finalizado"
+
+                        mudou = True
+
+            if mudou:
+                save_db(DB_CLIENTS, db_all)
+
+        except Exception as e:
+            print("Erro no proworker:", e)
+
+        time.sleep(30)
 
 # ---------- HELPERS CFGEVENTSPAWNS.XML ----------
 
@@ -426,7 +510,7 @@ def aplicar_eventos_map_no_cfgeventspawns(tree, root, eventos_map):
     return header + xml_bytes
 
 
-def enviar_cfgeventspawns_via_ftp(clientid, local_path, mapa):
+def enviar_cfgeventspawns_via_ftp(clientid, localpath, mapa):
     """
     Envia o cfgeventspawns.xml para a raiz da missão do DayZ,
     conforme o mapa selecionado.
@@ -452,7 +536,7 @@ def enviar_cfgeventspawns_via_ftp(clientid, local_path, mapa):
         ftp.login(conf["user"], conf["pass"])
         ftp.cwd(remotedir)
 
-        with open(local_path, "rb") as f:
+        with open(localpath, "rb") as f:
             ftp.storbinary("STOR cfgeventspawns.xml", f)
 
         ftp.quit()
@@ -462,7 +546,7 @@ def enviar_cfgeventspawns_via_ftp(clientid, local_path, mapa):
 
 # ---------- HELPER GENÉRICO DE FTP ----------
 
-def enviar_arquivo_via_ftp(clientid, local_path, remotedir, remotefilename):
+def enviar_arquivo_via_ftp(clientid, localpath, remotedir, remotefilename):
     """
     Envia um arquivo local para um diretório remoto específico via FTP.
     """
@@ -480,7 +564,7 @@ def enviar_arquivo_via_ftp(clientid, local_path, remotedir, remotefilename):
         ftp.login(conf["user"], conf["pass"])
         ftp.cwd(remotedir)
 
-        with open(local_path, "rb") as f:
+        with open(localpath, "rb") as f:
             ftp.storbinary(f"STOR {remotefilename}", f)
 
         ftp.quit()
@@ -492,9 +576,9 @@ def enviar_arquivo_via_ftp(clientid, local_path, remotedir, remotefilename):
 
 # ---------- WRAPPERS ESPECÍFICOS ----------
 
-def enviartypesviaftp(clientid, local_path, mapa):
+def enviartypesviaftp(clientid, localpath, mapa):
     """
-    Envia o arquivo types.xml já salvo em local_path
+    Envia o arquivo types.xml já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
     """
     remotedir = TYPESREMOTEPATHS.get(mapa)
@@ -503,14 +587,14 @@ def enviartypesviaftp(clientid, local_path, mapa):
 
     return enviar_arquivo_via_ftp(
         clientid=clientid,
-        local_path=local_path,
+        localpath=localpath,
         remotedir=remotedir,
         remotefilename="types.xml",
     )
 
-def enviarglobalsviaftp(clientid, local_path, mapa):
+def enviarglobalsviaftp(clientid, localpath, mapa):
     """
-    Envia o arquivo globals.xml já salvo em local_path
+    Envia o arquivo globals.xml já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
     """
     remotedir = TYPESREMOTEPATHS.get(mapa)
@@ -519,14 +603,14 @@ def enviarglobalsviaftp(clientid, local_path, mapa):
 
     return enviar_arquivo_via_ftp(
         clientid=clientid,
-        local_path=local_path,
+        localpath=localpath,
         remotedir=remotedir,
         remotefilename="globals.xml",
     )
 
-def enviarcfggameplayviaftp(clientid, local_path, mapa):
+def enviarcfggameplayviaftp(clientid, localpath, mapa):
     """
-    Envia o arquivo cfggameplay.json já salvo em local_path
+    Envia o arquivo cfggameplay.json já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
     """
     remotedir = CFGGAMEPLAYREMOTEPATHS.get(mapa)
@@ -535,12 +619,12 @@ def enviarcfggameplayviaftp(clientid, local_path, mapa):
 
     return enviar_arquivo_via_ftp(
         clientid=clientid,
-        local_path=local_path,
+        localpath=localpath,
         remotedir=remotedir,
         remotefilename="cfggameplay.json",
     )
 
-def enviareventsviaftp(clientid, local_path, mapa):
+def enviareventsviaftp(clientid, localpath, mapa):
     """
     Envia o arquivo events.xml para o diretório correto do mapa.
     """
@@ -550,12 +634,12 @@ def enviareventsviaftp(clientid, local_path, mapa):
 
     return enviar_arquivo_via_ftp(
         clientid=clientid,
-        local_path=local_path,
+        localpath=localpath,
         remotedir=remotedir,
         remotefilename="events.xml",
     )
 
-def enviarmessagesviaftp(clientid, local_path, mapa):
+def enviarmessagesviaftp(clientid, localpath, mapa):
     MESSAGESREMOTEPATHS = {
         "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
         "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
@@ -576,7 +660,7 @@ def enviarmessagesviaftp(clientid, local_path, mapa):
         ftp.login(conf["user"], conf["pass"])
         ftp.cwd(remotedir)
 
-        with open(local_path, "rb") as f:
+        with open(localpath, "rb") as f:
             ftp.storbinary("STOR messages.xml", f)
 
         ftp.quit()
@@ -585,7 +669,7 @@ def enviarmessagesviaftp(clientid, local_path, mapa):
         return False, str(e)
 
 
-def enviar_cfgeventspawns_via_ftp(clientid, local_path, mapa):
+def enviar_cfgeventspawns_via_ftp(clientid, localpath, mapa):
     """
     Envia o arquivo cfgeventspawns.xml para a raiz da missão do mapa.
     """
@@ -595,7 +679,7 @@ def enviar_cfgeventspawns_via_ftp(clientid, local_path, mapa):
 
     return enviar_arquivo_via_ftp(
         clientid=clientid,
-        local_path=local_path,
+        localpath=localpath,
         remotedir=remotedir,
         remotefilename="cfgeventspawns.xml",
     )
@@ -750,8 +834,8 @@ def pro_worker():
                         and ag["in"] == agora
                         and ag.get("status") == "Aguardando"
                     ):
-                        success, _ = disparar_ftp_pro(
-                            c_id, "UPLOAD", ag["file"], ag["local_path"], ag["path"]
+                        success, _ = dispararftppro(
+                            c_id, "UPLOAD", ag["file"], ag["localpath"], ag["path"]
                         )
                         ag["status"] = "Ativo" if success else "Erro"
                         mudou = True
@@ -760,8 +844,8 @@ def pro_worker():
                         and ag["out"] == agora
                         and ag.get("status") == "Ativo"
                     ):
-                        disparar_ftp_pro(
-                            c_id, "DELETE", ag["file"], ag["local_path"], ag["path"]
+                        dispararftppro(
+                            c_id, "DELETE", ag["file"], ag["localpath"], ag["path"]
                         )
                         ag["status"] = "Finalizado"
                         mudou = True
@@ -771,6 +855,14 @@ def pro_worker():
             pass
 
         time.sleep(30)
+
+WORKER_STARTED = False
+
+def start_worker_once():
+    global WORKER_STARTED
+    if not WORKER_STARTED:
+        WORKER_STARTED = True
+        threading.Thread(target=proworker, daemon=True).start()
 
 # ---------- HELPERS GLOBALS.XML (AMBIENTE) ----------
 
@@ -1032,6 +1124,7 @@ if not st.session_state.get("authenticated"):
             user_info_login["last_login"] = get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
             save_db(DB_USERS, st.session_state.db_users)
 
+            start_worker_once()
             st.rerun()
         else:
             st.error(cargo)
@@ -1660,9 +1753,11 @@ with tab1:
             )
 
             if up_file is not None:
+                file_bytes = up_file.getvalue()
                 st.session_state[upload_session_key] = {
                     "name": up_file.name,
-                    "bytes": up_file.getvalue(),
+                    "bytes": file_bytes,
+                    "b64": base64.b64encode(file_bytes).decode("utf-8"),
                 }
                 st.success(f"Arquivo carregado: {up_file.name}")
 
@@ -1720,7 +1815,8 @@ with tab1:
                     nova_agenda = {
                         "id": str(time.time()),
                         "file": arquivo_em_sessao["name"],
-                        "local_path": path,
+                        "localpath": path,
+                        "filecontent": arquivo_em_sessao["b64"],
                         "mapa": mapa,
                         "path": "/dayzxb_missions/dayzOffline.chernarusplus/custom"
                         if mapa == "Chernarus"
@@ -2645,17 +2741,17 @@ with tabevents:
                 st.error("Nenhum events.xml foi carregado.")
             else:
                 safename = f"{user_id[:5]}_events_{mapaevents.lower()}.xml"
-                local_path = os.path.join(UPLOAD_DIR, safename)
+                localpath = os.path.join(UPLOAD_DIR, safename)
 
                 try:
-                    with open(local_path, "wb") as f:
+                    with open(localpath, "wb") as f:
                         f.write(xmlbytes)
                 except Exception as e:
                     registrar_log(user_id, f"Erro ao salvar events.xml localmente: {str(e)}", "erro")
                     st.error(f"Erro ao salvar events.xml localmente: {e}")
                     st.stop()
 
-                ok, msg = enviareventsviaftp(user_id, local_path, mapaevents)
+                ok, msg = enviareventsviaftp(user_id, localpath, mapaevents)
                 if ok:
                     registrar_log(user_id, f"events.xml enviado via FTP para {mapaevents}.", "sucesso")
                     st.success("events.xml enviado e aplicado via FTP com sucesso!")
@@ -2713,17 +2809,17 @@ with tabmessages:
                 st.error("Nenhum messages.xml foi carregado.")
             else:
                 safename = f"{user_id[:5]}_messages_{mapamessages.lower()}.xml"
-                local_path = os.path.join(UPLOAD_DIR, safename)
+                localpath = os.path.join(UPLOAD_DIR, safename)
 
                 try:
-                    with open(local_path, "wb") as f:
+                    with open(localpath, "wb") as f:
                         f.write(xmlbytes)
                 except Exception as e:
                     registrar_log(user_id, f"Erro ao salvar messages.xml localmente: {str(e)}", "erro")
                     st.error(f"Erro ao salvar messages.xml localmente: {e}")
                     st.stop()
 
-                ok, msg = enviarmessagesviaftp(user_id, local_path, mapamessages)
+                ok, msg = enviarmessagesviaftp(user_id, localpath, mapamessages)
                 if ok:
                     registrar_log(user_id, f"messages.xml enviado via FTP para {mapamessages}.", "sucesso")
                     st.success("messages.xml enviado e aplicado via FTP com sucesso!")
@@ -2859,12 +2955,12 @@ with tabcfgeventspawns:
                         newxmlbytes = aplicar_eventos_map_no_cfgeventspawns(tree, root, eventos_map)
 
                         safe_name = f"{user_id}_cfgeventspawns_{mapa_dest.lower()}.xml"
-                        local_path = os.path.join(UPLOAD_DIR, safe_name)
+                        localpath = os.path.join(UPLOAD_DIR, safe_name)
 
-                        with open(local_path, "wb") as f:
+                        with open(localpath, "wb") as f:
                             f.write(newxmlbytes)
 
-                        ok, msg = enviar_cfgeventspawns_via_ftp(user_id, local_path, mapa_dest)
+                        ok, msg = enviar_cfgeventspawns_via_ftp(user_id, localpath, mapa_dest)
 
                         if ok:
                             registrar_log(user_id, f"cfgeventspawns.xml atualizado e enviado via FTP para {mapa_dest}.", "sucesso")
