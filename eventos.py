@@ -65,6 +65,26 @@ TYPES_REMOTE_PATHS = {
     "Livonia": "mpmissions/dayzOffline.enoch/db",
 }
 
+EVENTS_REMOTE_PATHS = {
+    "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
+    "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
+}
+
+MESSAGES_REMOTE_PATHS = {
+    "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
+    "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
+}
+
+CFGEVENTSPAWNS_REMOTE_PATHS = {
+    "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus",
+    "Livonia": "dayzxb_missions/dayzOffline.enoch",
+}
+
+CFGGAMEPLAY_REMOTE_PATHS = {
+    "Chernarus": "mpmissions/dayzOffline.chernarusplus",
+    "Livonia": "mpmissions/dayzOffline.enoch",
+}
+
 # --- BANCO DE DADOS (JSON) / UPLOADS ---
 UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
@@ -216,64 +236,65 @@ def get_user_location():
 
 # ---------- HELPERS TYPES.XML (ECONOMIA) ----------
 
-def parse_types_xml(xml_bytes):
+def parsetypesxml(xmlbytes):
     """
     Recebe bytes de um types.xml e devolve:
     - tree: objeto ET.ElementTree
     - root: elemento raiz
     - df: DataFrame com colunas principais para edição
     """
-    tree = ET.ElementTree(ET.fromstring(xml_bytes))
+    tree = ET.ElementTree(ET.fromstring(xmlbytes))
     root = tree.getroot()
     rows = []
 
     for t in root.findall("type"):
         name = t.get("name", "")
         cat = None
-        cat_elem = t.find("category")
-        if cat_elem is not None:
-            cat = cat_elem.get("name")
+        catelem = t.find("category")
+        if catelem is not None:
+            cat = catelem.get("name")
 
-        def _get_int(tag, default=None):
+        def getint(tag, default=None):
             elem = t.find(tag)
             if elem is not None and elem.text is not None and elem.text.strip() != "":
                 try:
                     return int(elem.text.strip())
-                except:
+                except Exception:
                     return default
             return default
 
-        nominal = _get_int("nominal", 0)
-        min_v = _get_int("min", 0)
-        lifetime = _get_int("lifetime", 0)
+        nominal = getint("nominal", 0)
+        minv = getint("min", 0)
+        lifetime = getint("lifetime", 0)
 
         rows.append(
             {
                 "name": name,
                 "category": cat,
                 "nominal": nominal,
-                "min": min_v,
+                "min": minv,
                 "lifetime": lifetime,
             }
         )
 
     df = pd.DataFrame(rows)
-    return tree, root, df  # [web:65]
+    return tree, root, df
 
-def apply_df_to_types_xml(tree, root, df):
+
+def applydftotypesxml(tree, root, df):
     """
     Aplica as alterações do DataFrame de volta no XML
     e devolve bytes do novo types.xml.
     """
-    df_indexed = df.set_index("name")
+    dfindexed = df.set_index("name")
 
     for t in root.findall("type"):
         name = t.get("name", "")
-        if name not in df_indexed.index:
+        if name not in dfindexed.index:
             continue
-        row = df_indexed.loc[name]
+        row = dfindexed.loc[name]
 
-        def _set_int(tag, value):
+        def setint(tag, value):
             if pd.isna(value):
                 return
             elem = t.find(tag)
@@ -281,25 +302,26 @@ def apply_df_to_types_xml(tree, root, df):
                 elem = ET.SubElement(t, tag)
             elem.text = str(int(value))
 
-        _set_int("nominal", row.get("nominal"))
-        _set_int("min", row.get("min"))
-        _set_int("lifetime", row.get("lifetime"))
+        setint("nominal", row.get("nominal"))
+        setint("min", row.get("min"))
+        setint("lifetime", row.get("lifetime"))
 
-    xml_bytes = ET.tostring(root, encoding="utf-8", method="xml")
+    xmlbytes = ET.tostring(root, encoding="utf-8", method="xml")
     header = b'<?xml version="1.0" encoding="utf-8"?>\n'
-    return header + xml_bytes
+    return header + xmlbytes
 
-def disparar_ftp_pro(client_id, acao, filename, local_path, mapa_path):
-    db_atual = load_db(DB_CLIENTS, {})
-    if client_id not in db_atual:
+
+def dispararftppro(clientid, acao, filename, local_path, mapapath):
+    dbatual = load_db(DBCLIENTS, {})
+    if clientid not in dbatual:
         return False, "Erro"
 
-    conf = db_atual[client_id]["ftp"]
+    conf = dbatual[clientid]["ftp"]
     try:
         ftp = ftplib.FTP()
         ftp.connect(conf["host"], int(conf["port"]), timeout=15)
         ftp.login(conf["user"], conf["pass"])
-        ftp.cwd(mapa_path)
+        ftp.cwd(mapapath)
         if acao == "UPLOAD":
             with open(local_path, "rb") as f:
                 ftp.storbinary(f"STOR {filename}", f)
@@ -313,94 +335,270 @@ def disparar_ftp_pro(client_id, acao, filename, local_path, mapa_path):
     except Exception:
         return False, "Erro"
 
-def enviar_types_via_ftp(client_id, local_path, mapa):
+# ---------- HELPERS CFGEVENTSPAWNS.XML ----------
+
+def parse_cfgeventspawns_xml(xml_bytes):
+    """
+    Recebe bytes de um cfgeventspawns.xml e devolve:
+    - tree: objeto ET.ElementTree
+    - root: elemento raiz
+    - eventos_map: dict {nome_evento: DataFrame com colunas x, z, a, y}
+    """
+    tree = ET.ElementTree(ET.fromstring(xml_bytes))
+    root = tree.getroot()
+
+    eventos_map = {}
+
+    for event_elem in root.findall("event"):
+        event_name = event_elem.get("name", "SemNome")
+        rows = []
+
+        for pos in event_elem.findall("pos"):
+            def to_float(v, default=None):
+                if v is None or str(v).strip() == "":
+                    return default
+                try:
+                    return float(str(v).strip())
+                except Exception:
+                    return default
+
+            rows.append({
+                "x": to_float(pos.get("x"), 0.0),
+                "z": to_float(pos.get("z"), 0.0),
+                "a": to_float(pos.get("a"), None),
+                "y": to_float(pos.get("y"), None),
+            })
+
+        eventos_map[event_name] = pd.DataFrame(rows, columns=["x", "z", "a", "y"])
+
+    return tree, root, eventos_map
+
+
+def apply_df_to_cfgeventspawns_xml(tree, root, event_name, df_evento):
+    """
+    Atualiza apenas um bloco <event name='...'> no XML original,
+    preservando os demais eventos e atributos existentes.
+    Retorna bytes do novo cfgeventspawns.xml.
+    """
+    target_event = None
+    for event_elem in root.findall("event"):
+        if event_elem.get("name") == event_name:
+            target_event = event_elem
+            break
+
+    if target_event is None:
+        raise ValueError(f"Evento '{event_name}' não encontrado no cfgeventspawns.xml.")
+
+    for pos_elem in list(target_event.findall("pos")):
+        target_event.remove(pos_elem)
+
+    df_clean = df_evento.copy()
+
+    for _, row in df_clean.iterrows():
+        pos_attrs = {
+            "x": str(float(row["x"])) if pd.notna(row["x"]) else "0.0",
+            "z": str(float(row["z"])) if pd.notna(row["z"]) else "0.0",
+        }
+
+        if "a" in row and pd.notna(row["a"]):
+            pos_attrs["a"] = str(float(row["a"]))
+
+        if "y" in row and pd.notna(row["y"]):
+            pos_attrs["y"] = str(float(row["y"]))
+
+        ET.SubElement(target_event, "pos", pos_attrs)
+
+    xml_bytes = ET.tostring(root, encoding="utf-8", method="xml")
+    header = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+    return header + xml_bytes
+
+
+def aplicar_eventos_map_no_cfgeventspawns(tree, root, eventos_map):
+    """
+    Aplica todos os DataFrames do dict eventos_map ao XML inteiro
+    e devolve os bytes finais.
+    """
+    for event_name, df_evento in eventos_map.items():
+        apply_df_to_cfgeventspawns_xml(tree, root, event_name, df_evento)
+
+    xml_bytes = ET.tostring(root, encoding="utf-8", method="xml")
+    header = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+    return header + xml_bytes
+
+
+def enviar_cfgeventspawns_via_ftp(clientid, local_path, mapa):
+    """
+    Envia o cfgeventspawns.xml para a raiz da missão do DayZ,
+    conforme o mapa selecionado.
+    """
+    CFGEVENTSPAWNS_REMOTE_PATHS = {
+        "Chernarus": "mpmissions/dayzOffline.chernarusplus",
+        "Livonia": "mpmissions/dayzOffline.enoch",
+    }
+
+    dbatual = load_db(DBCLIENTS, {})
+    if clientid not in dbatual:
+        return False, "Cliente não encontrado"
+
+    conf = dbatual[clientid].get("ftp", {})
+    remotedir = CFGEVENTSPAWNS_REMOTE_PATHS.get(mapa)
+
+    if not remotedir:
+        return False, f"Caminho remoto não configurado para o mapa {mapa}"
+
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(conf["host"], int(conf.get("port", 21)), timeout=15)
+        ftp.login(conf["user"], conf["pass"])
+        ftp.cwd(remotedir)
+
+        with open(local_path, "rb") as f:
+            ftp.storbinary("STOR cfgeventspawns.xml", f)
+
+        ftp.quit()
+        return True, "Sucesso"
+    except Exception as e:
+        return False, str(e)
+
+# ---------- HELPER GENÉRICO DE FTP ----------
+
+def enviar_arquivo_via_ftp(clientid, local_path, remotedir, remotefilename):
+    """
+    Envia um arquivo local para um diretório remoto específico via FTP.
+    """
+    dbatual = load_db(DBCLIENTS, {})
+    if clientid not in dbatual:
+        return False, "Cliente não encontrado"
+
+    conf = dbatual[clientid].get("ftp", {})
+    if not conf or not conf.get("host"):
+        return False, "Configuração FTP não encontrada"
+
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(conf["host"], int(conf.get("port", 21)), timeout=15)
+        ftp.login(conf["user"], conf["pass"])
+        ftp.cwd(remotedir)
+
+        with open(local_path, "rb") as f:
+            ftp.storbinary(f"STOR {remotefilename}", f)
+
+        ftp.quit()
+        return True, "Sucesso"
+
+    except Exception as e:
+        return False, str(e)
+
+
+# ---------- WRAPPERS ESPECÍFICOS ----------
+
+def enviartypesviaftp(clientid, local_path, mapa):
     """
     Envia o arquivo types.xml já salvo em local_path
     para o caminho correto no servidor, de acordo com o mapa.
     """
-    db_atual = load_db(DB_CLIENTS, {})
-    if client_id not in db_atual:
-        return False, "Cliente não encontrado"
-
-    conf = db_atual[client_id]["ftp"]
-    remote_dir = TYPES_REMOTE_PATHS.get(mapa)
-    if not remote_dir:
+    remotedir = TYPESREMOTEPATHS.get(mapa)
+    if not remotedir:
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
-    try:
-        ftp = ftplib.FTP()
-        ftp.connect(conf["host"], int(conf["port"]), timeout=15)
-        ftp.login(conf["user"], conf["pass"])
-        ftp.cwd(remote_dir)
+    return enviar_arquivo_via_ftp(
+        clientid=clientid,
+        local_path=local_path,
+        remotedir=remotedir,
+        remotefilename="types.xml",
+    )
 
-        filename = "types.xml"  # nome padrão no servidor
-        with open(local_path, "rb") as f:
-            ftp.storbinary(f"STOR {filename}", f)
-
-        ftp.quit()
-        return True, "Sucesso"
-    except Exception as e:
-        return False, str(e)
-
-def enviar_globals_via_ftp(client_id, local_path, mapa):
+def enviarglobalsviaftp(clientid, local_path, mapa):
     """
     Envia o arquivo globals.xml já salvo em local_path
     para o caminho correto no servidor, de acordo com o mapa.
     """
-    db_atual = load_db(DB_CLIENTS, {})
-    if client_id not in db_atual:
-        return False, "Cliente não encontrado"
-
-    conf = db_atual[client_id]["ftp"]
-    remote_dir = TYPES_REMOTE_PATHS.get(mapa)
-    if not remote_dir:
+    remotedir = TYPESREMOTEPATHS.get(mapa)
+    if not remotedir:
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
-    try:
-        ftp = ftplib.FTP()
-        ftp.connect(conf["host"], int(conf["port"]), timeout=15)
-        ftp.login(conf["user"], conf["pass"])
-        ftp.cwd(remote_dir)
-        filename = "globals.xml"
-        with open(local_path, "rb") as f:
-            ftp.storbinary(f"STOR {filename}", f)
-        ftp.quit()
-        return True, "Sucesso"
-    except Exception as e:
-        return False, str(e)
+    return enviar_arquivo_via_ftp(
+        clientid=clientid,
+        local_path=local_path,
+        remotedir=remotedir,
+        remotefilename="globals.xml",
+    )
 
-
-def enviar_cfggameplay_via_ftp(client_id, local_path, mapa):
+def enviarcfggameplayviaftp(clientid, local_path, mapa):
     """
     Envia o arquivo cfggameplay.json já salvo em local_path
     para o caminho correto no servidor, de acordo com o mapa.
     """
-    CFGGAMEPLAY_REMOTE_PATHS = {
-        "Chernarus": "mpmissions/dayzOffline.chernarusplus",
-        "Livonia":   "mpmissions/dayzOffline.enoch",
+    remotedir = CFGGAMEPLAYREMOTEPATHS.get(mapa)
+    if not remotedir:
+        return False, f"Caminho remoto não configurado para o mapa {mapa}"
+
+    return enviar_arquivo_via_ftp(
+        clientid=clientid,
+        local_path=local_path,
+        remotedir=remotedir,
+        remotefilename="cfggameplay.json",
+    )
+
+def enviareventsviaftp(clientid, local_path, mapa):
+    """
+    Envia o arquivo events.xml para o diretório correto do mapa.
+    """
+    remotedir = EVENTSREMOTEPATHS.get(mapa)
+    if not remotedir:
+        return False, f"Caminho remoto não configurado para o mapa {mapa}"
+
+    return enviar_arquivo_via_ftp(
+        clientid=clientid,
+        local_path=local_path,
+        remotedir=remotedir,
+        remotefilename="events.xml",
+    )
+
+def enviarmessagesviaftp(clientid, local_path, mapa):
+    MESSAGESREMOTEPATHS = {
+        "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
+        "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
     }
 
-    db_atual = load_db(DB_CLIENTS, {})
-    if client_id not in db_atual:
+    dbatual = load_db(DBCLIENTS, {})
+    if clientid not in dbatual:
         return False, "Cliente não encontrado"
 
-    conf = db_atual[client_id]["ftp"]
-    remote_dir = CFGGAMEPLAY_REMOTE_PATHS.get(mapa)
-    if not remote_dir:
+    conf = dbatual[clientid]["ftp"]
+    remotedir = MESSAGESREMOTEPATHS.get(mapa)
+    if not remotedir:
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
     try:
         ftp = ftplib.FTP()
         ftp.connect(conf["host"], int(conf["port"]), timeout=15)
         ftp.login(conf["user"], conf["pass"])
-        ftp.cwd(remote_dir)
-        filename = "cfggameplay.json"
+        ftp.cwd(remotedir)
+
         with open(local_path, "rb") as f:
-            ftp.storbinary(f"STOR {filename}", f)
+            ftp.storbinary("STOR messages.xml", f)
+
         ftp.quit()
         return True, "Sucesso"
     except Exception as e:
         return False, str(e)
+
+
+def enviar_cfgeventspawns_via_ftp(clientid, local_path, mapa):
+    """
+    Envia o arquivo cfgeventspawns.xml para a raiz da missão do mapa.
+    """
+    remotedir = CFGEVENTSPAWNSREMOTEPATHS.get(mapa)
+    if not remotedir:
+        return False, f"Caminho remoto não configurado para o mapa {mapa}"
+
+    return enviar_arquivo_via_ftp(
+        clientid=clientid,
+        local_path=local_path,
+        remotedir=remotedir,
+        remotefilename="cfgeventspawns.xml",
+    )
 
 def get_server_status_nitrado(client_id: str, nitrado_id: str) -> str:
     """
@@ -1428,16 +1626,19 @@ with st.sidebar:
 
 # --- TABS PRINCIPAIS CLIENTE ---
 st.title(f"🎮 {user_info['server']}")
-tab1, tab2, tab3, tab4, tab5, tab_cfggameplay, tab6, tab7, tab8 = st.tabs([
-    "📅 Agendamentos",
-    "📜 Logs",
+tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab6, tab7, tab8 = st.tabs([
+    "📅 Eventos Agendados",
+    "📜 Histórico / Logs",
     "📢 Comunicados",
-    "⚙️ Economia (types.xml)",
-    "🌍 Ambiente (globals.xml)",
-    "🎮 Gameplay (cfggameplay)",
-    "🛒 Loja / Trader",
-    "👤 Jogadores / Vínculos",
-    "🏦 Banco & Carteira",
+    "📦 Loot / types.xml",
+    "🌍 Ambiente / globals.xml",
+    "⚙️ Gameplay / cfggameplay.json",
+    "🎪 Eventos / events.xml",
+    "💬 Mensagens / messages.xml",
+    "📍 Spawns / cfgeventspawns.xml",
+    "🛒 Loja Trader",
+    "👥 Jogadores",
+    "🏦 Banco / Carteira",
 ])
 
 with tab1:
@@ -1445,41 +1646,80 @@ with tab1:
 
     with c1:
         st.subheader("🚀 Novo Evento")
+
         if total_agendas >= limite_agendas:
             st.error(f"Limite do plano atingido ({limite_agendas}).")
         else:
-            uploader_key = f"uploader_{time.time()}"
+            upload_widget_key = f"uploader_agendamento_{user_id}"
+            upload_session_key = f"agendamento_upload_{user_id}"
+
             up_file = st.file_uploader(
-                "Arquivo", type=["xml", "json"], key=uploader_key
+                "Arquivo",
+                type=["xml", "json"],
+                key=upload_widget_key,
             )
 
+            if up_file is not None:
+                st.session_state[upload_session_key] = {
+                    "name": up_file.name,
+                    "bytes": up_file.getvalue(),
+                }
+                st.success(f"Arquivo carregado: {up_file.name}")
+
+            arquivo_em_sessao = st.session_state.get(upload_session_key)
+
+            if arquivo_em_sessao:
+                st.info(f"Arquivo pronto para agendar: {arquivo_em_sessao['name']}")
+
             mapa = st.selectbox(
-                "Mapa", ["Chernarus", "Livonia"], key="map_sel_main"
+                "Mapa",
+                ["Chernarus", "Livonia"],
+                key=f"map_sel_main_{user_id}",
             )
+
             dt_ev = st.date_input(
-                "Data", min_value=get_hora_brasilia(), key="date_sel_main"
+                "Data",
+                min_value=get_hora_brasilia().date(),
+                key=f"date_sel_main_{user_id}",
             )
-            h_in = st.text_input("Entrada", "19:55", key="h_in_main")
-            h_out = st.text_input("Saída", "21:55", key="h_out_main")
+
+            h_in = st.text_input(
+                "Entrada",
+                "19:55",
+                key=f"h_in_main_{user_id}",
+            )
+
+            h_out = st.text_input(
+                "Saída",
+                "21:55",
+                key=f"h_out_main_{user_id}",
+            )
+
             rec = st.selectbox(
-                "Recorrência", ["Único", "Diário", "Semanal"], key="rec_sel_main"
+                "Recorrência",
+                ["Único", "Diário", "Semanal"],
+                key=f"rec_sel_main_{user_id}",
             )
 
             if st.button(
                 "Confirmar Agendamento",
                 use_container_width=True,
-                key="conf_btn_main",
+                key=f"conf_btn_main_{user_id}",
             ):
-                if up_file:
-                    safe_fn = f"{user_id[:5]}_{up_file.name}"
+                if arquivo_em_sessao:
+                    safe_fn = f"{user_id[:5]}_{arquivo_em_sessao['name']}"
                     path = os.path.join(UPLOAD_DIR, safe_fn)
 
-                    with open(path, "wb") as f:
-                        f.write(up_file.getbuffer())
+                    try:
+                        with open(path, "wb") as f:
+                            f.write(arquivo_em_sessao["bytes"])
+                    except Exception as e:
+                        st.error(f"Erro ao salvar arquivo localmente: {e}")
+                        st.stop()
 
                     nova_agenda = {
                         "id": str(time.time()),
-                        "file": up_file.name,
+                        "file": arquivo_em_sessao["name"],
                         "local_path": path,
                         "mapa": mapa,
                         "path": "/dayzxb_missions/dayzOffline.chernarusplus/custom"
@@ -1491,11 +1731,16 @@ with tab1:
                         "rec": rec,
                         "status": "Aguardando",
                     }
+
                     client_data["agendas"].append(nova_agenda)
                     save_db(DB_CLIENTS, st.session_state.db_clients)
                     registrar_log(
-                        user_id, f"Agendado: {up_file.name} ({mapa})", "info"
+                        user_id,
+                        f"Agendado: {arquivo_em_sessao['name']} ({mapa})",
+                        "info",
                     )
+
+                    st.session_state.pop(upload_session_key, None)
 
                     st.success("Evento agendado com sucesso!")
                     time.sleep(0.5)
@@ -1524,12 +1769,12 @@ with tab1:
 
                 with st.expander(titulo_expander):
                     inf1, inf2 = st.columns(2)
+
                     with inf1:
                         st.write(f"**📄 Arquivo:** `{agenda['file']}`")
                         st.write(f"**🗺️ Mapa:** {agenda['mapa']}")
-                        st.write(
-                            f"**🔄 Recorrência:** {agenda.get('rec', 'Único')}"
-                        )
+                        st.write(f"**🔄 Recorrência:** {agenda.get('rec', 'Único')}")
+
                     with inf2:
                         st.write(f"**⏰ Janela:** {agenda['in']} > {agenda['out']}")
                         st.write(f"**📌 Status:** {status_atual}")
@@ -1544,14 +1789,16 @@ with tab1:
                     ):
                         nome_arquivo = agenda["file"]
                         client_data["agendas"] = [
-                            a
-                            for a in client_data["agendas"]
-                            if a["id"] != agenda["id"]
+                            a for a in client_data["agendas"] if a["id"] != agenda["id"]
                         ]
+
                         save_db(DB_CLIENTS, st.session_state.db_clients)
                         registrar_log(
-                            user_id, f"Removido: {nome_arquivo}", "info"
+                            user_id,
+                            f"Removido: {nome_arquivo}",
+                            "info",
                         )
+
                         st.toast(f"Evento {nome_arquivo} removido!")
                         st.rerun()
 
@@ -2360,6 +2607,280 @@ with tab_cfggameplay:
                 st.error(f"Erro ao enviar cfggameplay via FTP: {msg_cfg}")
     else:
         st.info("Envie o cfggameplay.json do seu servidor para começar a editar.")
+
+with tabevents:
+    st.subheader("🎪 Editor de Eventos (events.xml)")
+    st.info("Faça upload do events.xml atual do seu servidor para salvar e enviar ao diretório correto.")
+
+    upevents = st.file_uploader(
+        "Enviar events.xml",
+        type=["xml"],
+        key=f"upeventsxml_{user_id}"
+    )
+
+    if upevents is not None:
+        try:
+            xmlbytes = upevents.read()
+            st.session_state[f"eventsxml_bytes_{user_id}"] = xmlbytes
+            st.success(f"Arquivo carregado: {upevents.name}")
+        except Exception as e:
+            st.error(f"Erro ao ler events.xml: {e}")
+
+    mapaevents = st.selectbox(
+        "Mapa de destino onde o events.xml será aplicado",
+        ["Chernarus", "Livonia"],
+        key=f"mapaevents_{user_id}"
+    )
+
+    colev1, colev2 = st.columns(2)
+
+    with colev1:
+        if st.button(
+            "Salvar no Titan Cloud e enviar via FTP",
+            use_container_width=True,
+            key=f"btn_events_save_{user_id}"
+        ):
+            xmlbytes = st.session_state.get(f"eventsxml_bytes_{user_id}")
+            if not xmlbytes:
+                st.error("Nenhum events.xml foi carregado.")
+            else:
+                safename = f"{user_id[:5]}_events_{mapaevents.lower()}.xml"
+                local_path = os.path.join(UPLOAD_DIR, safename)
+
+                try:
+                    with open(local_path, "wb") as f:
+                        f.write(xmlbytes)
+                except Exception as e:
+                    registrar_log(user_id, f"Erro ao salvar events.xml localmente: {str(e)}", "erro")
+                    st.error(f"Erro ao salvar events.xml localmente: {e}")
+                    st.stop()
+
+                ok, msg = enviareventsviaftp(user_id, local_path, mapaevents)
+                if ok:
+                    registrar_log(user_id, f"events.xml enviado via FTP para {mapaevents}.", "sucesso")
+                    st.success("events.xml enviado e aplicado via FTP com sucesso!")
+                else:
+                    registrar_log(user_id, f"Falha ao enviar events.xml via FTP: {msg}", "erro")
+                    st.error(f"Erro ao enviar events.xml via FTP: {msg}")
+
+    with colev2:
+        xmlbytes = st.session_state.get(f"eventsxml_bytes_{user_id}")
+        if xmlbytes:
+            st.download_button(
+                label="Baixar events.xml carregado",
+                data=xmlbytes,
+                file_name="events.xml",
+                mime="application/xml",
+                use_container_width=True,
+                key=f"download_events_{user_id}"
+            )
+
+
+with tabmessages:
+    st.subheader("💬 Editor de Mensagens (messages.xml)")
+    st.info("Faça upload do messages.xml atual do seu servidor para salvar e enviar ao diretório correto (/db).")
+
+    upmessages = st.file_uploader(
+        "Enviar messages.xml",
+        type=["xml"],
+        key=f"upmessagesxml_{user_id}"
+    )
+
+    if upmessages is not None:
+        try:
+            xmlbytes = upmessages.read()
+            st.session_state[f"messagesxml_bytes_{user_id}"] = xmlbytes
+            st.success(f"Arquivo carregado: {upmessages.name}")
+        except Exception as e:
+            st.error(f"Erro ao ler messages.xml: {e}")
+
+    mapamessages = st.selectbox(
+        "Mapa de destino onde o messages.xml será aplicado",
+        ["Chernarus", "Livonia"],
+        key=f"mapamessages_{user_id}"
+    )
+
+    colmsg1, colmsg2 = st.columns(2)
+
+    with colmsg1:
+        if st.button(
+            "Salvar no Titan Cloud e enviar via FTP",
+            use_container_width=True,
+            key=f"btn_messages_save_{user_id}"
+        ):
+            xmlbytes = st.session_state.get(f"messagesxml_bytes_{user_id}")
+            if not xmlbytes:
+                st.error("Nenhum messages.xml foi carregado.")
+            else:
+                safename = f"{user_id[:5]}_messages_{mapamessages.lower()}.xml"
+                local_path = os.path.join(UPLOAD_DIR, safename)
+
+                try:
+                    with open(local_path, "wb") as f:
+                        f.write(xmlbytes)
+                except Exception as e:
+                    registrar_log(user_id, f"Erro ao salvar messages.xml localmente: {str(e)}", "erro")
+                    st.error(f"Erro ao salvar messages.xml localmente: {e}")
+                    st.stop()
+
+                ok, msg = enviarmessagesviaftp(user_id, local_path, mapamessages)
+                if ok:
+                    registrar_log(user_id, f"messages.xml enviado via FTP para {mapamessages}.", "sucesso")
+                    st.success("messages.xml enviado e aplicado via FTP com sucesso!")
+                else:
+                    registrar_log(user_id, f"Falha ao enviar messages.xml via FTP: {msg}", "erro")
+                    st.error(f"Erro ao enviar messages.xml via FTP: {msg}")
+
+    with colmsg2:
+        xmlbytes = st.session_state.get(f"messagesxml_bytes_{user_id}")
+        if xmlbytes:
+            st.download_button(
+                label="Baixar messages.xml carregado",
+                data=xmlbytes,
+                file_name="messages.xml",
+                mime="application/xml",
+                use_container_width=True,
+                key=f"download_messages_{user_id}"
+            )
+
+
+with tabcfgeventspawns:
+    st.subheader("Editor de Spawns cfgeventspawns.xml")
+    st.info("Faça upload do cfgeventspawns.xml do seu servidor, edite os pontos por evento e depois baixe ou envie via FTP.")
+
+    upspawns = st.file_uploader(
+        "Enviar cfgeventspawns.xml",
+        type=["xml"],
+        key=f"up_cfgeventspawns_{user_id}"
+    )
+
+    key_tree = f"cfgeventspawns_tree_{user_id}"
+    key_root = f"cfgeventspawns_root_{user_id}"
+    key_map = f"cfgeventspawns_map_{user_id}"
+
+    if upspawns is not None:
+        try:
+            xmlbytes = upspawns.read()
+            tree, root, eventos_map = parse_cfgeventspawns_xml(xmlbytes)
+
+            st.session_state[key_tree] = tree
+            st.session_state[key_root] = root
+            st.session_state[key_map] = eventos_map
+
+            st.success(f"Arquivo carregado: {upspawns.name} | {len(eventos_map)} eventos detectados")
+        except Exception as e:
+            st.error(f"Erro ao ler cfgeventspawns.xml: {e}")
+
+    if key_map in st.session_state:
+        eventos_map = st.session_state[key_map]
+        nomes_eventos = sorted(eventos_map.keys())
+
+        if not nomes_eventos:
+            st.warning("Nenhum evento encontrado no cfgeventspawns.xml.")
+            st.stop()
+
+        colsel1, colsel2 = st.columns([2, 1])
+
+        with colsel1:
+            evento_sel = st.selectbox(
+                "Selecione o evento para editar",
+                options=nomes_eventos,
+                key=f"cfgeventspawns_evento_sel_{user_id}"
+            )
+
+        with colsel2:
+            mapa_dest = st.selectbox(
+                "Mapa de destino",
+                ["Chernarus", "Livonia"],
+                key=f"cfgeventspawns_mapa_{user_id}"
+            )
+
+        df_evento = eventos_map[evento_sel].copy()
+
+        st.markdown("### Posições do evento")
+        st.caption("Edite coordenadas X/Z, ângulo A e altura Y quando existir. Você também pode adicionar novas linhas.")
+
+        edited_df = st.data_editor(
+            df_evento,
+            num_rows="dynamic",
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "x": st.column_config.NumberColumn("X", step=0.1),
+                "z": st.column_config.NumberColumn("Z", step=0.1),
+                "a": st.column_config.NumberColumn("Ângulo A", step=0.1),
+                "y": st.column_config.NumberColumn("Altura Y", step=0.1),
+            },
+            key=f"editor_cfgeventspawns_{user_id}_{evento_sel}"
+        )
+
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            if st.button("Aplicar alterações na sessão", use_container_width=True, key=f"btn_apply_cfgeventspawns_{user_id}"):
+                eventos_map[evento_sel] = edited_df
+                st.session_state[key_map] = eventos_map
+                st.success(f"Alterações aplicadas ao evento '{evento_sel}' na sessão.")
+
+        with c2:
+            if st.button("Baixar cfgeventspawns.xml ajustado", use_container_width=True, key=f"btn_download_cfgeventspawns_{user_id}"):
+                try:
+                    tree = st.session_state.get(key_tree)
+                    root = st.session_state.get(key_root)
+                    eventos_map = st.session_state.get(key_map)
+
+                    if tree is None or root is None or eventos_map is None:
+                        st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
+                    else:
+                        eventos_map[evento_sel] = edited_df
+                        newxmlbytes = aplicar_eventos_map_no_cfgeventspawns(tree, root, eventos_map)
+
+                        st.download_button(
+                            label="Clique para baixar",
+                            data=newxmlbytes,
+                            file_name="cfgeventspawns_editado.xml",
+                            mime="application/xml",
+                            use_container_width=True
+                        )
+                except Exception as e:
+                    st.error(f"Erro ao gerar cfgeventspawns.xml: {e}")
+
+        with c3:
+            if st.button("Salvar no Titan Cloud e enviar via FTP", use_container_width=True, key=f"btn_ftp_cfgeventspawns_{user_id}"):
+                try:
+                    tree = st.session_state.get(key_tree)
+                    root = st.session_state.get(key_root)
+                    eventos_map = st.session_state.get(key_map)
+
+                    if tree is None or root is None or eventos_map is None:
+                        st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
+                    else:
+                        eventos_map[evento_sel] = edited_df
+                        newxmlbytes = aplicar_eventos_map_no_cfgeventspawns(tree, root, eventos_map)
+
+                        safe_name = f"{user_id}_cfgeventspawns_{mapa_dest.lower()}.xml"
+                        local_path = os.path.join(UPLOAD_DIR, safe_name)
+
+                        with open(local_path, "wb") as f:
+                            f.write(newxmlbytes)
+
+                        ok, msg = enviar_cfgeventspawns_via_ftp(user_id, local_path, mapa_dest)
+
+                        if ok:
+                            registrar_log(user_id, f"cfgeventspawns.xml atualizado e enviado via FTP para {mapa_dest}.", "sucesso")
+                            st.success("cfgeventspawns.xml enviado e aplicado via FTP com sucesso!")
+                        else:
+                            registrar_log(user_id, f"Falha ao enviar cfgeventspawns.xml via FTP: {msg}", "erro")
+                            st.error(f"Erro ao enviar via FTP: {msg}")
+
+                except Exception as e:
+                    registrar_log(user_id, f"Erro ao salvar/enviar cfgeventspawns.xml: {str(e)}", "erro")
+                    st.error(f"Erro ao salvar/enviar cfgeventspawns.xml: {e}")
+
+        st.divider()
+        st.markdown("### Resumo do evento selecionado")
+        st.write(f"- Evento: {evento_sel}")
+        st.write(f"- Total de posições carregadas: {len(edited_df)}")
 
 with tab6:
     st.subheader("🛒 Loja / Trader")
