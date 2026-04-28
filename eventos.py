@@ -345,7 +345,7 @@ def dispararftppro(clientid, acao, filename, localpath, mapapath):
     except Exception:
         return False, "Erro"
 
-def pro_worker():
+def proworker():
     while True:
         try:
             now = get_hora_brasilia()
@@ -415,9 +415,9 @@ def pro_worker():
                 save_db(DB_CLIENTS, db_all)
 
         except Exception as e:
-            print("Erro no pro_worker:", e)
+            print("Erro no proworker:", e)
 
-        time.sleep(30)
+        time.sleep(15)
 
 # ---------- HELPERS CFGEVENTSPAWNS.XML ----------
 
