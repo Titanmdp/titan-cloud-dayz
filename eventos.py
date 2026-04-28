@@ -3350,5 +3350,5 @@ with tab8:
 
 # --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
 if "worker_started" not in st.session_state:
-    threading.Thread(target=pro_worker, daemon=True).start()
+    threading.Thread(target=proworker, daemon=True).start()
     st.session_state["worker_started"] = True
