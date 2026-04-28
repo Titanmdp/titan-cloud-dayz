@@ -552,6 +552,284 @@ def enviar_cfgeventspawns_via_ftp(clientid, localpath, mapa):
     except Exception as e:
         return False, str(e)
 
+# ---------- HELPERS EVENTS.XML ----------
+
+def parse_events_xml(xml_bytes):
+    """
+    Recebe bytes de um events.xml e devolve:
+    - tree: objeto ET.ElementTree
+    - root: elemento raiz
+    - df: DataFrame com os principais campos editáveis de cada <event>
+    """
+    tree = ET.ElementTree(ET.fromstring(xml_bytes))
+    root = tree.getroot()
+    rows = []
+
+    def to_int(value, default=0):
+        try:
+            if value is None or str(value).strip() == "":
+                return default
+            return int(float(str(value).strip()))
+        except Exception:
+            return default
+
+    def to_bool(value, default=False):
+        try:
+            if value is None or str(value).strip() == "":
+                return default
+            value_str = str(value).strip().lower()
+            return value_str in ["1", "true", "yes"]
+        except Exception:
+            return default
+
+    for event_elem in root.findall("event"):
+        name = event_elem.get("name", "")
+
+        nominal = to_int(event_elem.findtext("nominal"), 0)
+        minimum = to_int(event_elem.findtext("min"), 0)
+        maximum = to_int(event_elem.findtext("max"), 0)
+        lifetime = to_int(event_elem.findtext("lifetime"), 0)
+        restock = to_int(event_elem.findtext("restock"), 0)
+        saferadius = to_int(event_elem.findtext("saferadius"), 0)
+        distanceradius = to_int(event_elem.findtext("distanceradius"), 0)
+        cleanupradius = to_int(event_elem.findtext("cleanupradius"), 0)
+
+        flags_elem = event_elem.find("flags")
+        active = False
+        if flags_elem is not None:
+            active = to_bool(flags_elem.get("active", "0"), False)
+
+        rows.append(
+            {
+                "name": name,
+                "nominal": nominal,
+                "min": minimum,
+                "max": maximum,
+                "lifetime": lifetime,
+                "restock": restock,
+                "saferadius": saferadius,
+                "distanceradius": distanceradius,
+                "cleanupradius": cleanupradius,
+                "active": active,
+            }
+        )
+
+    df = pd.DataFrame(
+        rows,
+        columns=[
+            "name",
+            "nominal",
+            "min",
+            "max",
+            "lifetime",
+            "restock",
+            "saferadius",
+            "distanceradius",
+            "cleanupradius",
+            "active",
+        ],
+    )
+
+    return tree, root, df
+
+def apply_df_to_events_xml(tree, root, df_events):
+    """
+    Aplica as alterações do DataFrame de volta no events.xml
+    e devolve bytes do novo XML.
+    """
+    df_indexed = df_events.set_index("name")
+
+    def set_text(parent, tag, value):
+        elem = parent.find(tag)
+        if elem is None:
+            elem = ET.SubElement(parent, tag)
+        elem.text = str(int(value)) if pd.notna(value) else "0"
+
+    for event_elem in root.findall("event"):
+        name = event_elem.get("name", "")
+        if name not in df_indexed.index:
+            continue
+
+        row = df_indexed.loc[name]
+
+        set_text(event_elem, "nominal", row.get("nominal", 0))
+        set_text(event_elem, "min", row.get("min", 0))
+        set_text(event_elem, "max", row.get("max", 0))
+        set_text(event_elem, "lifetime", row.get("lifetime", 0))
+        set_text(event_elem, "restock", row.get("restock", 0))
+        set_text(event_elem, "saferadius", row.get("saferadius", 0))
+        set_text(event_elem, "distanceradius", row.get("distanceradius", 0))
+        set_text(event_elem, "cleanupradius", row.get("cleanupradius", 0))
+
+        flags_elem = event_elem.find("flags")
+        if flags_elem is None:
+            flags_elem = ET.SubElement(event_elem, "flags")
+
+        active_value = bool(row.get("active", False))
+        flags_elem.set("active", "1" if active_value else "0")
+
+    xml_bytes = ET.tostring(root, encoding="utf-8", method="xml")
+    header = b'\n'
+    return header + xml_bytes
+
+# ---------- HELPERS MESSAGES.XML ----------
+
+def parse_messages_xml(xml_bytes):
+    """
+    Lê o messages.xml e expõe cada <message> em DataFrame editável.
+    Tenta capturar tanto atributos quanto sub-tags comuns.
+    """
+    tree = ET.ElementTree(ET.fromstring(xml_bytes))
+    root = tree.getroot()
+    rows = []
+
+    def to_int(value, default=0):
+        try:
+            if value is None or str(value).strip() == "":
+                return default
+            return int(float(str(value).strip()))
+        except Exception:
+            return default
+
+    def first_text(elem, tag_names):
+        for tag in tag_names:
+            child = elem.find(tag)
+            if child is not None and child.text is not None and str(child.text).strip() != "":
+                return str(child.text).strip()
+        return ""
+
+    def first_int(elem, tag_names, default=0):
+        for tag in tag_names:
+            child = elem.find(tag)
+            if child is not None:
+                return to_int(child.text, default)
+        return default
+
+    message_nodes = root.findall(".//message")
+
+    for idx, msg_elem in enumerate(message_nodes, start=1):
+        text_value = (
+            first_text(msg_elem, ["text", "message", "content", "body"])
+            or (msg_elem.text or "").strip()
+        )
+
+        time_value = msg_elem.get("time", None)
+        if time_value in [None, ""]:
+            time_value = msg_elem.get("delay", None)
+        if time_value in [None, ""]:
+            time_value = first_int(msg_elem, ["time", "delay"], 0)
+        else:
+            time_value = to_int(time_value, 0)
+
+        priority_value = msg_elem.get("priority", None)
+        if priority_value in [None, ""]:
+            priority_value = first_int(msg_elem, ["priority", "order"], 0)
+        else:
+            priority_value = to_int(priority_value, 0)
+
+        row = {
+            "ordem": idx,
+            "id": str(msg_elem.get("id", "")).strip(),
+            "name": str(msg_elem.get("name", "")).strip(),
+            "time": time_value,
+            "priority": priority_value,
+            "color": str(msg_elem.get("color", "")).strip(),
+            "icon": str(msg_elem.get("icon", "")).strip(),
+            "text": text_value,
+            "_elem": msg_elem,
+        }
+        rows.append(row)
+
+    df = pd.DataFrame(
+        rows,
+        columns=["ordem", "id", "name", "time", "priority", "color", "icon", "text", "_elem"]
+    )
+
+    return tree, root, df
+
+
+def apply_df_to_messages_xml(tree, root, df_messages):
+    """
+    Aplica as alterações do DataFrame ao XML original,
+    preservando ao máximo a estrutura já existente.
+    """
+    if df_messages.empty:
+        xml_bytes = ET.tostring(root, encoding="utf-8", method="xml")
+        return b"\n" + xml_bytes
+
+    def ensure_child(parent, tag_name):
+        child = parent.find(tag_name)
+        if child is None:
+            child = ET.SubElement(parent, tag_name)
+        return child
+
+    for _, row in df_messages.iterrows():
+        msg_elem = row.get("_elem")
+        if msg_elem is None:
+            continue
+
+        id_val = str(row.get("id", "")).strip()
+        name_val = str(row.get("name", "")).strip()
+        color_val = str(row.get("color", "")).strip()
+        icon_val = str(row.get("icon", "")).strip()
+        text_val = str(row.get("text", "") or "").strip()
+        time_val = row.get("time", 0)
+        priority_val = row.get("priority", 0)
+
+        if id_val:
+            msg_elem.set("id", id_val)
+        elif "id" in msg_elem.attrib:
+            del msg_elem.attrib["id"]
+
+        if name_val:
+            msg_elem.set("name", name_val)
+        elif "name" in msg_elem.attrib:
+            del msg_elem.attrib["name"]
+
+        if color_val:
+            msg_elem.set("color", color_val)
+        elif "color" in msg_elem.attrib:
+            del msg_elem.attrib["color"]
+
+        if icon_val:
+            msg_elem.set("icon", icon_val)
+        elif "icon" in msg_elem.attrib:
+            del msg_elem.attrib["icon"]
+
+        if pd.notna(time_val):
+            if "time" in msg_elem.attrib:
+                msg_elem.set("time", str(int(time_val)))
+            elif "delay" in msg_elem.attrib:
+                msg_elem.set("delay", str(int(time_val)))
+            elif msg_elem.find("time") is not None:
+                ensure_child(msg_elem, "time").text = str(int(time_val))
+            elif msg_elem.find("delay") is not None:
+                ensure_child(msg_elem, "delay").text = str(int(time_val))
+            else:
+                msg_elem.set("time", str(int(time_val)))
+
+        if pd.notna(priority_val):
+            if "priority" in msg_elem.attrib:
+                msg_elem.set("priority", str(int(priority_val)))
+            elif msg_elem.find("priority") is not None:
+                ensure_child(msg_elem, "priority").text = str(int(priority_val))
+            elif msg_elem.find("order") is not None:
+                ensure_child(msg_elem, "order").text = str(int(priority_val))
+
+        if msg_elem.find("text") is not None:
+            ensure_child(msg_elem, "text").text = text_val
+        elif msg_elem.find("message") is not None:
+            ensure_child(msg_elem, "message").text = text_val
+        elif msg_elem.find("content") is not None:
+            ensure_child(msg_elem, "content").text = text_val
+        elif msg_elem.find("body") is not None:
+            ensure_child(msg_elem, "body").text = text_val
+        else:
+            msg_elem.text = text_val
+
+    xml_bytes = ET.tostring(root, encoding="utf-8", method="xml")
+    return b"\n" + xml_bytes
+
 # ---------- HELPER GENÉRICO DE FTP ----------
 
 def enviar_arquivo_via_ftp(clientid, localpath, remotedir, remotefilename):
@@ -2669,19 +2947,28 @@ with tabcfggameplay:
 
 with tabevents:
     st.subheader("🎪 Editor de Eventos (events.xml)")
-    st.info("Faça upload do events.xml atual do seu servidor para salvar e enviar ao diretório correto.")
+    st.info("Faça upload do events.xml atual do seu servidor para analisar, editar, baixar e enviar via FTP.")
 
-    upevents = st.file_uploader(
+    up_events = st.file_uploader(
         "Enviar events.xml",
         type=["xml"],
         key=f"upeventsxml_{user_id}"
     )
 
-    if upevents is not None:
+    key_tree = f"events_tree_{user_id}"
+    key_root = f"events_root_{user_id}"
+    key_df = f"events_df_{user_id}"
+
+    if up_events is not None:
         try:
-            xmlbytes = upevents.read()
-            st.session_state[f"eventsxml_bytes_{user_id}"] = xmlbytes
-            st.success(f"Arquivo carregado: {upevents.name}")
+            xml_bytes = up_events.read()
+            tree, root, df_events = parse_events_xml(xml_bytes)
+
+            st.session_state[key_tree] = tree
+            st.session_state[key_root] = root
+            st.session_state[key_df] = df_events
+
+            st.success(f"Arquivo carregado: {up_events.name} ({len(df_events)} eventos detectados)")
         except Exception as e:
             st.error(f"Erro ao ler events.xml: {e}")
 
@@ -2691,53 +2978,209 @@ with tabevents:
         key=f"mapaevents_{user_id}"
     )
 
-    colev1, colev2 = st.columns(2)
+    if key_df in st.session_state:
+        df_events = st.session_state[key_df]
+        
+        if "active" in df_events.columns:
+            df_events["active"] = df_events["active"].astype(bool)
 
-    with colev1:
-        if st.button(
-            "Salvar no Titan Cloud e enviar via FTP",
-            use_container_width=True,
-            key=f"btn_events_save_{user_id}"
-        ):
-            xmlbytes = st.session_state.get(f"eventsxml_bytes_{user_id}")
-            if not xmlbytes:
-                st.error("Nenhum events.xml foi carregado.")
-            else:
-                safename = f"{user_id[:5]}_events_{mapaevents.lower()}.xml"
-                localpath = os.path.join(UPLOAD_DIR, safename)
+        st.markdown("### 🔍 Filtros rápidos")
 
-                try:
-                    with open(localpath, "wb") as f:
-                        f.write(xmlbytes)
-                except Exception as e:
-                    registrar_log(user_id, f"Erro ao salvar events.xml localmente: {str(e)}", "erro")
-                    st.error(f"Erro ao salvar events.xml localmente: {e}")
-                    st.stop()
+        colf1, colf2 = st.columns([2, 1])
 
-                ok, msg = enviareventsviaftp(user_id, localpath, mapaevents)
-                if ok:
-                    registrar_log(user_id, f"events.xml enviado via FTP para {mapaevents}.", "sucesso")
-                    st.success("events.xml enviado e aplicado via FTP com sucesso!")
-                else:
-                    registrar_log(user_id, f"Falha ao enviar events.xml via FTP: {msg}", "erro")
-                    st.error(f"Erro ao enviar events.xml via FTP: {msg}")
-
-    with colev2:
-        xmlbytes = st.session_state.get(f"eventsxml_bytes_{user_id}")
-        if xmlbytes:
-            st.download_button(
-                label="Baixar events.xml carregado",
-                data=xmlbytes,
-                file_name="events.xml",
-                mime="application/xml",
-                use_container_width=True,
-                key=f"download_events_{user_id}"
+        with colf1:
+            busca_evento = st.text_input(
+                "Buscar evento por nome",
+                "",
+                key=f"busca_events_{user_id}"
             )
+
+        with colf2:
+            somente_ativos = st.checkbox(
+                "Mostrar apenas ativos",
+                key=f"ativos_events_{user_id}"
+            )
+
+        df_view = df_events.copy()
+
+        if busca_evento.strip():
+            df_view = df_view[
+                df_view["name"].str.contains(busca_evento.strip(), case=False, na=False)
+            ]
+
+        if somente_ativos:
+            df_view = df_view[df_view["active"]]
+
+        st.markdown("### ✏️ Ajuste de parâmetros")
+
+        edited_df = st.data_editor(
+            df_view,
+            num_rows="fixed",
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "name": st.column_config.TextColumn(
+                    "Evento",
+                    help="Nome interno do evento no events.xml."
+                ),
+                "nominal": st.column_config.NumberColumn(
+                    "Nominal",
+                    min_value=0,
+                    step=1
+                ),
+                "min": st.column_config.NumberColumn(
+                    "Min",
+                    min_value=0,
+                    step=1
+                ),
+                "max": st.column_config.NumberColumn(
+                    "Max",
+                    min_value=0,
+                    step=1
+                ),
+                "lifetime": st.column_config.NumberColumn(
+                    "Lifetime",
+                    min_value=0,
+                    step=1
+                ),
+                "restock": st.column_config.NumberColumn(
+                    "Restock",
+                    min_value=0,
+                    step=1
+                ),
+                "saferadius": st.column_config.NumberColumn(
+                    "SafeRadius",
+                    min_value=0,
+                    step=1
+                ),
+                "distanceradius": st.column_config.NumberColumn(
+                    "DistanceRadius",
+                    min_value=0,
+                    step=1
+                ),
+                "cleanupradius": st.column_config.NumberColumn(
+                    "CleanupRadius",
+                    min_value=0,
+                    step=1
+                ),
+                "active": st.column_config.CheckboxColumn(
+                    "Ativo",
+                    help="Define se o evento está ativo no XML."
+                ),
+            },
+            disabled=["name"],
+            key=f"editor_events_{user_id}"
+        )
+
+        st.markdown("### 💾 Gerar, baixar e aplicar")
+
+        colb1, colb2, colb3 = st.columns(3)
+
+        with colb1:
+            if st.button(
+                "Aplicar alterações na sessão",
+                use_container_width=True,
+                key=f"btn_apply_events_{user_id}"
+            ):
+                df_merged = df_events.set_index("name")
+                edited_indexed = edited_df.set_index("name")
+
+                for idx in edited_indexed.index:
+                    if idx in df_merged.index:
+                        for col in [
+                            "nominal",
+                            "min",
+                            "max",
+                            "lifetime",
+                            "restock",
+                            "saferadius",
+                            "distanceradius",
+                            "cleanupradius",
+                            "active",
+                        ]:
+                            df_merged.loc[idx, col] = edited_indexed.loc[idx, col]
+
+                st.session_state[key_df] = df_merged.reset_index()
+                st.success("Alterações aplicadas internamente ao events.xml (sessão).")
+
+        with colb2:
+            tree = st.session_state.get(key_tree)
+            root = st.session_state.get(key_root)
+            df_full = st.session_state.get(key_df)
+
+            if tree is not None and root is not None and df_full is not None:
+                try:
+                    new_xml_bytes = apply_df_to_events_xml(tree, root, df_full)
+
+                    st.download_button(
+                        label="⬇️ Baixar events.xml ajustado",
+                        data=new_xml_bytes,
+                        file_name="events_editado.xml",
+                        mime="application/xml",
+                        use_container_width=True,
+                        key=f"download_events_editado_{user_id}"
+                    )
+                except Exception as e:
+                    st.error(f"Erro ao gerar events.xml ajustado: {e}")
+
+        with colb3:
+            if st.button(
+                "Salvar no Titan Cloud e enviar via FTP",
+                use_container_width=True,
+                key=f"btn_events_save_{user_id}"
+            ):
+                tree = st.session_state.get(key_tree)
+                root = st.session_state.get(key_root)
+                df_full = st.session_state.get(key_df)
+
+                if tree is None or root is None or df_full is None:
+                    st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
+                else:
+                    try:
+                        new_xml_bytes = apply_df_to_events_xml(tree, root, df_full)
+
+                        safe_name = f"{user_id[:5]}_events_{mapaevents.lower()}.xml"
+                        localpath = os.path.join(UPLOAD_DIR, safe_name)
+
+                        with open(localpath, "wb") as f:
+                            f.write(new_xml_bytes)
+
+                        ok, msg = enviareventsviaftp(user_id, localpath, mapaevents)
+
+                        if ok:
+                            registrar_log(
+                                user_id,
+                                f"events.xml atualizado e enviado via FTP para {mapaevents}.",
+                                "sucesso"
+                            )
+                            st.success("events.xml enviado e aplicado via FTP com sucesso!")
+                        else:
+                            registrar_log(
+                                user_id,
+                                f"Falha ao enviar events.xml via FTP: {msg}",
+                                "erro"
+                            )
+                            st.error(f"Erro ao enviar events.xml via FTP: {msg}")
+
+                    except Exception as e:
+                        registrar_log(
+                            user_id,
+                            f"Erro ao salvar/enviar events.xml: {str(e)}",
+                            "erro"
+                        )
+                        st.error(f"Erro ao salvar/enviar events.xml: {e}")
+
+        st.divider()
+        st.markdown("### ℹ️ Observações rápidas")
+        st.write("- Use primeiro o botão **Aplicar alterações na sessão** antes de baixar ou enviar.")
+        st.write("- O download e o FTP sempre usam o DataFrame salvo na sessão.")
+    else:
+        st.info("Envie o events.xml do seu servidor para começar a editar.")
 
 
 with tabmessages:
     st.subheader("💬 Editor de Mensagens (messages.xml)")
-    st.info("Faça upload do messages.xml atual do seu servidor para salvar e enviar ao diretório correto (/db).")
+    st.info("Faça upload do messages.xml atual do seu servidor para visualizar, ajustar, baixar e enviar ao diretório correto (/db).")
 
     upmessages = st.file_uploader(
         "Enviar messages.xml",
@@ -2745,11 +3188,22 @@ with tabmessages:
         key=f"upmessagesxml_{user_id}"
     )
 
+    key_tree = f"messages_tree_{user_id}"
+    key_root = f"messages_root_{user_id}"
+    key_df = f"messages_df_{user_id}"
+    key_raw = f"messagesxml_bytes_{user_id}"
+
     if upmessages is not None:
         try:
             xmlbytes = upmessages.read()
-            st.session_state[f"messagesxml_bytes_{user_id}"] = xmlbytes
-            st.success(f"Arquivo carregado: {upmessages.name}")
+            tree, root, df_messages = parse_messages_xml(xmlbytes)
+
+            st.session_state[key_raw] = xmlbytes
+            st.session_state[key_tree] = tree
+            st.session_state[key_root] = root
+            st.session_state[key_df] = df_messages
+
+            st.success(f"Arquivo carregado: {upmessages.name} ({len(df_messages)} mensagens detectadas)")
         except Exception as e:
             st.error(f"Erro ao ler messages.xml: {e}")
 
@@ -2759,48 +3213,158 @@ with tabmessages:
         key=f"mapamessages_{user_id}"
     )
 
-    colmsg1, colmsg2 = st.columns(2)
+    if key_df in st.session_state:
+        df_messages = st.session_state[key_df].copy()
 
-    with colmsg1:
-        if st.button(
-            "Salvar no Titan Cloud e enviar via FTP",
+        st.markdown("### 🔍 Mensagens atualmente aplicadas")
+
+        busca_msg = st.text_input(
+            "Buscar por texto da mensagem",
+            "",
+            key=f"busca_messages_{user_id}"
+        )
+
+        df_view = df_messages.copy()
+
+        if "text" not in df_view.columns:
+            df_view["text"] = ""
+
+        if busca_msg.strip():
+            df_view = df_view[
+                df_view["text"].astype(str).str.contains(busca_msg.strip(), case=False, na=False)
+            ]
+
+        with st.expander("🔎 Diagnóstico do messages.xml carregado", expanded=False):
+            st.write(f"Total de mensagens detectadas: {len(df_messages)}")
+            if not df_messages.empty:
+                st.dataframe(
+                    df_messages.drop(columns=["_elem"], errors="ignore"),
+                    use_container_width=True
+                )
+
+        st.markdown("### ✏️ Ajuste de mensagens")
+
+        cols_editor = [
+            c for c in ["ordem", "id", "name", "time", "priority", "color", "icon", "text"]
+            if c in df_view.columns
+        ]
+
+        edited_df = st.data_editor(
+            df_view[cols_editor],
+            num_rows="fixed",
+            hide_index=True,
             use_container_width=True,
-            key=f"btn_messages_save_{user_id}"
-        ):
-            xmlbytes = st.session_state.get(f"messagesxml_bytes_{user_id}")
-            if not xmlbytes:
-                st.error("Nenhum messages.xml foi carregado.")
-            else:
-                safename = f"{user_id[:5]}_messages_{mapamessages.lower()}.xml"
-                localpath = os.path.join(UPLOAD_DIR, safename)
+            column_config={
+                "ordem": st.column_config.NumberColumn("Ordem", disabled=True),
+                "id": st.column_config.TextColumn("ID"),
+                "name": st.column_config.TextColumn("Nome"),
+                "time": st.column_config.NumberColumn("Tempo", min_value=0, step=1),
+                "priority": st.column_config.NumberColumn("Prioridade", min_value=0, step=1),
+                "color": st.column_config.TextColumn("Cor"),
+                "icon": st.column_config.TextColumn("Ícone"),
+                "text": st.column_config.TextColumn("Mensagem", width="large"),
+            },
+            disabled=["ordem"],
+            key=f"editor_messages_{user_id}"
+        )
 
-                try:
-                    with open(localpath, "wb") as f:
-                        f.write(xmlbytes)
-                except Exception as e:
-                    registrar_log(user_id, f"Erro ao salvar messages.xml localmente: {str(e)}", "erro")
-                    st.error(f"Erro ao salvar messages.xml localmente: {e}")
-                    st.stop()
+        st.markdown("### 💾 Gerar, baixar e aplicar")
 
-                ok, msg = enviarmessagesviaftp(user_id, localpath, mapamessages)
-                if ok:
-                    registrar_log(user_id, f"messages.xml enviado via FTP para {mapamessages}.", "sucesso")
-                    st.success("messages.xml enviado e aplicado via FTP com sucesso!")
-                else:
-                    registrar_log(user_id, f"Falha ao enviar messages.xml via FTP: {msg}", "erro")
-                    st.error(f"Erro ao enviar messages.xml via FTP: {msg}")
+        colmsg1, colmsg2, colmsg3 = st.columns(3)
 
-    with colmsg2:
-        xmlbytes = st.session_state.get(f"messagesxml_bytes_{user_id}")
-        if xmlbytes:
-            st.download_button(
-                label="Baixar messages.xml carregado",
-                data=xmlbytes,
-                file_name="messages.xml",
-                mime="application/xml",
+        with colmsg1:
+            if st.button(
+                "Aplicar alterações na sessão",
                 use_container_width=True,
-                key=f"download_messages_{user_id}"
-            )
+                key=f"btn_apply_messages_{user_id}"
+            ):
+                df_full = df_messages.copy().set_index("ordem")
+                df_edit = edited_df.copy().set_index("ordem")
+
+                for idx in df_edit.index:
+                    if idx in df_full.index:
+                        for col in ["id", "name", "time", "priority", "color", "icon", "text"]:
+                            if col in df_edit.columns and col in df_full.columns:
+                                df_full.loc[idx, col] = df_edit.loc[idx, col]
+
+                st.session_state[key_df] = df_full.reset_index()
+                st.success("Alterações aplicadas internamente ao messages.xml (sessão).")
+
+        with colmsg2:
+            tree = st.session_state.get(key_tree)
+            root = st.session_state.get(key_root)
+            df_full = st.session_state.get(key_df)
+
+            if tree is not None and root is not None and df_full is not None:
+                try:
+                    new_xml_bytes = apply_df_to_messages_xml(tree, root, df_full)
+
+                    st.download_button(
+                        label="⬇️ Baixar messages.xml ajustado",
+                        data=new_xml_bytes,
+                        file_name="messages_editado.xml",
+                        mime="application/xml",
+                        use_container_width=True,
+                        key=f"download_messages_editado_{user_id}"
+                    )
+                except Exception as e:
+                    st.error(f"Erro ao gerar messages.xml ajustado: {e}")
+
+        with colmsg3:
+            if st.button(
+                "Salvar no Titan Cloud e enviar via FTP",
+                use_container_width=True,
+                key=f"btn_messages_save_{user_id}"
+            ):
+                tree = st.session_state.get(key_tree)
+                root = st.session_state.get(key_root)
+                df_full = st.session_state.get(key_df)
+
+                if tree is None or root is None or df_full is None:
+                    st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
+                else:
+                    try:
+                        new_xml_bytes = apply_df_to_messages_xml(tree, root, df_full)
+
+                        safename = f"{user_id[:5]}_messages_{mapamessages.lower()}.xml"
+                        localpath = os.path.join(UPLOAD_DIR, safename)
+
+                        with open(localpath, "wb") as f:
+                            f.write(new_xml_bytes)
+
+                        ok, msg = enviarmessagesviaftp(user_id, localpath, mapamessages)
+
+                        if ok:
+                            registrar_log(
+                                user_id,
+                                f"messages.xml atualizado e enviado via FTP para {mapamessages}.",
+                                "sucesso"
+                            )
+                            st.success("messages.xml enviado e aplicado via FTP com sucesso!")
+                        else:
+                            registrar_log(
+                                user_id,
+                                f"Falha ao enviar messages.xml via FTP: {msg}",
+                                "erro"
+                            )
+                            st.error(f"Erro ao enviar messages.xml via FTP: {msg}")
+
+                    except Exception as e:
+                        registrar_log(
+                            user_id,
+                            f"Erro ao salvar/enviar messages.xml: {str(e)}",
+                            "erro"
+                        )
+                        st.error(f"Erro ao salvar/enviar messages.xml: {e}")
+
+        st.divider()
+        st.markdown("### ℹ️ Observações rápidas")
+        st.write("- A interface mostra as mensagens que já estão no arquivo carregado.")
+        st.write("- Use primeiro o botão **Aplicar alterações na sessão** antes de baixar ou enviar.")
+        st.write("- O download e o FTP sempre usam o DataFrame salvo na sessão.")
+        st.write("- O bloco de diagnóstico ajuda a validar se o parser leu corretamente o schema do seu XML.")
+    else:
+        st.info("Envie o messages.xml do seu servidor para começar a visualizar e editar.")
 
 
 with tabcfgeventspawns:
