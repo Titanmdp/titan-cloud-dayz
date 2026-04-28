@@ -322,7 +322,7 @@ def applydftotypesxml(tree, root, df):
 
 
 def dispararftppro(clientid, acao, filename, localpath, mapapath):
-    dbatual = load_db(DBCLIENTS, {})
+    dbatual = load_db(DB_CLIENTS, {})
     if clientid not in dbatual:
         return False, "Erro"
 
@@ -418,6 +418,14 @@ def proworker():
             print("Erro no proworker:", e)
 
         time.sleep(15)
+
+WORKER_STARTED = False
+
+def start_worker_once():
+    global WORKER_STARTED
+    if not WORKER_STARTED:
+        WORKER_STARTED = True
+        threading.Thread(target=proworker, daemon=True).start()
 
 # ---------- HELPERS CFGEVENTSPAWNS.XML ----------
 
@@ -520,7 +528,7 @@ def enviar_cfgeventspawns_via_ftp(clientid, localpath, mapa):
         "Livonia": "mpmissions/dayzOffline.enoch",
     }
 
-    dbatual = load_db(DBCLIENTS, {})
+    dbatual = load_db(DB_CLIENTS, {})
     if clientid not in dbatual:
         return False, "Cliente não encontrado"
 
@@ -550,7 +558,7 @@ def enviar_arquivo_via_ftp(clientid, localpath, remotedir, remotefilename):
     """
     Envia um arquivo local para um diretório remoto específico via FTP.
     """
-    dbatual = load_db(DBCLIENTS, {})
+    dbatual = load_db(DB_CLIENTS, {})
     if clientid not in dbatual:
         return False, "Cliente não encontrado"
 
@@ -581,7 +589,7 @@ def enviartypesviaftp(clientid, localpath, mapa):
     Envia o arquivo types.xml já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
     """
-    remotedir = TYPESREMOTEPATHS.get(mapa)
+    remotedir = TYPES_REMOTE_PATHS.get(mapa)
     if not remotedir:
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
@@ -597,7 +605,7 @@ def enviarglobalsviaftp(clientid, localpath, mapa):
     Envia o arquivo globals.xml já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
     """
-    remotedir = TYPESREMOTEPATHS.get(mapa)
+    remotedir = TYPES_REMOTE_PATHS.get(mapa)
     if not remotedir:
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
@@ -613,7 +621,7 @@ def enviarcfggameplayviaftp(clientid, localpath, mapa):
     Envia o arquivo cfggameplay.json já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
     """
-    remotedir = CFGGAMEPLAYREMOTEPATHS.get(mapa)
+    remotedir = CFGGAMEPLAY_REMOTE_PATHS.get(mapa)
     if not remotedir:
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
@@ -628,7 +636,7 @@ def enviareventsviaftp(clientid, localpath, mapa):
     """
     Envia o arquivo events.xml para o diretório correto do mapa.
     """
-    remotedir = EVENTSREMOTEPATHS.get(mapa)
+    remotedir = EVENTS_REMOTE_PATHS.get(mapa)
     if not remotedir:
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
@@ -645,7 +653,7 @@ def enviarmessagesviaftp(clientid, localpath, mapa):
         "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
     }
 
-    dbatual = load_db(DBCLIENTS, {})
+    dbatual = load_db(DB_CLIENTS, {})
     if clientid not in dbatual:
         return False, "Cliente não encontrado"
 
@@ -673,7 +681,7 @@ def enviar_cfgeventspawns_via_ftp(clientid, localpath, mapa):
     """
     Envia o arquivo cfgeventspawns.xml para a raiz da missão do mapa.
     """
-    remotedir = CFGEVENTSPAWNSREMOTEPATHS.get(mapa)
+    remotedir = CFGEVENTSPAWNS_REMOTE_PATHS.get(mapa)
     if not remotedir:
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
@@ -818,51 +826,6 @@ def worker_processar_pedidos():
             print(f"Erro no worker de pedidos: {e}")
         
         time.sleep(30)
-
-
-def pro_worker():
-    while True:
-        try:
-            now = get_hora_brasilia()
-            hoje, agora = now.strftime("%d/%m/%Y"), now.strftime("%H:%M")
-            db_all = load_db(DB_CLIENTS, {})
-            mudou = False
-            for c_id, c_info in db_all.items():
-                for ag in c_info.get("agendas", []):
-                    if (
-                        ag["data"] == hoje
-                        and ag["in"] == agora
-                        and ag.get("status") == "Aguardando"
-                    ):
-                        success, _ = dispararftppro(
-                            c_id, "UPLOAD", ag["file"], ag["localpath"], ag["path"]
-                        )
-                        ag["status"] = "Ativo" if success else "Erro"
-                        mudou = True
-                    if (
-                        ag["data"] == hoje
-                        and ag["out"] == agora
-                        and ag.get("status") == "Ativo"
-                    ):
-                        dispararftppro(
-                            c_id, "DELETE", ag["file"], ag["localpath"], ag["path"]
-                        )
-                        ag["status"] = "Finalizado"
-                        mudou = True
-            if mudou:
-                save_db(DB_CLIENTS, db_all)
-        except Exception:
-            pass
-
-        time.sleep(30)
-
-WORKER_STARTED = False
-
-def start_worker_once():
-    global WORKER_STARTED
-    if not WORKER_STARTED:
-        WORKER_STARTED = True
-        threading.Thread(target=pro_worker, daemon=True).start()
 
 # ---------- HELPERS GLOBALS.XML (AMBIENTE) ----------
 
