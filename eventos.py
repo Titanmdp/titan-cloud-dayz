@@ -8,6 +8,7 @@ import secrets
 import string
 import requests
 import shutil
+import base64
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
 
@@ -75,8 +76,7 @@ DB_USERS = os.path.join(MOUNT_PATH, "users_db.json")
 DB_CLIENTS = os.path.join(MOUNT_PATH, "clients_data.json")
 UPLOAD_DIR = os.path.join(MOUNT_PATH, "uploads")
 
-if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 # =========================================================
@@ -219,10 +219,15 @@ def validar_acesso(key):
 def disparar_ftp_pro(client_id, acao, filename, local_path, mapa_path):
     db_atual = load_db(DB_CLIENTS, {})
     if client_id not in db_atual:
-        return False, "Erro"
+        return False, "Cliente não encontrado"
 
     conf = db_atual[client_id]["ftp"]
     try:
+        if acao == "UPLOAD" and not os.path.exists(local_path):
+            print(f"[FTP] ERRO: arquivo local não encontrado: {local_path}")
+            registrar_log(client_id, f"Arquivo não encontrado: {filename} — refaça o agendamento", "erro")
+            return False, "Arquivo local não encontrado"
+
         ftp = ftplib.FTP()
         ftp.connect(conf["host"], int(conf["port"]), timeout=15)
         ftp.login(conf["user"], conf["pass"])
@@ -231,16 +236,20 @@ def disparar_ftp_pro(client_id, acao, filename, local_path, mapa_path):
         if acao == "UPLOAD":
             with open(local_path, "rb") as f:
                 ftp.storbinary(f"STOR {filename}", f)
+            print(f"[FTP] UPLOAD OK: {filename}")
         elif acao == "DELETE":
             try:
                 ftp.delete(filename)
-            except Exception:
-                pass
+                print(f"[FTP] DELETE OK: {filename}")
+            except Exception as e:
+                print(f"[FTP] DELETE falhou: {e}")
 
         ftp.quit()
         return True, "Sucesso"
-    except Exception:
-        return False, "Erro"
+    except Exception as e:
+        print(f"[FTP] ERRO geral: {e}")
+        registrar_log(client_id, f"Erro FTP ({acao}): {str(e)}", "erro")
+        return False, str(e)
 
 
 def pro_worker():
@@ -261,11 +270,28 @@ def pro_worker():
                         and now >= hora_entrada
                         and ag.get("status") == "Aguardando"
                     ):
-                        success, _ = disparar_ftp_pro(
-                            c_id, "UPLOAD", ag["file"], ag["local_path"], ag["path"]
-                        )
-                        ag["status"] = "Ativo" if success else "Erro"
-                        mudou = True
+                        # Se o arquivo sumiu (redeploy), recria a partir do conteúdo salvo
+                        if not os.path.exists(ag["local_path"]) and ag.get("file_content"):
+                            try:
+                                import base64
+                                os.makedirs(os.path.dirname(ag["local_path"]), exist_ok=True)
+                                with open(ag["local_path"], "wb") as f:
+                                    f.write(base64.b64decode(ag["file_content"]))
+                                print(f"[worker] Arquivo recriado: {ag['local_path']}")
+                            except Exception as e:
+                                print(f"[worker] Erro ao recriar arquivo: {e}")
+
+                        if not os.path.exists(ag["local_path"]):
+                            ag["status"] = "Erro"
+                            registrar_log(c_id, f"Arquivo perdido e sem backup: {ag['file']} — recadastre", "erro")
+                            mudou = True
+                        else:
+                            success, msg = disparar_ftp_pro(
+                                c_id, "UPLOAD", ag["file"], ag["local_path"], ag["path"]
+                            )
+                            ag["status"] = "Ativo" if success else "Erro"
+                            registrar_log(c_id, f"UPLOAD {ag['file']}: {'OK' if success else msg}", "sucesso" if success else "erro")
+                            mudou = True
 
                     # DELETE — dispara quando chega ou passa do horário de saída
                     if (
@@ -883,14 +909,12 @@ with tab1:
         if total_agendas >= limite_agendas:
             st.error(f"Limite do plano atingido ({limite_agendas}).")
         else:
-            # Uploader com key fixa
             up_file = st.file_uploader(
                 "Arquivo",
                 type=["xml", "json"],
                 key="file_agenda",
             )
 
-            # Mantém o arquivo no session_state entre reruns
             if up_file is not None:
                 st.session_state["last_uploaded_file"] = up_file
             elif "last_uploaded_file" in st.session_state:
@@ -919,7 +943,6 @@ with tab1:
                     safe_fn = f"{user_id[:5]}_{up_file.name}"
                     path = os.path.join(UPLOAD_DIR, safe_fn)
 
-                    # Salva o arquivo em disco
                     try:
                         with open(path, "wb") as f:
                             f.write(up_file.getbuffer())
@@ -927,10 +950,14 @@ with tab1:
                         st.error(f"Erro ao salvar arquivo em disco: {e}")
                         st.stop()
 
+                    with open(path, "rb") as f:
+                        file_content_b64 = base64.b64encode(f.read()).decode("utf-8")
+
                     nova_agenda = {
                         "id": str(time.time()),
                         "file": up_file.name,
                         "local_path": path,
+                        "file_content": file_content_b64,
                         "mapa": mapa,
                         "path": "/dayzxb_missions/dayzOffline.chernarusplus/custom"
                         if mapa == "Chernarus"
@@ -947,9 +974,7 @@ with tab1:
                         user_id, f"Agendado: {up_file.name} ({mapa})", "info"
                     )
 
-                    # Limpa o arquivo da sessão para o próximo agendamento
                     st.session_state.pop("last_uploaded_file", None)
-
                     st.success("Evento agendado com sucesso!")
                     time.sleep(0.5)
                     st.rerun()
