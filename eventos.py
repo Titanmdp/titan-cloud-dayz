@@ -247,18 +247,18 @@ def pro_worker():
     while True:
         try:
             now = get_hora_brasilia()
-            hoje = now.strftime("%d/%m/%Y")
-            agora = now.strftime("%H:%M")
             db_all = load_db(DB_CLIENTS, {})
             mudou = False
 
             for c_id, c_info in db_all.items():
                 for ag in c_info.get("agendas", []):
+                    hora_entrada = str_to_time(ag["data"], ag["in"])
+                    hora_saida = str_to_time(ag["data"], ag["out"])
 
-                    # UPLOAD — hora exata de entrada
+                    # UPLOAD — dispara quando chega ou passa do horário de entrada
                     if (
-                        ag["data"] == hoje
-                        and ag["in"] == agora
+                        hora_entrada
+                        and now >= hora_entrada
                         and ag.get("status") == "Aguardando"
                     ):
                         success, _ = disparar_ftp_pro(
@@ -267,8 +267,7 @@ def pro_worker():
                         ag["status"] = "Ativo" if success else "Erro"
                         mudou = True
 
-                    # DELETE — compara >= para não perder o minuto
-                    hora_saida = str_to_time(ag["data"], ag["out"])
+                    # DELETE — dispara quando chega ou passa do horário de saída
                     if (
                         hora_saida
                         and now >= hora_saida
@@ -293,6 +292,7 @@ def pro_worker():
             print(f"[pro_worker] erro: {e}")
 
         time.sleep(30)
+
 
 
 # =========================================================
@@ -353,6 +353,8 @@ if not st.session_state.authenticated:
             st.session_state.role = cargo
             st.session_state.session_token = token_sessao
             st.session_state.view_mode = "admin" if cargo == "admin" else "client"
+
+            start_worker_once()
 
             st.rerun()
         else:
