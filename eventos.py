@@ -2229,7 +2229,7 @@ with tab5:
                     )
                     st.error(f"Erro ao salvar/enviar globals.xml: {e}")
                     
-with tab_cfggameplay:
+with tabcfggameplay:
     st.subheader("🎮 Configuração de Gameplay (cfggameplay.json)")
     st.info(
         "Faça upload do cfggameplay.json do seu servidor, ajuste os parâmetros de gameplay "
