@@ -1363,12 +1363,12 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
         )
         return
 
-    @st.fragment(run_every=300)
+    @st.fragment(run_every="300s")
     def _ranking(ftp_cfg, gamertag_vinculada, clients_db, server_id):
         with st.spinner("Carregando ranking semanal (últimos 7 dias)..."):
             log_text_semanal = ftp_download_adm_files_weekly(ftp_cfg, max_files=7)
 
-        if not log_text_semanal.strip():
+        if not log_text_semanal or not log_text_semanal.strip():
             st.warning("Não foi possível carregar os logs do servidor.")
             return
 
@@ -1379,8 +1379,8 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
             return
 
         st.caption(
-            f"📊 {len(stats)} jogadores encontrados nos logs dos últimos 7 dias "
-            f"— atualizado a cada 5 min"
+            f"📊 {len(stats)} jogadores encontrados nos logs dos últimos 7 dias — "
+            "dados atualizados a cada 5 minutos."
         )
 
         # ---- Sub-abas de ranking ----
@@ -1393,22 +1393,25 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
             "💰 Magnata DzCoins",
         ])
 
+        medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+
         # ---- TEMPO DE JOGO TOP 10 ----
         with sub_play:
             st.markdown("#### ⏱️ Tempo de Jogo Total — Top 10")
             ranking_play = sorted(
                 stats.items(),
-                key=lambda x: x[1]["total_play_seconds"],
-                reverse=True
+                key=lambda x: x[1].get("total_play_seconds", 0),
+                reverse=True,
             )[:10]
 
             if not ranking_play:
                 st.info("Sem dados de tempo de jogo.")
             else:
-                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
                 for idx, (nome, dados) in enumerate(ranking_play):
-                    destaque = nome == gamertag_vinculada
+                    destaque = (nome == gamertag_vinculada)
                     cor = "#00d4ff" if destaque else "#e0e0e0"
+                    total_seg = dados.get("total_play_seconds", 0)
+                    sessoes = dados.get("session_count", 0)
                     st.markdown(
                         f"""
                         <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
@@ -1419,8 +1422,8 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
                                 {nome}
                             </span>
                             <span style="color:#aaa; float:right;">
-                                ⏱️ {format_seconds_hhmmss(dados['total_play_seconds'])}
-                                &nbsp;|&nbsp; 🔁 {dados['session_count']} sessões
+                                ⏱️ {format_seconds_hhmmss(total_seg)}
+                                &nbsp;|&nbsp; 🔁 {sessoes} sessões
                             </span>
                         </div>
                         """,
@@ -1433,19 +1436,18 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
             st.caption("Tempo máximo que o jogador ficou vivo sem morrer em uma única vida.")
             ranking_surv = sorted(
                 stats.items(),
-                key=lambda x: x[1]["max_survival_seconds"],
-                reverse=True
+                key=lambda x: x[1].get("max_survival_seconds", 0),
+                reverse=True,
             )[:10]
 
             if not ranking_surv:
                 st.info("Sem dados de sobrevivência.")
             else:
-                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
                 for idx, (nome, dados) in enumerate(ranking_surv):
-                    destaque = nome == gamertag_vinculada
+                    destaque = (nome == gamertag_vinculada)
                     cor = "#00d4ff" if destaque else "#e0e0e0"
-                    total_surv = dados["total_survival_seconds"]
-                    max_surv = dados["max_survival_seconds"]
+                    total_surv = dados.get("total_survival_seconds", 0)
+                    max_surv = dados.get("max_survival_seconds", 0)
                     st.markdown(
                         f"""
                         <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
@@ -1470,19 +1472,19 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
             st.caption("XP é calculado com base no tempo total sobrevivendo. 1 minuto vivo = 1 XP.")
             ranking_xp = sorted(
                 stats.items(),
-                key=lambda x: x[1]["xp"],
-                reverse=True
+                key=lambda x: x[1].get("xp", 0.0),
+                reverse=True,
             )[:10]
 
             if not ranking_xp:
                 st.info("Sem dados de XP.")
             else:
-                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-                xp_max = ranking_xp[0][1]["xp"] if ranking_xp else 1
+                xp_max = ranking_xp[0][1].get("xp", 1) if ranking_xp else 1
+                xp_max = xp_max or 1  # evita divisão por zero
                 for idx, (nome, dados) in enumerate(ranking_xp):
-                    destaque = nome == gamertag_vinculada
+                    destaque = (nome == gamertag_vinculada)
                     cor = "#00d4ff" if destaque else "#e0e0e0"
-                    xp = dados["xp"]
+                    xp = dados.get("xp", 0.0)
                     nivel = max(1, int(xp // 100) + 1)
                     barra_pct = int((xp / max(xp_max, 1)) * 100)
                     st.markdown(
@@ -1513,22 +1515,21 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
 
             ranking_pvp = sorted(
                 stats.items(),
-                key=lambda x: x[1]["pvp_kills"],
-                reverse=True
+                key=lambda x: x[1].get("pvp_kills", 0),
+                reverse=True,
             )[:10]
 
-            tem_pvp = any(d["pvp_kills"] > 0 for _, d in ranking_pvp)
+            tem_pvp = any(d.get("pvp_kills", 0) > 0 for _, d in ranking_pvp)
 
             if not tem_pvp:
                 st.info("Nenhum evento PvP registrado nos últimos 7 dias.")
                 st.caption("O ranking será preenchido automaticamente quando ocorrerem kills PvP no servidor.")
             else:
-                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
                 for idx, (nome, dados) in enumerate(ranking_pvp):
-                    destaque = nome == gamertag_vinculada
+                    destaque = (nome == gamertag_vinculada)
                     cor = "#00d4ff" if destaque else "#e0e0e0"
-                    kills = dados["pvp_kills"]
-                    deaths = dados["pvp_deaths"]
+                    kills = dados.get("pvp_kills", 0)
+                    deaths = dados.get("pvp_deaths", 0)
                     kd = round(kills / max(deaths, 1), 2)
                     st.markdown(
                         f"""
@@ -1553,17 +1554,18 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
             st.markdown("#### 🧟 Hits PvE & Suicídios — Top 10")
             ranking_pve = sorted(
                 stats.items(),
-                key=lambda x: x[1]["pve_hits"],
-                reverse=True
+                key=lambda x: x[1].get("pve_hits", 0),
+                reverse=True,
             )[:10]
 
             if not ranking_pve:
                 st.info("Sem dados de PvE.")
             else:
-                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
                 for idx, (nome, dados) in enumerate(ranking_pve):
-                    destaque = nome == gamertag_vinculada
+                    destaque = (nome == gamertag_vinculada)
                     cor = "#00d4ff" if destaque else "#e0e0e0"
+                    hits = dados.get("pve_hits", 0)
+                    suicidios = dados.get("pve_suicides", 0)
                     st.markdown(
                         f"""
                         <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
@@ -1574,8 +1576,8 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
                                 {nome}
                             </span>
                             <span style="color:#aaa; float:right;">
-                                🧟 Hits: {dados['pve_hits']}
-                                &nbsp;|&nbsp; 💀 Suicídios: {dados['pve_suicides']}
+                                🧟 Hits: {hits}
+                                &nbsp;|&nbsp; 💀 Suicídios: {suicidios}
                             </span>
                         </div>
                         """,
@@ -1591,12 +1593,15 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
             if not ranking_mag:
                 st.info("Nenhum jogador com DzCoins registrado ainda.")
             else:
-                medalhas = ["🥇", "🥈", "🥉"] + ["4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
                 total_max = ranking_mag[0]["total"] if ranking_mag else 1
+                total_max = total_max or 1
                 for idx, r in enumerate(ranking_mag):
-                    destaque = r["gamertag"] == gamertag_vinculada
+                    destaque = (r["gamertag"] == gamertag_vinculada)
                     cor = "#00d4ff" if destaque else "#e0e0e0"
-                    barra_pct = int((r["total"] / max(total_max, 1)) * 100)
+                    carteira = r["carteira"]
+                    banco = r["banco"]
+                    total = r["total"]
+                    barra_pct = int((total / max(total_max, 1)) * 100)
                     st.markdown(
                         f"""
                         <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
@@ -1607,9 +1612,9 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
                                 {r['gamertag']}
                             </span>
                             <span style="color:#aaa; float:right;">
-                                💰 {r['carteira']} carteira
-                                &nbsp;|&nbsp; 🏦 {r['banco']} banco
-                                &nbsp;|&nbsp; 💎 {r['total']} total
+                                💰 {carteira} carteira
+                                &nbsp;|&nbsp; 🏦 {banco} banco
+                                &nbsp;|&nbsp; 💎 {total} total
                             </span>
                             <div style="background:#333; border-radius:4px; height:4px;
                                         margin-top:6px;">
@@ -1629,11 +1634,11 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
             st.info("Sua Gamertag ainda não aparece nos logs desta semana.")
         else:
             col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("⏱️ Tempo de Jogo", format_seconds_hhmmss(meu["total_play_seconds"]))
-            col2.metric("🏕️ Melhor Vida", format_seconds_hhmmss(meu["max_survival_seconds"]))
-            col3.metric("⭐ XP", f"{meu['xp']:.1f}")
-            col4.metric("⚔️ Kills PvP", meu["pvp_kills"])
-            col5.metric("🧟 Hits PvE", meu["pve_hits"])
+            col1.metric("⏱️ Tempo de Jogo", format_seconds_hhmmss(meu.get("total_play_seconds", 0)))
+            col2.metric("🏕️ Melhor Vida", format_seconds_hhmmss(meu.get("max_survival_seconds", 0)))
+            col3.metric("⭐ XP", f"{meu.get('xp', 0.0):.1f}")
+            col4.metric("⚔️ Kills PvP", meu.get("pvp_kills", 0))
+            col5.metric("🧟 Hits PvE", meu.get("pve_hits", 0))
 
     _ranking(ftp_cfg, gamertag_vinculada, clients_db, server_id)
 
