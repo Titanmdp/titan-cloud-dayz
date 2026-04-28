@@ -1886,8 +1886,12 @@ def main():
     with col_h3:
         if st.button("🚪 Sair", use_container_width=True):
             for k in [
-                "portal_discord_id", "portal_discord_name", "portal_discord_guilds",
-                "portal_server_id", "portal_server_nome", "portal_gamertag",
+                "portal_discord_id",
+                "portal_discord_name",
+                "portal_discord_guilds",
+                "portal_server_id",
+                "portal_server_nome",
+                "portal_gamertag",
                 "portal_discord_avatar",
             ]:
                 st.session_state.pop(k, None)
@@ -1914,13 +1918,10 @@ def main():
     # ----------------------------------------------------------
     # 8.8 ABAS PRINCIPAIS (todas dentro de main())
     # ----------------------------------------------------------
-    tab_inicio, tab_banco, tab_ranking, tab_pvp, tab_pve, tab_conexao, tab_loja = st.tabs([
+    tab_inicio, tab_banco, tab_ranking, tab_loja = st.tabs([
         "🏠 Início",
         "🏦 Banco DzCoins",
         "🏆 Ranking",
-        "⚔️ Killfeed PvP",
-        "🧟 Killfeed PvE",
-        "🔌 Conexão",
         "🛒 Loja Virtual",
     ])
 
@@ -1953,239 +1954,51 @@ def main():
         st.markdown(f"### 🏦 Banco DzCoins — {gamertag_vinculada}")
         clients_db_fresh = load_db(DB_CLIENTS, {})
         client_data_fresh = clients_db_fresh.get(server_id, {})
-        render_banco(client_data_fresh, clients_db_fresh, server_id, gamertag_vinculada)
+        render_banco(
+            client_data_fresh,
+            clients_db_fresh,
+            server_id,
+            gamertag_vinculada,
+        )
 
     # --- ABA RANKING ---
     with tab_ranking:
         st.markdown("### 🏆 Ranking Semanal")
-        render_ranking(client_data, gamertag_vinculada, clients_db_fresh, server_id)
-
-    # --- ABA KILLFEED PVP ---
-    with tab_pvp:
-        st.markdown("### ⚔️ Killfeed PvP")
-
-        ftp_cfg = get_client_ftp_config(client_data)
-        if not ftp_cfg:
-            st.warning("FTP não configurado. Peça ao admin para configurar no painel.")
-        else:
-            @st.fragment(run_every=60)
-            def _killfeed_pvp(ftp_cfg):
-                with st.spinner("Carregando eventos PvP..."):
-                    log_text, err = ftp_download_latest_adm(ftp_cfg)
-
-                if err or not log_text:
-                    st.warning("Não foi possível carregar o log do servidor.")
-                    st.caption(f"Detalhes: {err or 'log vazio'}")
-                    return
-
-                eventos = parse_adm_killfeed_pvp(log_text)
-
-                if not eventos:
-                    st.info("Nenhum evento PvP registrado no log atual.")
-                    st.caption("Os eventos aparecerão aqui assim que ocorrerem no servidor.")
-                    return
-
-                st.caption(f"Total de eventos PvP: {len(eventos)} — atualizado a cada 60s")
-                st.divider()
-
-                for ev in eventos:
-                    col_i, col_d = st.columns([1, 8])
-                    with col_i:
-                        st.markdown(
-                            f"<div style='font-size:28px; text-align:center;'>{ev['icone']}</div>",
-                            unsafe_allow_html=True,
-                        )
-                    with col_d:
-                        st.markdown(
-                            f"""
-                            <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
-                                        border-left:3px solid #ff4444; margin-bottom:6px;">
-                                <span style="font-size:13px; color:#ff6666; font-weight:bold;">
-                                    {ev['hora']} — {ev['descricao']}
-                                </span><br>
-                                <span style="font-size:11px; color:#888;">
-                                    🗡️ {ev.get('assassino','?')} → 💀 {ev.get('vitima','?')}
-                                    {f" | 🔫 {ev['arma']}" if ev.get('arma') and ev['arma'] != 'Desconhecida' else ""}
-                                    {f" | 📍 {ev['posicao']}" if ev.get('posicao') else ""}
-                                </span>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-            _killfeed_pvp(ftp_cfg)
-
-    # --- ABA KILLFEED PVE ---
-    with tab_pve:
-        st.markdown("### 🧟 Killfeed PvE")
-
-        ftp_cfg = get_client_ftp_config(client_data)
-        if not ftp_cfg:
-            st.warning("FTP não configurado. Peça ao admin para configurar no painel.")
-        else:
-            filtro_pve = st.radio(
-                "Filtrar por tipo:",
-                ["Todos", "💀 Apenas Mortes", "🧟 Apenas Hits"],
-                horizontal=True,
-                key="filtro_pve",
-            )
-
-            @st.fragment(run_every=60)
-            def _killfeed_pve(ftp_cfg, filtro_pve):
-                with st.spinner("Carregando eventos PvE..."):
-                    log_text, err = ftp_download_latest_adm(ftp_cfg)
-
-                if err or not log_text:
-                    st.warning("Não foi possível carregar o log do servidor.")
-                    st.caption(f"Detalhes: {err or 'log vazio'}")
-                    return
-
-                eventos = parse_adm_killfeed_pve(log_text)
-
-                if filtro_pve == "💀 Apenas Mortes":
-                    eventos = [e for e in eventos if e["tipo"] == "morte_pve"]
-                elif filtro_pve == "🧟 Apenas Hits":
-                    eventos = [e for e in eventos if e["tipo"] == "hit_pve"]
-
-                if not eventos:
-                    st.info("Nenhum evento PvE encontrado com esse filtro.")
-                    return
-
-                st.caption(f"Total de eventos: {len(eventos)} — atualizado a cada 60s")
-                st.divider()
-
-                for ev in eventos:
-                    cor_borda = "#ff4444" if ev["tipo"] == "morte_pve" else "#ff8800"
-                    col_i, col_d = st.columns([1, 8])
-                    with col_i:
-                        st.markdown(
-                            f"<div style='font-size:28px; text-align:center;'>{ev['icone']}</div>",
-                            unsafe_allow_html=True,
-                        )
-                    with col_d:
-                        st.markdown(
-                            f"""
-                            <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
-                                        border-left:3px solid {cor_borda}; margin-bottom:6px;">
-                                <span style="font-size:13px; color:#ffaa44; font-weight:bold;">
-                                    {ev['hora']} — {ev['jogador']}
-                                </span><br>
-                                <span style="font-size:12px; color:#ccc;">
-                                    {ev['descricao']}
-                                </span>
-                                {f"<br><span style='font-size:11px; color:#888;'>📍 {ev['posicao']}</span>" if ev.get('posicao') else ""}
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-            _killfeed_pve(ftp_cfg, filtro_pve)
-
-    # --- ABA CONEXÃO ---
-    with tab_conexao:
-        st.markdown("### 🔌 Conexões & Desconexões")
-
-        ftp_cfg = get_client_ftp_config(client_data)
-        if not ftp_cfg:
-            st.warning("FTP não configurado. Peça ao admin para configurar no painel.")
-        else:
-            filtro_con = st.radio(
-                "Filtrar por tipo:",
-                ["Todos", "🟢 Conectou", "🔴 Desconectou"],
-                horizontal=True,
-                key="filtro_con",
-            )
-
-            @st.fragment(run_every=60)
-            def _conexoes(ftp_cfg, filtro_con):
-                with st.spinner("Carregando eventos de conexão..."):
-                    log_text, err = ftp_download_latest_adm(ftp_cfg)
-
-                if err or not log_text:
-                    st.warning("Não foi possível carregar o log do servidor.")
-                    st.caption(f"Detalhes: {err or 'log vazio'}")
-                    return
-
-                eventos = parse_adm_conexoes(log_text)
-
-                if filtro_con == "🟢 Conectou":
-                    eventos = [e for e in eventos if e["tipo"] == "connected"]
-                elif filtro_con == "🔴 Desconectou":
-                    eventos = [e for e in eventos if e["tipo"] == "disconnected"]
-
-                if not eventos:
-                    st.info("Nenhum evento de conexão encontrado.")
-                    return
-
-                st.caption(f"Total de eventos: {len(eventos)} — atualizado a cada 60s")
-                st.divider()
-
-                for ev in eventos:
-                    cor_borda = (
-                        "#00ff88" if ev["tipo"] == "connected"
-                        else "#ff4444" if ev["tipo"] == "disconnected"
-                        else "#888888"
-                    )
-                    col_i, col_d = st.columns([1, 8])
-                    with col_i:
-                        st.markdown(
-                            f"<div style='font-size:24px; text-align:center;'>{ev['icone']}</div>",
-                            unsafe_allow_html=True,
-                        )
-                    with col_d:
-                        st.markdown(
-                            f"""
-                            <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
-                                        border-left:3px solid {cor_borda}; margin-bottom:6px;">
-                                <span style="font-size:13px; color:#00d4ff; font-weight:bold;">
-                                    {ev['hora']} — {ev['jogador']}
-                                </span><br>
-                                <span style="font-size:12px; color:#ccc;">
-                                    {ev['descricao']}
-                                </span>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-            _conexoes(ftp_cfg, filtro_con)
+        clients_db_fresh = load_db(DB_CLIENTS, {})
+        client_data_fresh = clients_db_fresh.get(server_id, {})
+        render_ranking(
+            client_data_fresh,
+            gamertag_vinculada,
+            clients_db_fresh,
+            server_id,
+        )
 
     # --- ABA LOJA VIRTUAL ---
     with tab_loja:
         st.markdown("### 🛒 Loja Virtual")
 
-        # 1. Carrega o banco completo
         clients_db_loja = load_db(DB_CLIENTS, {})
-        
-        # 2. Localiza o cliente pelo server_id que você já tem no portal
-        # O server_id aqui já deve estar vindo do login/seleção de servidor
         client_data_loja = clients_db_loja.get(server_id, {})
-        
-        # 3. SEGURANÇA: Verifica se a chave 'loja' existe
         loja = client_data_loja.get("loja", {})
-        
         itens = [i for i in loja.get("itens", []) if i.get("ativo", True)]
 
         if not itens:
             st.info("A loja ainda não possui itens cadastrados ou ativos.")
         else:
-            # ... (seu código de exibição da loja continua aqui)
             hora_br = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
 
-            # Saldos do jogador
             wallets_loja = client_data_loja.get("wallets", {})
-            bank_loja    = client_data_loja.get("bank", {})
+            bank_loja = client_data_loja.get("bank", {})
             saldo_w = wallets_loja.get(gamertag_vinculada, {}).get("balance", 0)
             saldo_b = bank_loja.get(gamertag_vinculada, {}).get("balance", 0)
 
             col_sw, col_sb, col_st = st.columns(3)
             col_sw.metric("💰 Carteira", f"{saldo_w} DzCoins")
-            col_sb.metric("🏦 Banco",    f"{saldo_b} DzCoins")
-            col_st.metric("💎 Total",    f"{saldo_w + saldo_b} DzCoins")
+            col_sb.metric("🏦 Banco", f"{saldo_b} DzCoins")
+            col_st.metric("💎 Total", f"{saldo_w + saldo_b} DzCoins")
 
             st.divider()
 
-            # Filtro por categoria
             categorias = sorted(set(i.get("categoria", "Geral") for i in itens))
             categorias_opcoes = ["Todas"] + categorias
             cat_sel = st.selectbox(
@@ -2202,7 +2015,6 @@ def main():
             st.markdown(f"**{len(itens_filtrados)} item(ns) disponível(is)**")
             st.divider()
 
-            # Grid de itens
             for item in itens_filtrados:
                 with st.expander(
                     f"🎒 {item['nome']} — {item['preco']} DzCoins "
@@ -2232,9 +2044,9 @@ def main():
                             unsafe_allow_html=True,
                         )
 
-                        # Indica se tem saldo suficiente
                         tem_saldo_w = saldo_w >= item["preco"]
                         tem_saldo_b = saldo_b >= item["preco"]
+
                         if not tem_saldo_w and not tem_saldo_b:
                             st.error(
                                 f"❌ Saldo insuficiente. Você precisa de {item['preco']} DzCoins."
@@ -2311,7 +2123,6 @@ def main():
                                 else:
                                     st.error(msg)
 
-            # --- Histórico de Compras do Jogador ---
             st.divider()
             st.markdown("### 📜 Minhas Compras")
 
