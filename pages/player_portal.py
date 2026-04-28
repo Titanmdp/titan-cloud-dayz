@@ -1049,14 +1049,22 @@ def registrar_compra(
     client_data["bank"]    = bank
     clients_db[server_id]  = client_data
 
-    # >>> NOVO PASSO: envia imediatamente o arquivo loja_pedidos.json via FTP
+    # Envia imediatamente o loja_spawn.json via FTP com todos os pedidos pendentes
     mapa = client_data.get("loja", {}).get("mapa_padrao", "Chernarus")
-    success = enviar_pedidos_via_ftp(client_id=server_id, pedidos=client_data["pedidos"], mapa=mapa)
+    pedidos_pendentes = [p for p in client_data["pedidos"] if p.get("status") == "Aguardando Reset"]
+    success = enviar_pedidos_via_ftp(client_id=server_id, pedidos=pedidos_pendentes, mapa=mapa)
 
     if success:
+        # Marca todos os pedidos pendentes como Entregue após envio bem-sucedido
+        hora_entrega = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
+        for p in client_data["pedidos"]:
+            if p.get("status") == "Aguardando Reset":
+                p["status"] = "Entregue"
+                p["data_entrega"] = hora_entrega
+        clients_db[server_id] = client_data
         return True, "Pedido registrado e arquivo enviado via FTP."
     else:
-        return False, "Pedido registrado, mas falha ao enviar via FTP."
+        return True, "Pedido registrado, mas falha ao enviar via FTP. Será entregue no próximo reset."
 
     
 # =========================================================
