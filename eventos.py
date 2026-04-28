@@ -415,7 +415,7 @@ def pro_worker():
                 save_db(DB_CLIENTS, db_all)
 
         except Exception as e:
-            print("Erro no proworker:", e)
+            print("Erro no pro_worker:", e)
 
         time.sleep(30)
 
@@ -862,7 +862,7 @@ def start_worker_once():
     global WORKER_STARTED
     if not WORKER_STARTED:
         WORKER_STARTED = True
-        threading.Thread(target=proworker, daemon=True).start()
+        threading.Thread(target=pro_worker, daemon=True).start()
 
 # ---------- HELPERS GLOBALS.XML (AMBIENTE) ----------
 
