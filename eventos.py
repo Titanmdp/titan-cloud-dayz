@@ -246,7 +246,7 @@ def get_user_location():
 
 # ---------- HELPERS TYPES.XML (ECONOMIA) ----------
 
-def parsetypesxml(xmlbytes):
+def parse_types_xml(xmlbytes):
     """
     Recebe bytes de um types.xml e devolve:
     - tree: objeto ET.ElementTree
