@@ -6,10 +6,8 @@ from datetime import datetime, timezone, timedelta
 # Ajuste de fuso horário
 FUSO_BR = timezone(timedelta(hours=-3))
 
-# Altura fixa temporária para a região de Zelenogorsk (~172.62m de altitude)
-# TODO: substituir por lookup dinâmico via heightmap quando disponível
-TERRAIN_Y = 172.62
-OFFSET_Y = 0.0  # offset adicional (0.0 = altura exata do terreno, DayZ aplica gravidade sozinho)
+# Offset de altura para evitar que itens fiquem enterrados
+OFFSET_Y = 2.0  
 
 def get_hora_brasilia():
     return datetime.now(FUSO_BR)
@@ -42,10 +40,18 @@ def converter_pedidos_para_dayz_json(pedidos):
     objetos = []
     for pedido in pedidos:
         try:
-            coords = pedido.get("coordenadas", "0 / 0").split("/")
-            x = float(coords[0].strip())
-            z = float(coords[1].strip())
-            y = TERRAIN_Y + OFFSET_Y  # altura do terreno + offset para não enterrar
+            coords = pedido.get("coordenadas", "").split()
+
+            if len(coords) >= 3:
+                x = float(coords[0].strip())
+                y = float(coords[1].strip())
+                z = float(coords[2].strip())
+            elif len(coords) >= 2:
+                x = float(coords[0].strip())
+                z = float(coords[1].strip())
+                y = OFFSETY
+            else:
+                raise ValueError("Coordenadas inválidas")
 
             # Separa classes (kit ou item solo)
             classes = [c.strip() for c in pedido.get("item_classe", "Unknown").split(",")]
