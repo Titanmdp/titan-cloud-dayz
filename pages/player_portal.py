@@ -1111,7 +1111,7 @@ def sincronizar_pedidos_apos_reset(
     - Lê o restart.log via FTP
     - Descobre o último reset
     - Marca como não pendentes no spawn os pedidos comprados antes ou no reset
-    - Reenvia o lojaspawn.json apenas com os pedidos ainda pendentes
+    - Reenvia o loja_spawn.json apenas com os pedidos ainda pendentes
     """
     client_data = clients_db.get(server_id, {})
     pedidos = client_data.get("pedidos", [])
@@ -1169,12 +1169,12 @@ def sincronizar_pedidos_apos_reset(
         clients_db[server_id] = client_data
 
     if not success:
-        return False, "Pedidos sincronizados, mas falhou ao atualizar lojaspawn.json."
+        return False, "Pedidos sincronizados, mas falhou ao atualizar lojas_pawn.json."
 
     if houve_alteracao:
-        return True, "Pedidos sincronizados após reset e lojaspawn.json atualizado."
+        return True, "Pedidos sincronizados após reset e lojas_pawn.json atualizado."
 
-    return True, "Nenhum pedido precisava ser alterado; lojaspawn.json foi apenas revalidado."
+    return True, "Nenhum pedido precisava ser alterado; lojas_pawn.json foi apenas revalidado."
 
     
 # =========================================================
