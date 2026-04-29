@@ -752,6 +752,7 @@ def apply_df_to_messages_xml(tree, root, df_messages):
     """
     Aplica as alterações do DataFrame ao XML original,
     preservando ao máximo a estrutura já existente.
+    Também permite adicionar novas mensagens.
     """
     if df_messages.empty:
         xml_bytes = ET.tostring(root, encoding="utf-8", method="xml")
@@ -763,10 +764,10 @@ def apply_df_to_messages_xml(tree, root, df_messages):
             child = ET.SubElement(parent, tag_name)
         return child
 
-    for _, row in df_messages.iterrows():
+    df_work = df_messages.copy()
+
+    for _, row in df_work.iterrows():
         msg_elem = row.get("_elem")
-        if msg_elem is None:
-            continue
 
         id_val = str(row.get("id", "")).strip()
         name_val = str(row.get("name", "")).strip()
@@ -775,6 +776,9 @@ def apply_df_to_messages_xml(tree, root, df_messages):
         text_val = str(row.get("text", "") or "").strip()
         time_val = row.get("time", 0)
         priority_val = row.get("priority", 0)
+
+        if msg_elem is None:
+            msg_elem = ET.SubElement(root, "message")
 
         if id_val:
             msg_elem.set("id", id_val)
@@ -797,24 +801,34 @@ def apply_df_to_messages_xml(tree, root, df_messages):
             del msg_elem.attrib["icon"]
 
         if pd.notna(time_val):
+            try:
+                time_int = int(float(time_val))
+            except Exception:
+                time_int = 0
+
             if "time" in msg_elem.attrib:
-                msg_elem.set("time", str(int(time_val)))
+                msg_elem.set("time", str(time_int))
             elif "delay" in msg_elem.attrib:
-                msg_elem.set("delay", str(int(time_val)))
+                msg_elem.set("delay", str(time_int))
             elif msg_elem.find("time") is not None:
-                ensure_child(msg_elem, "time").text = str(int(time_val))
+                ensure_child(msg_elem, "time").text = str(time_int)
             elif msg_elem.find("delay") is not None:
-                ensure_child(msg_elem, "delay").text = str(int(time_val))
+                ensure_child(msg_elem, "delay").text = str(time_int)
             else:
-                msg_elem.set("time", str(int(time_val)))
+                msg_elem.set("time", str(time_int))
 
         if pd.notna(priority_val):
+            try:
+                priority_int = int(float(priority_val))
+            except Exception:
+                priority_int = 0
+
             if "priority" in msg_elem.attrib:
-                msg_elem.set("priority", str(int(priority_val)))
+                msg_elem.set("priority", str(priority_int))
             elif msg_elem.find("priority") is not None:
-                ensure_child(msg_elem, "priority").text = str(int(priority_val))
+                ensure_child(msg_elem, "priority").text = str(priority_int)
             elif msg_elem.find("order") is not None:
-                ensure_child(msg_elem, "order").text = str(int(priority_val))
+                ensure_child(msg_elem, "order").text = str(priority_int)
 
         if msg_elem.find("text") is not None:
             ensure_child(msg_elem, "text").text = text_val
@@ -3180,7 +3194,7 @@ with tabevents:
 
 with tabmessages:
     st.subheader("💬 Editor de Mensagens (messages.xml)")
-    st.info("Faça upload do messages.xml atual do seu servidor para visualizar, ajustar, baixar e enviar ao diretório correto (/db).")
+    st.info("Faça upload do messages.xml atual do seu servidor para visualizar, ajustar, incluir novas mensagens, baixar e enviar ao diretório correto (/db).")
 
     upmessages = st.file_uploader(
         "Enviar messages.xml",
@@ -3216,6 +3230,13 @@ with tabmessages:
     if key_df in st.session_state:
         df_messages = st.session_state[key_df].copy()
 
+        if "text" not in df_messages.columns:
+            df_messages["text"] = ""
+        if "ordem" not in df_messages.columns:
+            df_messages["ordem"] = range(1, len(df_messages) + 1)
+        if "_elem" not in df_messages.columns:
+            df_messages["_elem"] = None
+
         st.markdown("### 🔍 Mensagens atualmente aplicadas")
 
         busca_msg = st.text_input(
@@ -3224,16 +3245,6 @@ with tabmessages:
             key=f"busca_messages_{user_id}"
         )
 
-        df_view = df_messages.copy()
-
-        if "text" not in df_view.columns:
-            df_view["text"] = ""
-
-        if busca_msg.strip():
-            df_view = df_view[
-                df_view["text"].astype(str).str.contains(busca_msg.strip(), case=False, na=False)
-            ]
-
         with st.expander("🔎 Diagnóstico do messages.xml carregado", expanded=False):
             st.write(f"Total de mensagens detectadas: {len(df_messages)}")
             if not df_messages.empty:
@@ -3241,6 +3252,72 @@ with tabmessages:
                     df_messages.drop(columns=["_elem"], errors="ignore"),
                     use_container_width=True
                 )
+
+        st.markdown("### ➕ Inclusão rápida")
+
+        col_new1, col_new2 = st.columns([2, 1])
+
+        with col_new1:
+            nova_msg_texto = st.text_input(
+                "Texto da nova mensagem",
+                key=f"nova_msg_texto_{user_id}",
+                placeholder="Ex: Reinício do servidor em 10 minutos."
+            )
+
+        with col_new2:
+            nova_msg_tempo = st.number_input(
+                "Tempo",
+                min_value=0,
+                step=1,
+                value=30,
+                key=f"nova_msg_tempo_{user_id}"
+            )
+
+        col_new3, col_new4, col_new5 = st.columns(3)
+
+        with col_new3:
+            nova_msg_id = st.text_input("ID", key=f"nova_msg_id_{user_id}")
+
+        with col_new4:
+            nova_msg_name = st.text_input("Nome", key=f"nova_msg_name_{user_id}")
+
+        with col_new5:
+            nova_msg_priority = st.number_input(
+                "Prioridade",
+                min_value=0,
+                step=1,
+                value=0,
+                key=f"nova_msg_priority_{user_id}"
+            )
+
+        if st.button("Adicionar nova mensagem à sessão", use_container_width=True, key=f"btn_add_message_{user_id}"):
+            if not nova_msg_texto.strip():
+                st.warning("Digite o texto da nova mensagem antes de adicionar.")
+            else:
+                nova_ordem = int(df_messages["ordem"].max()) + 1 if not df_messages.empty else 1
+
+                nova_linha = {
+                    "ordem": nova_ordem,
+                    "id": str(nova_msg_id).strip(),
+                    "name": str(nova_msg_name).strip(),
+                    "time": int(nova_msg_tempo),
+                    "priority": int(nova_msg_priority),
+                    "color": "",
+                    "icon": "",
+                    "text": nova_msg_texto.strip(),
+                    "_elem": None,
+                }
+
+                df_messages = pd.concat([df_messages, pd.DataFrame([nova_linha])], ignore_index=True)
+                st.session_state[key_df] = df_messages
+                st.success("Nova mensagem adicionada à sessão. Agora você pode revisar, baixar ou enviar.")
+
+        df_view = df_messages.copy()
+
+        if busca_msg.strip():
+            df_view = df_view[
+                df_view["text"].astype(str).str.contains(busca_msg.strip(), case=False, na=False)
+            ]
 
         st.markdown("### ✏️ Ajuste de mensagens")
 
@@ -3251,7 +3328,7 @@ with tabmessages:
 
         edited_df = st.data_editor(
             df_view[cols_editor],
-            num_rows="fixed",
+            num_rows="dynamic",
             hide_index=True,
             use_container_width=True,
             column_config={
@@ -3287,7 +3364,14 @@ with tabmessages:
                             if col in df_edit.columns and col in df_full.columns:
                                 df_full.loc[idx, col] = df_edit.loc[idx, col]
 
-                st.session_state[key_df] = df_full.reset_index()
+                # Captura novas linhas adicionadas diretamente no data_editor
+                novos_indices = [idx for idx in df_edit.index if idx not in df_full.index]
+                if novos_indices:
+                    novas_linhas = df_edit.loc[novos_indices].reset_index()
+                    novas_linhas["_elem"] = None
+                    df_full = pd.concat([df_full.reset_index(), novas_linhas], ignore_index=True).set_index("ordem")
+
+                st.session_state[key_df] = df_full.reset_index().sort_values("ordem").reset_index(drop=True)
                 st.success("Alterações aplicadas internamente ao messages.xml (sessão).")
 
         with colmsg2:
@@ -3360,11 +3444,12 @@ with tabmessages:
         st.divider()
         st.markdown("### ℹ️ Observações rápidas")
         st.write("- A interface mostra as mensagens que já estão no arquivo carregado.")
+        st.write("- Você pode adicionar novas mensagens direto pela área de inclusão rápida.")
         st.write("- Use primeiro o botão **Aplicar alterações na sessão** antes de baixar ou enviar.")
         st.write("- O download e o FTP sempre usam o DataFrame salvo na sessão.")
         st.write("- O bloco de diagnóstico ajuda a validar se o parser leu corretamente o schema do seu XML.")
     else:
-        st.info("Envie o messages.xml do seu servidor para começar a visualizar e editar.")
+        st.info("Envie o messages.xml do seu servidor para começar a visualizar, editar e incluir novas mensagens.")
 
 
 with tabcfgeventspawns:
