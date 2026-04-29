@@ -62,13 +62,13 @@ PLANOS = {
 
 # Caminhos padrão do types.xml por mapa no servidor DayZ
 TYPES_REMOTE_PATHS = {
-    "Chernarus": "mpmissions/dayzOffline.chernarusplus/db",
-    "Livonia": "mpmissions/dayzOffline.enoch/db",
+    "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
+    "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
 }
 
 GLOBALS_REMOTE_PATHS = {
-    "Chernarus": "mpmissions/dayzOffline.chernarusplus/db",
-    "Livonia": "mpmissions/dayzOffline.enoch/db",
+    "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
+    "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
 }
 
 EVENTS_REMOTE_PATHS = {
@@ -87,8 +87,8 @@ CFGEVENTSPAWNS_REMOTE_PATHS = {
 }
 
 CFGGAMEPLAY_REMOTE_PATHS = {
-    "Chernarus": "mpmissions/dayzOffline.chernarusplus",
-    "Livonia": "mpmissions/dayzOffline.enoch",
+    "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus",
+    "Livonia": "dayzxb_missions/dayzOffline.enoch",
 }
 
 # --- BANCO DE DADOS (JSON) / UPLOADS ---
@@ -196,20 +196,6 @@ def enviar_email(destino, assunto, mensagem):
         return False
 
 
-def enviar_whatsapp(numero, mensagem):
-    """
-    Envia uma mensagem via WhatsApp (integração com serviço externo).
-    Este é um stub que retorna False, pois requer integração com API.
-    Para implementar: usar twilio, baileys ou similar.
-    """
-    try:
-        print(f"Tentativa de enviar WhatsApp para {numero}: {mensagem[:50]}...")
-        return False
-    except Exception as e:
-        print(f"Erro ao enviar WhatsApp: {e}")
-        return False
-
-
 def registrar_log(client_id, mensagem, tipo="info"):
     db_disco = load_db(DB_CLIENTS, {})
 
@@ -310,7 +296,7 @@ def parse_types_xml(xmlbytes):
     return tree, root, df
 
 
-def apply_df_to_types_xml(tree, root, df):
+def applydftotypesxml(tree, root, df):
     """
     Aplica as alterações do DataFrame de volta no XML
     e devolve bytes do novo types.xml.
@@ -447,6 +433,31 @@ def start_worker_once():
         threading.Thread(target=proworker, daemon=True).start()
 
 # ---------- HELPERS BAIXAR FTP ----------
+
+def baixar_arquivo_via_ftp(clientid, remotedir, remotefilename):
+    dbatual = load_db(DB_CLIENTS, {})
+    if clientid not in dbatual:
+        return False, None, "Cliente não encontrado"
+
+    conf = dbatual[clientid].get("ftp", {})
+    if not conf or not conf.get("host"):
+        return False, None, "Configuração FTP não encontrada"
+
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(conf["host"], int(conf.get("port", 21)), timeout=20)
+        ftp.login(conf["user"], conf["pass"])
+        ftp.cwd(remotedir)
+
+        chunks = []
+        ftp.retrbinary(f"RETR {remotefilename}", chunks.append)
+        ftp.quit()
+
+        file_bytes = b"".join(chunks)
+        return True, file_bytes, "Sucesso"
+
+    except Exception as e:
+        return False, None, str(e)
 
 # ---------- HELPER GENÉRICO DE DOWNLOAD VIA FTP ----------
 
@@ -609,6 +620,39 @@ def aplicar_eventos_map_no_cfgeventspawns(tree, root, eventos_map):
     return header + xml_bytes
 
 
+def enviar_cfgeventspawns_via_ftp(clientid, localpath, mapa):
+    """
+    Envia o cfgeventspawns.xml para a raiz da missão do DayZ,
+    conforme o mapa selecionado.
+    """
+    CFGEVENTSPAWNS_REMOTE_PATHS = {
+        "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus",
+        "Livonia": "dayzxb_missions/dayzOffline.enoch",
+    }
+
+    dbatual = load_db(DB_CLIENTS, {})
+    if clientid not in dbatual:
+        return False, "Cliente não encontrado"
+
+    conf = dbatual[clientid].get("ftp", {})
+    remotedir = CFGEVENTSPAWNS_REMOTE_PATHS.get(mapa)
+
+    if not remotedir:
+        return False, f"Caminho remoto não configurado para o mapa {mapa}"
+
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(conf["host"], int(conf.get("port", 21)), timeout=15)
+        ftp.login(conf["user"], conf["pass"])
+        ftp.cwd(remotedir)
+
+        with open(localpath, "rb") as f:
+            ftp.storbinary("STOR cfgeventspawns.xml", f)
+
+        ftp.quit()
+        return True, "Sucesso"
+    except Exception as e:
+        return False, str(e)
 
 # ---------- HELPERS EVENTS.XML ----------
 
@@ -727,7 +771,7 @@ def apply_df_to_events_xml(tree, root, df_events):
         flags_elem.set("active", "1" if active_value else "0")
 
     xml_bytes = ET.tostring(root, encoding="utf-8", method="xml")
-    header = b'<?xml version="1.0" encoding="utf-8"?>\n'
+    header = b'\n'
     return header + xml_bytes
 
 # ---------- HELPERS MESSAGES.XML ----------
@@ -934,7 +978,7 @@ def enviar_arquivo_via_ftp(clientid, localpath, remotedir, remotefilename):
 
 # ---------- WRAPPERS ESPECÍFICOS ----------
 
-def enviar_types_via_ftp(clientid, localpath, mapa):
+def enviartypesviaftp(clientid, localpath, mapa):
     """
     Envia o arquivo types.xml já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
@@ -950,7 +994,7 @@ def enviar_types_via_ftp(clientid, localpath, mapa):
         remotefilename="types.xml",
     )
 
-def enviar_globals_via_ftp(clientid, localpath, mapa):
+def enviarglobalsviaftp(clientid, localpath, mapa):
     """
     Envia o arquivo globals.xml já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
@@ -966,7 +1010,7 @@ def enviar_globals_via_ftp(clientid, localpath, mapa):
         remotefilename="globals.xml",
     )
 
-def enviar_cfggameplay_via_ftp(clientid, localpath, mapa):
+def enviarcfggameplayviaftp(clientid, localpath, mapa):
     """
     Envia o arquivo cfggameplay.json já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
@@ -1071,7 +1115,7 @@ def get_server_status_nitrado(client_id: str, nitrado_id: str) -> str:
 def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus") -> bool:
     """
     Envia um arquivo JSON com os pedidos para o servidor via FTP.
-    Arquivo é enviado para: mpmissions/dayzOffline.{mapa}/custom/loja_pedidos.json
+    Arquivo é enviado para: dayzxb_missions/dayzOffline.{mapa}/custom/loja_pedidos.json
     """
     try:
         db_atual = load_db(DB_CLIENTS, {})
@@ -1085,9 +1129,9 @@ def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus
         # Define caminho remoto de acordo com o mapa
         mapa_lower = mapa.lower()
         if "enoch" in mapa_lower or "livonia" in mapa_lower:
-            remote_base = "mpmissions/dayzOffline.enoch"
+            remote_base = "dayzxb_missions/dayzOffline.enoch"
         else:
-            remote_base = "mpmissions/dayzOffline.chernarusplus"
+            remote_base = "dayzxb_missions/dayzOffline.chernarusplus"
         
         remote_dir = f"{remote_base}/custom"
         
