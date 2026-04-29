@@ -2309,7 +2309,32 @@ def main():
                                     st.error(msg)
 
             st.divider()
-            st.markdown("### 📜 Minhas Compras")
+
+            col_titulo, col_acao = st.columns([3, 1])
+            with col_titulo:
+                st.markdown("### 📜 Minhas Compras")
+
+            with col_acao:
+                if st.button(
+                    "🗑️ Limpar entregues",
+                    key="limpar_compras_entregues",
+                    use_container_width=True,
+                ):
+                    pedidos_atuais = client_data_loja.get("pedidos", [])
+                    pedidos_filtrados = [
+                        p for p in pedidos_atuais
+                        if not (
+                            p.get("gamertag") == gamertag_vinculada
+                            and p.get("status") == "Entregue"
+                        )
+                    ]
+
+                    client_data_loja["pedidos"] = pedidos_filtrados
+                    clients_db_loja[server_id] = client_data_loja
+                    save_db(DB_CLIENTS, clients_db_loja)
+
+                    st.success("Histórico de compras entregues limpo com sucesso!")
+                    st.rerun()
 
             pedidos = client_data_loja.get("pedidos", [])
             meus_pedidos = [p for p in pedidos if p.get("gamertag") == gamertag_vinculada]
