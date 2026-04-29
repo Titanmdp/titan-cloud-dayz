@@ -66,6 +66,11 @@ TYPES_REMOTE_PATHS = {
     "Livonia": "mpmissions/dayzOffline.enoch/db",
 }
 
+GLOBALS_REMOTE_PATHS = {
+    "Chernarus": "mpmissions/dayzOffline.chernarusplus/db",
+    "Livonia": "mpmissions/dayzOffline.enoch/db",
+}
+
 EVENTS_REMOTE_PATHS = {
     "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
     "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
@@ -426,6 +431,103 @@ def start_worker_once():
     if not WORKER_STARTED:
         WORKER_STARTED = True
         threading.Thread(target=proworker, daemon=True).start()
+
+# ---------- HELPERS BAIXAR FTP ----------
+
+def baixar_arquivo_via_ftp(clientid, remotedir, remotefilename):
+    dbatual = load_db(DB_CLIENTS, {})
+    if clientid not in dbatual:
+        return False, None, "Cliente não encontrado"
+
+    conf = dbatual[clientid].get("ftp", {})
+    if not conf or not conf.get("host"):
+        return False, None, "Configuração FTP não encontrada"
+
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(conf["host"], int(conf.get("port", 21)), timeout=20)
+        ftp.login(conf["user"], conf["pass"])
+        ftp.cwd(remotedir)
+
+        chunks = []
+        ftp.retrbinary(f"RETR {remotefilename}", chunks.append)
+        ftp.quit()
+
+        file_bytes = b"".join(chunks)
+        return True, file_bytes, "Sucesso"
+
+    except Exception as e:
+        return False, None, str(e)
+
+# ---------- HELPER GENÉRICO DE DOWNLOAD VIA FTP ----------
+
+def baixar_arquivo_via_ftp(clientid, remotedir, remotefilename):
+    """
+    Baixa um arquivo remoto via FTP e devolve:
+    (ok: bool, file_bytes: bytes|None, msg: str)
+    """
+    dbatual = load_db(DB_CLIENTS, {})
+
+    if clientid not in dbatual:
+        return False, None, "Cliente não encontrado"
+
+    conf = dbatual[clientid].get("ftp", {})
+    if not conf or not conf.get("host"):
+        return False, None, "Configuração FTP não encontrada"
+
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(conf["host"], int(conf.get("port", 21)), timeout=20)
+        ftp.login(conf["user"], conf["pass"])
+        ftp.cwd(remotedir)
+
+        chunks = []
+        ftp.retrbinary(f"RETR {remotefilename}", chunks.append)
+        ftp.quit()
+
+        file_bytes = b"".join(chunks)
+        return True, file_bytes, "Sucesso"
+
+    except Exception as e:
+        return False, None, str(e)
+
+# ---------- WRAPPERS ESPECÍFICOS DE DOWNLOAD ----------
+
+def baixartypesviaftp(clientid, mapa):
+    remotedir = TYPES_REMOTE_PATHS.get(mapa)
+    if not remotedir:
+        return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
+    return baixar_arquivo_via_ftp(clientid, remotedir, "types.xml")
+
+def baixarglobalsviaftp(clientid, mapa):
+    remotedir = GLOBALS_REMOTE_PATHS.get(mapa)
+    if not remotedir:
+        return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
+    return baixar_arquivo_via_ftp(clientid, remotedir, "globals.xml")
+
+def baixarcfggameplayviaftp(clientid, mapa):
+    remotedir = CFGGAMEPLAY_REMOTE_PATHS.get(mapa)
+    if not remotedir:
+        return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
+    return baixar_arquivo_via_ftp(clientid, remotedir, "cfggameplay.json")
+
+def baixareventsviaftp(clientid, mapa):
+    remotedir = EVENTS_REMOTE_PATHS.get(mapa)
+    if not remotedir:
+        return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
+    return baixar_arquivo_via_ftp(clientid, remotedir, "events.xml")
+
+def baixarmessagesviaftp(clientid, mapa):
+    remotedir = MESSAGES_REMOTE_PATHS.get(mapa)
+    if not remotedir:
+        return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
+    return baixar_arquivo_via_ftp(clientid, remotedir, "messages.xml")
+
+def baixarcfgeventspawnsviaftp(clientid, mapa):
+    remotedir = CFGEVENTSPAWNS_REMOTE_PATHS.get(mapa)
+    if not remotedir:
+        return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
+    return baixar_arquivo_via_ftp(clientid, remotedir, "cfgeventspawns.xml")
 
 # ---------- HELPERS CFGEVENTSPAWNS.XML ----------
 
@@ -2209,17 +2311,50 @@ with tab3:
                     
 with tab4:
     st.subheader("⚙️ Editor de Loot (types.xml)")
-    st.info("Faça upload do types.xml atual do seu servidor para analisar e ajustar o loot.")
+    st.info("Você pode enviar o types.xml manualmente ou carregar direto do servidor via FTP.")
 
-    # 1) Upload do arquivo
-    up_types = st.file_uploader("Enviar types.xml", type=["xml"], key="up_types_xml_client")
+    mapa_types = st.selectbox(
+        "Mapa do types.xml",
+        ["Chernarus", "Livonia"],
+        key=f"mapa_types_ftp_{user_id}"
+    )
+
+    colftp1, colftp2 = st.columns([1, 1])
+
+    with colftp1:
+        if st.button(
+            "📥 Carregar types.xml do servidor via FTP",
+            use_container_width=True,
+            key=f"btn_load_types_ftp_{user_id}"
+        ):
+            ok, xml_bytes, msg = baixartypesviaftp(user_id, mapa_types)
+
+            if ok:
+                try:
+                    tree, root, df_types = parse_types_xml(xml_bytes)
+
+                    st.session_state[f"types_xml_tree_{user_id}"] = tree
+                    st.session_state[f"types_xml_root_{user_id}"] = root
+                    st.session_state[f"types_xml_df_{user_id}"] = df_types
+
+                    st.success(f"types.xml carregado do servidor com sucesso! ({len(df_types)} itens)")
+                except Exception as e:
+                    st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
+            else:
+                st.error(f"Erro ao baixar types.xml via FTP: {msg}")
+
+    with colftp2:
+        up_types = st.file_uploader(
+            "Enviar types.xml",
+            type=["xml"],
+            key="up_types_xml_client"
+        )
 
     if up_types is not None:
         try:
             xml_bytes = up_types.read()
             tree, root, df_types = parse_types_xml(xml_bytes)
 
-            # Guarda no session_state, separado por cliente
             st.session_state[f"types_xml_tree_{user_id}"] = tree
             st.session_state[f"types_xml_root_{user_id}"] = root
             st.session_state[f"types_xml_df_{user_id}"] = df_types
@@ -2227,6 +2362,9 @@ with tab4:
             st.success(f"Arquivo carregado: {up_types.name} ({len(df_types)} itens)")
         except Exception as e:
             st.error(f"Erro ao ler types.xml: {e}")
+
+    # daqui para baixo continua o restante da lógica da tab4
+    # que usa st.session_state[f"types_xml_df_{user_id}"]
 
     # 2) Se já temos algo carregado na sessão, mostra a interface
     key_df = f"types_xml_df_{user_id}"
@@ -2391,24 +2529,58 @@ with tab4:
         )  # [web:65]
 
 with tab5:
-    st.subheader("🌍 Configuração de Ambiente (globals.xml)")
-    st.info("Ajuste limites de zumbis/animais, tempos de limpeza e timers de login/logout.")
+    st.subheader("🌍 Ambiente / globals.xml")
+    st.info("Você pode enviar o globals.xml manualmente ou carregar direto do servidor via FTP.")
 
-    # 1) Upload do globals.xml
-    up_globals = st.file_uploader("Enviar globals.xml", type=["xml"], key="up_globals_xml_client")
+    mapa_globals = st.selectbox(
+        "Mapa do globals.xml",
+        ["Chernarus", "Livonia"],
+        key=f"mapa_globals_ftp_{user_id}"
+    )
+
+    colg1, colg2 = st.columns([1, 1])
+
+    with colg1:
+        if st.button(
+            "📥 Carregar globals.xml do servidor via FTP",
+            use_container_width=True,
+            key=f"btn_load_globals_ftp_{user_id}"
+        ):
+            ok, xml_bytes, msg = baixarglobalsviaftp(user_id, mapa_globals)
+
+            if ok:
+                try:
+                    tree, root, vars_dict = parse_globals_xml(xml_bytes)
+                    st.session_state[f"globals_tree_{user_id}"] = tree
+                    st.session_state[f"globals_root_{user_id}"] = root
+                    st.session_state[f"globals_vars_{user_id}"] = vars_dict
+                    st.success(f"globals.xml carregado do servidor com sucesso! ({len(vars_dict)} variáveis)")
+                except Exception as e:
+                    st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
+            else:
+                st.error(f"Erro ao baixar globals.xml via FTP: {msg}")
+
+    with colg2:
+        up_globals = st.file_uploader(
+            "Enviar globals.xml",
+            type=["xml"],
+            key=f"up_globalsxml_{user_id}"
+        )
 
     if up_globals is not None:
         try:
             xml_bytes = up_globals.read()
-            g_tree, g_root, g_vars = parse_globals_xml(xml_bytes)
+            tree, root, vars_dict = parse_globals_xml(xml_bytes)
 
-            st.session_state[f"globals_tree_{user_id}"] = g_tree
-            st.session_state[f"globals_root_{user_id}"] = g_root
-            st.session_state[f"globals_vars_{user_id}"] = g_vars
+            st.session_state[f"globals_tree_{user_id}"] = tree
+            st.session_state[f"globals_root_{user_id}"] = root
+            st.session_state[f"globals_vars_{user_id}"] = vars_dict
 
-            st.success(f"globals.xml carregado ({len(g_vars)} variáveis detectadas)")
+            st.success(f"Arquivo carregado: {up_globals.name} ({len(vars_dict)} variáveis)")
         except Exception as e:
             st.error(f"Erro ao ler globals.xml: {e}")
+
+    # daqui para baixo continua o restante da lógica da tab5
 
     key_gvars = f"globals_vars_{user_id}"
     if key_gvars in st.session_state:
@@ -2581,29 +2753,56 @@ with tab5:
                     st.error(f"Erro ao salvar/enviar globals.xml: {e}")
                     
 with tabcfggameplay:
-    st.subheader("🎮 Configuração de Gameplay (cfggameplay.json)")
-    st.info(
-        "Faça upload do cfggameplay.json do seu servidor, ajuste os parâmetros de gameplay "
-        "e depois baixe o arquivo ou envie via FTP."
+    st.subheader("⚙️ Gameplay / cfggameplay.json")
+    st.info("Você pode enviar o cfggameplay.json manualmente ou carregar direto do servidor via FTP.")
+
+    mapa_cfggameplay = st.selectbox(
+        "Mapa do cfggameplay.json",
+        ["Chernarus", "Livonia"],
+        key=f"mapa_cfggameplay_ftp_{user_id}"
     )
 
-    # 1) Upload do cfggameplay.json (igual types/globals: baseado em upload + sessão)
-    up_cfg = st.file_uploader(
-        "Enviar cfggameplay.json",
-        type=["json"],
-        key=f"up_cfggameplay_{user_id}",
-    )
+    colcg1, colcg2 = st.columns([1, 1])
 
-    cfg_session_key = f"cfggameplay_cfg_{user_id}"
+    with colcg1:
+        if st.button(
+            "📥 Carregar cfggameplay.json do servidor via FTP",
+            use_container_width=True,
+            key=f"btn_load_cfggameplay_ftp_{user_id}"
+        ):
+            ok, json_bytes, msg = baixarcfggameplayviaftp(user_id, mapa_cfggameplay)
 
-    if up_cfg is not None:
+            if ok:
+                try:
+                    cfg_data = json.loads(json_bytes.decode("utf-8"))
+
+                    st.session_state[f"cfggameplay_data_{user_id}"] = cfg_data
+
+                    st.success("cfggameplay.json carregado do servidor com sucesso!")
+                except Exception as e:
+                    st.error(f"Arquivo baixado, mas houve erro ao interpretar o JSON: {e}")
+            else:
+                st.error(f"Erro ao baixar cfggameplay.json via FTP: {msg}")
+
+    with colcg2:
+        up_cfggameplay = st.file_uploader(
+            "Enviar cfggameplay.json",
+            type=["json"],
+            key=f"up_cfggameplay_{user_id}"
+        )
+
+    if up_cfggameplay is not None:
         try:
-            raw_bytes = up_cfg.read()
-            cfg = json.loads(raw_bytes.decode("utf-8"))
-            st.session_state[cfg_session_key] = cfg
-            st.success(f"Arquivo carregado: {up_cfg.name}")
+            json_bytes = up_cfggameplay.read()
+            cfg_data = json.loads(json_bytes.decode("utf-8"))
+
+            st.session_state[f"cfggameplay_data_{user_id}"] = cfg_data
+
+            st.success("cfggameplay.json carregado com sucesso!")
         except Exception as e:
             st.error(f"Erro ao ler cfggameplay.json: {e}")
+
+    # daqui para baixo continua o restante da lógica da aba
 
     # 2) Se já temos cfg em sessão, mostra a interface
     if cfg_session_key in st.session_state:
@@ -2960,31 +3159,60 @@ with tabcfggameplay:
         st.info("Envie o cfggameplay.json do seu servidor para começar a editar.")
 
 with tabevents:
-    st.subheader("🎪 Editor de Eventos (events.xml)")
-    st.info("Faça upload do events.xml atual do seu servidor para analisar, editar, baixar e enviar via FTP.")
+    st.subheader("🎪 Eventos / events.xml")
+    st.info("Você pode enviar o events.xml manualmente ou carregar direto do servidor via FTP.")
 
-    up_events = st.file_uploader(
-        "Enviar events.xml",
-        type=["xml"],
-        key=f"upeventsxml_{user_id}"
+    mapa_events = st.selectbox(
+        "Mapa do events.xml",
+        ["Chernarus", "Livonia"],
+        key=f"mapa_events_ftp_{user_id}"
     )
 
-    key_tree = f"events_tree_{user_id}"
-    key_root = f"events_root_{user_id}"
-    key_df = f"events_df_{user_id}"
+    cole1, cole2 = st.columns([1, 1])
+
+    with cole1:
+        if st.button(
+            "📥 Carregar events.xml do servidor via FTP",
+            use_container_width=True,
+            key=f"btn_load_events_ftp_{user_id}"
+        ):
+            ok, xml_bytes, msg = baixareventsviaftp(user_id, mapa_events)
+
+            if ok:
+                try:
+                    tree, root, df_events = parse_events_xml(xml_bytes)
+
+                    st.session_state[f"events_tree_{user_id}"] = tree
+                    st.session_state[f"events_root_{user_id}"] = root
+                    st.session_state[f"events_df_{user_id}"] = df_events
+
+                    st.success(f"events.xml carregado do servidor com sucesso! ({len(df_events)} eventos)")
+                except Exception as e:
+                    st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
+            else:
+                st.error(f"Erro ao baixar events.xml via FTP: {msg}")
+
+    with cole2:
+        up_events = st.file_uploader(
+            "Enviar events.xml",
+            type=["xml"],
+            key=f"up_eventsxml_{user_id}"
+        )
 
     if up_events is not None:
         try:
             xml_bytes = up_events.read()
             tree, root, df_events = parse_events_xml(xml_bytes)
 
-            st.session_state[key_tree] = tree
-            st.session_state[key_root] = root
-            st.session_state[key_df] = df_events
+            st.session_state[f"events_tree_{user_id}"] = tree
+            st.session_state[f"events_root_{user_id}"] = root
+            st.session_state[f"events_df_{user_id}"] = df_events
 
-            st.success(f"Arquivo carregado: {up_events.name} ({len(df_events)} eventos detectados)")
+            st.success(f"Arquivo carregado: {up_events.name} ({len(df_events)} eventos)")
         except Exception as e:
             st.error(f"Erro ao ler events.xml: {e}")
+
+    # resto da aba continua aqui
 
     mapaevents = st.selectbox(
         "Mapa de destino onde o events.xml será aplicado",
@@ -3193,33 +3421,60 @@ with tabevents:
 
 
 with tabmessages:
-    st.subheader("💬 Editor de Mensagens (messages.xml)")
-    st.info("Faça upload do messages.xml atual do seu servidor para visualizar, ajustar, incluir novas mensagens, baixar e enviar ao diretório correto (/db).")
+    st.subheader("💬 Mensagens / messages.xml")
+    st.info("Você pode enviar o messages.xml manualmente ou carregar direto do servidor via FTP.")
 
-    upmessages = st.file_uploader(
-        "Enviar messages.xml",
-        type=["xml"],
-        key=f"upmessagesxml_{user_id}"
+    mapa_messages = st.selectbox(
+        "Mapa do messages.xml",
+        ["Chernarus", "Livonia"],
+        key=f"mapa_messages_ftp_{user_id}"
     )
 
-    key_tree = f"messages_tree_{user_id}"
-    key_root = f"messages_root_{user_id}"
-    key_df = f"messages_df_{user_id}"
-    key_raw = f"messagesxml_bytes_{user_id}"
+    colm1, colm2 = st.columns([1, 1])
 
-    if upmessages is not None:
+    with colm1:
+        if st.button(
+            "📥 Carregar messages.xml do servidor via FTP",
+            use_container_width=True,
+            key=f"btn_load_messages_ftp_{user_id}"
+        ):
+            ok, xml_bytes, msg = baixarmessagesviaftp(user_id, mapa_messages)
+
+            if ok:
+                try:
+                    tree, root, df_messages = parse_messages_xml(xml_bytes)
+
+                    st.session_state[f"messages_tree_{user_id}"] = tree
+                    st.session_state[f"messages_root_{user_id}"] = root
+                    st.session_state[f"messages_df_{user_id}"] = df_messages
+
+                    st.success(f"messages.xml carregado do servidor com sucesso! ({len(df_messages)} mensagens)")
+                except Exception as e:
+                    st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
+            else:
+                st.error(f"Erro ao baixar messages.xml via FTP: {msg}")
+
+    with colm2:
+        up_messages = st.file_uploader(
+            "Enviar messages.xml",
+            type=["xml"],
+            key=f"up_messagesxml_{user_id}"
+        )
+
+    if up_messages is not None:
         try:
-            xmlbytes = upmessages.read()
-            tree, root, df_messages = parse_messages_xml(xmlbytes)
+            xml_bytes = up_messages.read()
+            tree, root, df_messages = parse_messages_xml(xml_bytes)
 
-            st.session_state[key_raw] = xmlbytes
-            st.session_state[key_tree] = tree
-            st.session_state[key_root] = root
-            st.session_state[key_df] = df_messages
+            st.session_state[f"messages_tree_{user_id}"] = tree
+            st.session_state[f"messages_root_{user_id}"] = root
+            st.session_state[f"messages_df_{user_id}"] = df_messages
 
-            st.success(f"Arquivo carregado: {upmessages.name} ({len(df_messages)} mensagens detectadas)")
+            st.success(f"Arquivo carregado: {up_messages.name} ({len(df_messages)} mensagens)")
         except Exception as e:
             st.error(f"Erro ao ler messages.xml: {e}")
+
+    # resto da aba continua aqui
 
     mapamessages = st.selectbox(
         "Mapa de destino onde o messages.xml será aplicado",
@@ -3437,31 +3692,60 @@ with tabmessages:
 
 
 with tabcfgeventspawns:
-    st.subheader("Editor de Spawns cfgeventspawns.xml")
-    st.info("Faça upload do cfgeventspawns.xml do seu servidor, edite os pontos por evento e depois baixe ou envie via FTP.")
+    st.subheader("📍 Spawns / cfgeventspawns.xml")
+    st.info("Você pode enviar o cfgeventspawns.xml manualmente ou carregar direto do servidor via FTP.")
 
-    upspawns = st.file_uploader(
-        "Enviar cfgeventspawns.xml",
-        type=["xml"],
-        key=f"up_cfgeventspawns_{user_id}"
+    mapa_spawns = st.selectbox(
+        "Mapa do cfgeventspawns.xml",
+        ["Chernarus", "Livonia"],
+        key=f"mapa_cfgeventspawns_ftp_{user_id}"
     )
 
-    key_tree = f"cfgeventspawns_tree_{user_id}"
-    key_root = f"cfgeventspawns_root_{user_id}"
-    key_map = f"cfgeventspawns_map_{user_id}"
+    cols1, cols2 = st.columns([1, 1])
 
-    if upspawns is not None:
+    with cols1:
+        if st.button(
+            "📥 Carregar cfgeventspawns.xml do servidor via FTP",
+            use_container_width=True,
+            key=f"btn_load_cfgeventspawns_ftp_{user_id}"
+        ):
+            ok, xml_bytes, msg = baixarcfgeventspawnsviaftp(user_id, mapa_spawns)
+
+            if ok:
+                try:
+                    tree, root, eventos_map = parse_cfgeventspawns_xml(xml_bytes)
+
+                    st.session_state[f"cfgeventspawns_tree_{user_id}"] = tree
+                    st.session_state[f"cfgeventspawns_root_{user_id}"] = root
+                    st.session_state[f"cfgeventspawns_map_{user_id}"] = eventos_map
+
+                    st.success(f"cfgeventspawns.xml carregado do servidor com sucesso! ({len(eventos_map)} eventos)")
+                except Exception as e:
+                    st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
+            else:
+                st.error(f"Erro ao baixar cfgeventspawns.xml via FTP: {msg}")
+
+    with cols2:
+        up_cfgeventspawns = st.file_uploader(
+            "Enviar cfgeventspawns.xml",
+            type=["xml"],
+            key=f"up_cfgeventspawnsxml_{user_id}"
+        )
+
+    if up_cfgeventspawns is not None:
         try:
-            xmlbytes = upspawns.read()
-            tree, root, eventos_map = parse_cfgeventspawns_xml(xmlbytes)
+            xml_bytes = up_cfgeventspawns.read()
+            tree, root, eventos_map = parse_cfgeventspawns_xml(xml_bytes)
 
-            st.session_state[key_tree] = tree
-            st.session_state[key_root] = root
-            st.session_state[key_map] = eventos_map
+            st.session_state[f"cfgeventspawns_tree_{user_id}"] = tree
+            st.session_state[f"cfgeventspawns_root_{user_id}"] = root
+            st.session_state[f"cfgeventspawns_map_{user_id}"] = eventos_map
 
-            st.success(f"Arquivo carregado: {upspawns.name} | {len(eventos_map)} eventos detectados")
+            st.success(f"Arquivo carregado: {up_cfgeventspawns.name} ({len(eventos_map)} eventos)")
         except Exception as e:
             st.error(f"Erro ao ler cfgeventspawns.xml: {e}")
+
+    # resto da aba continua aqui
 
     if key_map in st.session_state:
         eventos_map = st.session_state[key_map]
