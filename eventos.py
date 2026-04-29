@@ -3232,8 +3232,13 @@ with tabmessages:
 
         if "text" not in df_messages.columns:
             df_messages["text"] = ""
+
+        if "time" not in df_messages.columns:
+            df_messages["time"] = 0
+
         if "ordem" not in df_messages.columns:
             df_messages["ordem"] = range(1, len(df_messages) + 1)
+
         if "_elem" not in df_messages.columns:
             df_messages["_elem"] = None
 
@@ -3249,13 +3254,13 @@ with tabmessages:
             st.write(f"Total de mensagens detectadas: {len(df_messages)}")
             if not df_messages.empty:
                 st.dataframe(
-                    df_messages.drop(columns=["_elem"], errors="ignore"),
+                    df_messages[["ordem", "time", "text"]].copy(),
                     use_container_width=True
                 )
 
         st.markdown("### ➕ Inclusão rápida")
 
-        col_new1, col_new2 = st.columns([2, 1])
+        col_new1, col_new2 = st.columns([3, 1])
 
         with col_new1:
             nova_msg_texto = st.text_input(
@@ -3273,23 +3278,6 @@ with tabmessages:
                 key=f"nova_msg_tempo_{user_id}"
             )
 
-        col_new3, col_new4, col_new5 = st.columns(3)
-
-        with col_new3:
-            nova_msg_id = st.text_input("ID", key=f"nova_msg_id_{user_id}")
-
-        with col_new4:
-            nova_msg_name = st.text_input("Nome", key=f"nova_msg_name_{user_id}")
-
-        with col_new5:
-            nova_msg_priority = st.number_input(
-                "Prioridade",
-                min_value=0,
-                step=1,
-                value=0,
-                key=f"nova_msg_priority_{user_id}"
-            )
-
         if st.button("Adicionar nova mensagem à sessão", use_container_width=True, key=f"btn_add_message_{user_id}"):
             if not nova_msg_texto.strip():
                 st.warning("Digite o texto da nova mensagem antes de adicionar.")
@@ -3298,10 +3286,10 @@ with tabmessages:
 
                 nova_linha = {
                     "ordem": nova_ordem,
-                    "id": str(nova_msg_id).strip(),
-                    "name": str(nova_msg_name).strip(),
+                    "id": "",
+                    "name": "",
                     "time": int(nova_msg_tempo),
-                    "priority": int(nova_msg_priority),
+                    "priority": 0,
                     "color": "",
                     "icon": "",
                     "text": nova_msg_texto.strip(),
@@ -3321,10 +3309,7 @@ with tabmessages:
 
         st.markdown("### ✏️ Ajuste de mensagens")
 
-        cols_editor = [
-            c for c in ["ordem", "id", "name", "time", "priority", "color", "icon", "text"]
-            if c in df_view.columns
-        ]
+        cols_editor = [c for c in ["ordem", "time", "text"] if c in df_view.columns]
 
         edited_df = st.data_editor(
             df_view[cols_editor],
@@ -3333,12 +3318,7 @@ with tabmessages:
             use_container_width=True,
             column_config={
                 "ordem": st.column_config.NumberColumn("Ordem", disabled=True),
-                "id": st.column_config.TextColumn("ID"),
-                "name": st.column_config.TextColumn("Nome"),
                 "time": st.column_config.NumberColumn("Tempo", min_value=0, step=1),
-                "priority": st.column_config.NumberColumn("Prioridade", min_value=0, step=1),
-                "color": st.column_config.TextColumn("Cor"),
-                "icon": st.column_config.TextColumn("Ícone"),
                 "text": st.column_config.TextColumn("Mensagem", width="large"),
             },
             disabled=["ordem"],
@@ -3360,14 +3340,18 @@ with tabmessages:
 
                 for idx in df_edit.index:
                     if idx in df_full.index:
-                        for col in ["id", "name", "time", "priority", "color", "icon", "text"]:
+                        for col in ["time", "text"]:
                             if col in df_edit.columns and col in df_full.columns:
                                 df_full.loc[idx, col] = df_edit.loc[idx, col]
 
-                # Captura novas linhas adicionadas diretamente no data_editor
                 novos_indices = [idx for idx in df_edit.index if idx not in df_full.index]
                 if novos_indices:
                     novas_linhas = df_edit.loc[novos_indices].reset_index()
+                    novas_linhas["id"] = ""
+                    novas_linhas["name"] = ""
+                    novas_linhas["priority"] = 0
+                    novas_linhas["color"] = ""
+                    novas_linhas["icon"] = ""
                     novas_linhas["_elem"] = None
                     df_full = pd.concat([df_full.reset_index(), novas_linhas], ignore_index=True).set_index("ordem")
 
@@ -3443,7 +3427,7 @@ with tabmessages:
 
         st.divider()
         st.markdown("### ℹ️ Observações rápidas")
-        st.write("- A interface mostra as mensagens que já estão no arquivo carregado.")
+        st.write("- A interface mostra apenas os campos realmente úteis para o seu messages.xml atual.")
         st.write("- Você pode adicionar novas mensagens direto pela área de inclusão rápida.")
         st.write("- Use primeiro o botão **Aplicar alterações na sessão** antes de baixar ou enviar.")
         st.write("- O download e o FTP sempre usam o DataFrame salvo na sessão.")
