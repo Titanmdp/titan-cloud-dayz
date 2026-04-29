@@ -3163,6 +3163,11 @@ with tabevents:
     st.subheader("🎪 Eventos / events.xml")
     st.info("Você pode enviar o events.xml manualmente ou carregar direto do servidor via FTP.")
 
+    # chaves únicas da sessão para este usuário
+    key_tree = f"events_tree_{user_id}"
+    key_root = f"events_root_{user_id}"
+    key_df = f"events_df_{user_id}"
+
     mapa_events = st.selectbox(
         "Mapa do events.xml",
         ["Chernarus", "Livonia"],
@@ -3183,9 +3188,9 @@ with tabevents:
                 try:
                     tree, root, df_events = parse_events_xml(xml_bytes)
 
-                    st.session_state[f"events_tree_{user_id}"] = tree
-                    st.session_state[f"events_root_{user_id}"] = root
-                    st.session_state[f"events_df_{user_id}"] = df_events
+                    st.session_state[key_tree] = tree
+                    st.session_state[key_root] = root
+                    st.session_state[key_df] = df_events
 
                     st.success(f"events.xml carregado do servidor com sucesso! ({len(df_events)} eventos)")
                 except Exception as e:
@@ -3205,15 +3210,13 @@ with tabevents:
             xml_bytes = up_events.read()
             tree, root, df_events = parse_events_xml(xml_bytes)
 
-            st.session_state[f"events_tree_{user_id}"] = tree
-            st.session_state[f"events_root_{user_id}"] = root
-            st.session_state[f"events_df_{user_id}"] = df_events
+            st.session_state[key_tree] = tree
+            st.session_state[key_root] = root
+            st.session_state[key_df] = df_events
 
             st.success(f"Arquivo carregado: {up_events.name} ({len(df_events)} eventos)")
         except Exception as e:
             st.error(f"Erro ao ler events.xml: {e}")
-
-    # resto da aba continua aqui
 
     mapaevents = st.selectbox(
         "Mapa de destino onde o events.xml será aplicado",
@@ -3222,8 +3225,8 @@ with tabevents:
     )
 
     if key_df in st.session_state:
-        df_events = st.session_state[key_df]
-        
+        df_events = st.session_state[key_df].copy()
+
         if "active" in df_events.columns:
             df_events["active"] = df_events["active"].astype(bool)
 
@@ -3248,10 +3251,10 @@ with tabevents:
 
         if busca_evento.strip():
             df_view = df_view[
-                df_view["name"].str.contains(busca_evento.strip(), case=False, na=False)
+                df_view["name"].astype(str).str.contains(busca_evento.strip(), case=False, na=False)
             ]
 
-        if somente_ativos:
+        if somente_ativos and "active" in df_view.columns:
             df_view = df_view[df_view["active"]]
 
         st.markdown("### ✏️ Ajuste de parâmetros")
@@ -3325,8 +3328,8 @@ with tabevents:
                 use_container_width=True,
                 key=f"btn_apply_events_{user_id}"
             ):
-                df_merged = df_events.set_index("name")
-                edited_indexed = edited_df.set_index("name")
+                df_merged = df_events.copy().set_index("name")
+                edited_indexed = edited_df.copy().set_index("name")
 
                 for idx in edited_indexed.index:
                     if idx in df_merged.index:
@@ -3341,7 +3344,8 @@ with tabevents:
                             "cleanupradius",
                             "active",
                         ]:
-                            df_merged.loc[idx, col] = edited_indexed.loc[idx, col]
+                            if col in edited_indexed.columns and col in df_merged.columns:
+                                df_merged.loc[idx, col] = edited_indexed.loc[idx, col]
 
                 st.session_state[key_df] = df_merged.reset_index()
                 st.success("Alterações aplicadas internamente ao events.xml (sessão).")
@@ -3415,7 +3419,7 @@ with tabevents:
 
         st.divider()
         st.markdown("### ℹ️ Observações rápidas")
-        st.write("- Use primeiro o botão **Aplicar alterações na sessão** antes de baixar ou enviar.")
+        st.write("- Use primeiro o botão Aplicar alterações na sessão antes de baixar ou enviar.")
         st.write("- O download e o FTP sempre usam o DataFrame salvo na sessão.")
     else:
         st.info("Envie o events.xml do seu servidor para começar a editar.")
@@ -3424,6 +3428,11 @@ with tabevents:
 with tabmessages:
     st.subheader("💬 Mensagens / messages.xml")
     st.info("Você pode enviar o messages.xml manualmente ou carregar direto do servidor via FTP.")
+
+    # chaves únicas da sessão para este usuário
+    key_tree = f"messages_tree_{user_id}"
+    key_root = f"messages_root_{user_id}"
+    key_df = f"messages_df_{user_id}"
 
     mapa_messages = st.selectbox(
         "Mapa do messages.xml",
@@ -3445,9 +3454,9 @@ with tabmessages:
                 try:
                     tree, root, df_messages = parse_messages_xml(xml_bytes)
 
-                    st.session_state[f"messages_tree_{user_id}"] = tree
-                    st.session_state[f"messages_root_{user_id}"] = root
-                    st.session_state[f"messages_df_{user_id}"] = df_messages
+                    st.session_state[key_tree] = tree
+                    st.session_state[key_root] = root
+                    st.session_state[key_df] = df_messages
 
                     st.success(f"messages.xml carregado do servidor com sucesso! ({len(df_messages)} mensagens)")
                 except Exception as e:
@@ -3467,15 +3476,13 @@ with tabmessages:
             xml_bytes = up_messages.read()
             tree, root, df_messages = parse_messages_xml(xml_bytes)
 
-            st.session_state[f"messages_tree_{user_id}"] = tree
-            st.session_state[f"messages_root_{user_id}"] = root
-            st.session_state[f"messages_df_{user_id}"] = df_messages
+            st.session_state[key_tree] = tree
+            st.session_state[key_root] = root
+            st.session_state[key_df] = df_messages
 
             st.success(f"Arquivo carregado: {up_messages.name} ({len(df_messages)} mensagens)")
         except Exception as e:
             st.error(f"Erro ao ler messages.xml: {e}")
-
-    # resto da aba continua aqui
 
     mapamessages = st.selectbox(
         "Mapa de destino onde o messages.xml será aplicado",
@@ -3509,8 +3516,9 @@ with tabmessages:
         with st.expander("🔎 Diagnóstico do messages.xml carregado", expanded=False):
             st.write(f"Total de mensagens detectadas: {len(df_messages)}")
             if not df_messages.empty:
+                cols_diag = [c for c in ["ordem", "time", "text"] if c in df_messages.columns]
                 st.dataframe(
-                    df_messages[["ordem", "time", "text"]].copy(),
+                    df_messages[cols_diag].copy(),
                     use_container_width=True
                 )
 
@@ -3685,7 +3693,7 @@ with tabmessages:
         st.markdown("### ℹ️ Observações rápidas")
         st.write("- A interface mostra apenas os campos realmente úteis para o seu messages.xml atual.")
         st.write("- Você pode adicionar novas mensagens direto pela área de inclusão rápida.")
-        st.write("- Use primeiro o botão **Aplicar alterações na sessão** antes de baixar ou enviar.")
+        st.write("- Use primeiro o botão Aplicar alterações na sessão antes de baixar ou enviar.")
         st.write("- O download e o FTP sempre usam o DataFrame salvo na sessão.")
         st.write("- O bloco de diagnóstico ajuda a validar se o parser leu corretamente o schema do seu XML.")
     else:
@@ -3695,6 +3703,11 @@ with tabmessages:
 with tabcfgeventspawns:
     st.subheader("📍 Spawns / cfgeventspawns.xml")
     st.info("Você pode enviar o cfgeventspawns.xml manualmente ou carregar direto do servidor via FTP.")
+
+    # chaves únicas da sessão para este usuário
+    key_tree = f"cfgeventspawns_tree_{user_id}"
+    key_root = f"cfgeventspawns_root_{user_id}"
+    key_map = f"cfgeventspawns_map_{user_id}"
 
     mapa_spawns = st.selectbox(
         "Mapa do cfgeventspawns.xml",
@@ -3716,9 +3729,9 @@ with tabcfgeventspawns:
                 try:
                     tree, root, eventos_map = parse_cfgeventspawns_xml(xml_bytes)
 
-                    st.session_state[f"cfgeventspawns_tree_{user_id}"] = tree
-                    st.session_state[f"cfgeventspawns_root_{user_id}"] = root
-                    st.session_state[f"cfgeventspawns_map_{user_id}"] = eventos_map
+                    st.session_state[key_tree] = tree
+                    st.session_state[key_root] = root
+                    st.session_state[key_map] = eventos_map
 
                     st.success(f"cfgeventspawns.xml carregado do servidor com sucesso! ({len(eventos_map)} eventos)")
                 except Exception as e:
@@ -3738,15 +3751,13 @@ with tabcfgeventspawns:
             xml_bytes = up_cfgeventspawns.read()
             tree, root, eventos_map = parse_cfgeventspawns_xml(xml_bytes)
 
-            st.session_state[f"cfgeventspawns_tree_{user_id}"] = tree
-            st.session_state[f"cfgeventspawns_root_{user_id}"] = root
-            st.session_state[f"cfgeventspawns_map_{user_id}"] = eventos_map
+            st.session_state[key_tree] = tree
+            st.session_state[key_root] = root
+            st.session_state[key_map] = eventos_map
 
             st.success(f"Arquivo carregado: {up_cfgeventspawns.name} ({len(eventos_map)} eventos)")
         except Exception as e:
             st.error(f"Erro ao ler cfgeventspawns.xml: {e}")
-
-    # resto da aba continua aqui
 
     if key_map in st.session_state:
         eventos_map = st.session_state[key_map]
@@ -3794,13 +3805,21 @@ with tabcfgeventspawns:
         c1, c2, c3 = st.columns(3)
 
         with c1:
-            if st.button("Aplicar alterações na sessão", use_container_width=True, key=f"btn_apply_cfgeventspawns_{user_id}"):
+            if st.button(
+                "Aplicar alterações na sessão",
+                use_container_width=True,
+                key=f"btn_apply_cfgeventspawns_{user_id}"
+            ):
                 eventos_map[evento_sel] = edited_df
                 st.session_state[key_map] = eventos_map
                 st.success(f"Alterações aplicadas ao evento '{evento_sel}' na sessão.")
 
         with c2:
-            if st.button("Baixar cfgeventspawns.xml ajustado", use_container_width=True, key=f"btn_download_cfgeventspawns_{user_id}"):
+            if st.button(
+                "Baixar cfgeventspawns.xml ajustado",
+                use_container_width=True,
+                key=f"btn_download_cfgeventspawns_{user_id}"
+            ):
                 try:
                     tree = st.session_state.get(key_tree)
                     root = st.session_state.get(key_root)
@@ -3823,7 +3842,11 @@ with tabcfgeventspawns:
                     st.error(f"Erro ao gerar cfgeventspawns.xml: {e}")
 
         with c3:
-            if st.button("Salvar no Titan Cloud e enviar via FTP", use_container_width=True, key=f"btn_ftp_cfgeventspawns_{user_id}"):
+            if st.button(
+                "Salvar no Titan Cloud e enviar via FTP",
+                use_container_width=True,
+                key=f"btn_ftp_cfgeventspawns_{user_id}"
+            ):
                 try:
                     tree = st.session_state.get(key_tree)
                     root = st.session_state.get(key_root)
