@@ -2756,6 +2756,9 @@ with tabcfggameplay:
     st.subheader("⚙️ Gameplay / cfggameplay.json")
     st.info("Você pode enviar o cfggameplay.json manualmente ou carregar direto do servidor via FTP.")
 
+    # chave única de sessão para este usuário
+    cfg_session_key = f"cfggameplay_data_{user_id}"
+
     mapa_cfggameplay = st.selectbox(
         "Mapa do cfggameplay.json",
         ["Chernarus", "Livonia"],
@@ -2764,6 +2767,7 @@ with tabcfggameplay:
 
     colcg1, colcg2 = st.columns([1, 1])
 
+    # 1) Carregar do servidor via FTP
     with colcg1:
         if st.button(
             "📥 Carregar cfggameplay.json do servidor via FTP",
@@ -2775,15 +2779,14 @@ with tabcfggameplay:
             if ok:
                 try:
                     cfg_data = json.loads(json_bytes.decode("utf-8"))
-
-                    st.session_state[f"cfggameplay_data_{user_id}"] = cfg_data
-
+                    st.session_state[cfg_session_key] = cfg_data
                     st.success("cfggameplay.json carregado do servidor com sucesso!")
                 except Exception as e:
                     st.error(f"Arquivo baixado, mas houve erro ao interpretar o JSON: {e}")
             else:
                 st.error(f"Erro ao baixar cfggameplay.json via FTP: {msg}")
 
+    # 2) Upload manual do arquivo
     with colcg2:
         up_cfggameplay = st.file_uploader(
             "Enviar cfggameplay.json",
@@ -2795,9 +2798,7 @@ with tabcfggameplay:
         try:
             json_bytes = up_cfggameplay.read()
             cfg_data = json.loads(json_bytes.decode("utf-8"))
-
-            st.session_state[f"cfggameplay_data_{user_id}"] = cfg_data
-
+            st.session_state[cfg_session_key] = cfg_data
             st.success("cfggameplay.json carregado com sucesso!")
         except Exception as e:
             st.error(f"Erro ao ler cfggameplay.json: {e}")
