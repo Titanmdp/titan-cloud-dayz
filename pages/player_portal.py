@@ -1009,7 +1009,7 @@ def registrar_compra(
     Registra uma compra na loja:
     - Debita DzCoins do banco ou carteira
     - Salva pedido em client_data["pedidos"]
-    - Envia imediatamente o arquivo loja_pedidos.json via FTP
+    - Envia imediatamente o arquivo loja_spawn.json via FTP
     - Retorna (sucesso, mensagem)
     """
     client_data = clients_db.get(server_id, {})
@@ -1026,7 +1026,7 @@ def registrar_compra(
     preco   = int(item.get("preco", 0))
 
     wallet_reg = wallets.get(gamertag, {"balance": 0, "historico": []})
-    bank_reg   = bank.get(gamertag,   {"balance": 0, "historico": []})
+    bank_reg   = bank.get(gamertag, {"balance": 0, "historico": []})
 
     saldo_w = wallet_reg.get("balance", 0)
     saldo_b = bank_reg.get("balance", 0)
@@ -1037,7 +1037,7 @@ def registrar_compra(
             return False, f"Saldo insuficiente na carteira ({saldo_w} DzCoins)."
         wallet_reg["balance"] = saldo_w - preco
         wallet_reg.setdefault("historico", []).append(
-            f"[{hora_br}] COMPRA LOJA — {item['nome']} x{item.get('quantidade',1)} "
+            f"[{hora_br}] COMPRA LOJA — {item['nome']} x{item.get('quantidade', 1)} "
             f"-{preco} DzCoins (carteira)"
         )
         wallets[gamertag] = wallet_reg
@@ -1047,10 +1047,13 @@ def registrar_compra(
             return False, f"Saldo insuficiente no banco ({saldo_b} DzCoins)."
         bank_reg["balance"] = saldo_b - preco
         bank_reg.setdefault("historico", []).append(
-            f"[{hora_br}] COMPRA LOJA — {item['nome']} x{item.get('quantidade',1)} "
+            f"[{hora_br}] COMPRA LOJA — {item['nome']} x{item.get('quantidade', 1)} "
             f"-{preco} DzCoins (banco)"
         )
         bank[gamertag] = bank_reg
+
+    else:
+        return False, "Origem de pagamento inválida."
 
     # Registra pedido
     pedido = {
@@ -1065,7 +1068,13 @@ def registrar_compra(
         "origem_pagamento": origem,
         "coordenadas": coordenadas.strip(),
         "data_compra": hora_br,
-        "status": "Aguardando Reset",
+
+        # Exibição no portal
+        "status": "Entregue",
+        "data_entrega": datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M"),
+
+        # Controle logístico real para o spawn
+        "spawn_pendente": True,
     }
 
     client_data["pedidos"].insert(0, pedido)
@@ -1073,22 +1082,99 @@ def registrar_compra(
     client_data["bank"]    = bank
     clients_db[server_id]  = client_data
 
-    # Envia imediatamente o loja_spawn.json via FTP com todos os pedidos pendentes
+    # Envia imediatamente o loja_spawn.json via FTP com todos os pedidos
+    # que ainda precisam permanecer no spawn
     mapa = client_data.get("loja", {}).get("mapa_padrao", "Chernarus")
-    pedidos_pendentes = [p for p in client_data["pedidos"] if p.get("status") == "Aguardando Reset"]
-    success = enviar_pedidos_via_ftp(client_id=server_id, pedidos=pedidos_pendentes, mapa=mapa)
+    pedidos_pendentes = [
+        p for p in client_data["pedidos"]
+        if p.get("spawn_pendente", False) is True
+    ]
+
+    success = enviar_pedidos_via_ftp(
+        client_id=server_id,
+        pedidos=pedidos_pendentes,
+        mapa=mapa
+    )
 
     if success:
-        # Marca todos os pedidos pendentes como Entregue após envio bem-sucedido
-        hora_entrega = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
-        for p in client_data["pedidos"]:
-            if p.get("status") == "Aguardando Reset":
-                p["status"] = "Entregue"
-                p["data_entrega"] = hora_entrega
         clients_db[server_id] = client_data
         return True, "Pedido registrado e arquivo enviado via FTP."
     else:
         return True, "Pedido registrado, mas falha ao enviar via FTP. Será entregue no próximo reset."
+
+def sincronizar_pedidos_apos_reset(
+    clients_db: dict,
+    server_id: str,
+) -> tuple[bool, str]:
+    """
+    Sincroniza pedidos após detectar reset real do servidor:
+    - Lê o restart.log via FTP
+    - Descobre o último reset
+    - Marca como não pendentes no spawn os pedidos comprados antes ou no reset
+    - Reenvia o lojaspawn.json apenas com os pedidos ainda pendentes
+    """
+    client_data = clients_db.get(server_id, {})
+    pedidos = client_data.get("pedidos", [])
+
+    if not pedidos:
+        return False, "Nenhum pedido para sincronizar."
+
+    ftpcfg = get_client_ftp_config(client_data)
+    if not ftpcfg:
+        return False, "FTP não configurado para este servidor."
+
+    restart_text, err = ftp_download_restart_log(ftpcfg)
+    if err or not restart_text:
+        return False, f"Não foi possível ler restart.log: {err or 'arquivo vazio'}"
+
+    last_reset_dt = parse_last_restart_from_restart_log(restart_text)
+    if not last_reset_dt:
+        return False, "Nenhum reset encontrado no restart.log."
+
+    houve_alteracao = False
+
+    for p in pedidos:
+        if p.get("spawn_pendente", False) is not True:
+            continue
+
+        data_compra_str = p.get("data_compra")
+        if not data_compra_str:
+            continue
+
+        try:
+            data_compra_dt = datetime.strptime(data_compra_str, "%d/%m/%Y %H:%M")
+            data_compra_dt = data_compra_dt.replace(tzinfo=FUSO_BR)
+        except Exception:
+            continue
+
+        if data_compra_dt <= last_reset_dt:
+            p["spawn_pendente"] = False
+            p["resetado_em"] = last_reset_dt.strftime("%d/%m/%Y %H:%M:%S")
+            houve_alteracao = True
+
+    mapa = client_data.get("loja", {}).get("mapa_padrao", "Chernarus")
+    pedidos_pendentes = [
+        p for p in pedidos
+        if p.get("spawn_pendente", False) is True
+    ]
+
+    success = enviar_pedidos_via_ftp(
+        client_id=server_id,
+        pedidos=pedidos_pendentes,
+        mapa=mapa
+    )
+
+    if houve_alteracao:
+        client_data["pedidos"] = pedidos
+        clients_db[server_id] = client_data
+
+    if not success:
+        return False, "Pedidos sincronizados, mas falhou ao atualizar lojaspawn.json."
+
+    if houve_alteracao:
+        return True, "Pedidos sincronizados após reset e lojaspawn.json atualizado."
+
+    return True, "Nenhum pedido precisava ser alterado; lojaspawn.json foi apenas revalidado."
 
     
 # =========================================================
@@ -1788,28 +1874,34 @@ def main():
 
     discord_id = st.session_state.get("portal_discord_id")
     discord_name = st.session_state.get("portal_discord_name", "Jogador")
+    server_id = st.session_state.get("portal_server_id")
+    server_name = st.session_state.get("portal_server_name", "Servidor")
 
     # ----------------------------------------------------------
     # 8.4 SELEÇÃO DO SERVIDOR
     # ----------------------------------------------------------
     nome_para_server_id = {}
     nitrado_id_map = {}
+
     for keyuser, data in users_db.get("keys", {}).items():
-        server_name = str(data.get("server", "")).strip()
-        server_id = str(data.get("server_id", "")).strip() or keyuser
+        server_name_cfg = str(data.get("server", "")).strip()
+        server_id_cfg = str(data.get("server_id", "")).strip() or keyuser
         nid = str(data.get("server_id", "")).strip()
-        if server_name and server_id:
-            nome_para_server_id[server_name.lower()] = server_id
-            nitrado_id_map[server_id] = nid
+
+        if server_name_cfg and server_id_cfg:
+            nome_para_server_id[server_name_cfg.lower()] = server_id_cfg
+            nitrado_id_map[server_id_cfg] = nid
 
     server_id = st.session_state.get("portal_server_id")
 
     if not server_id:
         st.markdown("### 🏷️ Qual servidor você joga?")
         nome_input = st.text_input("Nome do servidor", "")
+
         if st.button("Confirmar servidor"):
             nome_limpo = nome_input.strip().lower()
             sid = nome_para_server_id.get(nome_limpo)
+
             if not sid:
                 st.error("Servidor não encontrado. Verifique com o administrador.")
             elif sid not in clients_db:
@@ -1818,6 +1910,7 @@ def main():
                 st.session_state.portal_server_id = sid
                 st.session_state.portal_server_nome = nome_limpo.title()
                 st.rerun()
+
         st.stop()
 
     client_data = clients_db.get(server_id, {})
