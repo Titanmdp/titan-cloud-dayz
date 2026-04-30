@@ -1485,20 +1485,63 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
 
     hora_br = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
 
-    if op == "📋 Extrato":
-        st.markdown("#### 📋 Extrato de movimentações")
+        if op == "📋 Extrato":
         historico_comb = []
+
         for linha in wallet_reg.get("historico", []):
             historico_comb.append(("CARTEIRA", linha))
+
         for linha in bank_reg.get("historico", []):
             historico_comb.append(("BANCO", linha))
 
+        col_ext_1, col_ext_2 = st.columns([3, 1])
+        with col_ext_1:
+            st.markdown("#### 📋 Extrato de movimentações")
+        with col_ext_2:
+            if st.button("🧹 Limpar Extrato", key="limpar_extrato_jogador", use_container_width=True):
+                wallet_reg["historico"] = []
+                bank_reg["historico"] = []
+
+                wallets[gamertag] = wallet_reg
+                bank[gamertag] = bank_reg
+                client_data["wallets"] = wallets
+                client_data["bank"] = bank
+                clients_db[server_id] = client_data
+                save_db(DB_CLIENTS, clients_db)
+
+                st.success("✅ Extrato limpo com sucesso.")
+                st.rerun()
+
+        st.caption("As movimentações mais recentes ficam visíveis neste console com rolagem.")
+
         if not historico_comb:
-            st.info("Nenhuma movimentação registrada ainda.")
+            historico_txt = "Nenhuma movimentação registrada ainda."
         else:
-            for origem, linha in reversed(historico_comb[-30:]):
+            linhas_console = []
+            for origem, linha in reversed(historico_comb[-200:]):
                 icone = "💰" if origem == "CARTEIRA" else "🏦"
-                st.markdown(f"{icone} `[{origem}]` {linha}")
+                linhas_console.append(f"{icone} [{origem}] {linha}")
+
+            historico_txt = "\n".join(linhas_console)
+
+        st.markdown(
+            f"""
+            <div style="
+                background:#0f1117;
+                border:1px solid #2b3240;
+                border-radius:8px;
+                padding:12px;
+                height:320px;
+                overflow-y:auto;
+                font-family:Consolas, 'Courier New', monospace;
+                font-size:12px;
+                color:#d6e2f0;
+                white-space:pre-wrap;
+                line-height:1.5;
+            ">{historico_txt}</div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     elif op == "➡️ Depositar (Carteira → Banco)":
         st.markdown("#### ➡️ Depositar na conta bancária")
@@ -2330,6 +2373,20 @@ def main():
                         )
 
                         st.markdown("#### 📍 Localização de entrega")
+                        st.markdown(
+                            """
+                            <div style="background:#141a24; border-radius:6px;
+                                        padding:8px 12px; border:1px solid #2a3650;
+                                        font-size:12px; color:#9fb3c8; margin-bottom:10px;">
+                                🗺️ Em <b style="color:#ffffff;">Chernarus</b>, o eixo Y é calculado
+                                automaticamente com base nos dados locais do terreno do mapa.
+                                <br>
+                                🔄 Caso a base local não esteja disponível, o sistema tenta usar
+                                o <b style="color:#ffffff;">fallback do servidor</b>.
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
                         col_cx, col_cz = st.columns(2)
                         with col_cx:
                             coord_x = st.text_input(
@@ -2390,17 +2447,54 @@ def main():
                                         qualidade = "ℹ️ Fonte alternativa"
                                         referencia_txt = "Referência não disponível"
 
+                                    if fonte_y and fonte_y.startswith("local:"):
+                                        bg_box = "#0f1b12"
+                                        border_box = "#1f5a34"
+                                        cor_y = "#57ff9a"
+                                        badge_origem = "🗺️ Terreno local"
+                                        detalhe_fonte = (
+                                            "Base local do mapa carregada no portal"
+                                        )
+                                    elif fonte_y == "ftp:cfgeventspawns":
+                                        bg_box = "#22170d"
+                                        border_box = "#7a4b1f"
+                                        cor_y = "#ffcc66"
+                                        badge_origem = "🔄 Fallback do servidor"
+                                        detalhe_fonte = (
+                                            f"Ponto de referência encontrado a {dist_ref:.0f}m"
+                                            if dist_ref is not None else
+                                            "Referência encontrada no servidor"
+                                        )
+                                    else:
+                                        bg_box = "#1b1b1b"
+                                        border_box = "#444"
+                                        cor_y = "#cccccc"
+                                        badge_origem = "ℹ️ Fonte alternativa"
+                                        detalhe_fonte = detalhe_y or "Sem detalhes"
+
                                     st.markdown(
                                         f"""
-                                        <div style="background:#0d1f0d; border-radius:6px;
-                                                    padding:8px 12px; border:1px solid #1a4a1a;
-                                                    font-size:12px; color:#aaa; margin-bottom:6px;">
-                                            🧭 Eixo Y calculado automaticamente:
-                                            <b style="color:#00ff88;">{coord_y:.4f}</b>
-                                            &nbsp;|&nbsp; {referencia_txt}
-                                            &nbsp;|&nbsp; {qualidade}
-                                            <br>
-                                            <span style="color:#7fd1ff;">Fonte: {fonte_y or 'desconhecida'}</span>
+                                        <div style="background:{bg_box}; border-radius:8px;
+                                                    padding:10px 12px; border:1px solid {border_box};
+                                                    font-size:12px; color:#b8c0cc; margin-bottom:8px;">
+                                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                                <span style="font-size:12px; color:#d7dde8;">
+                                                    🧭 Eixo Y calculado automaticamente
+                                                </span>
+                                                <span style="font-size:11px; padding:3px 8px; border-radius:999px;
+                                                             background:rgba(255,255,255,0.08); color:#fff;">
+                                                    {badge_origem}
+                                                </span>
+                                            </div>
+
+                                            <div style="font-size:20px; font-weight:bold; color:{cor_y}; margin-bottom:6px;">
+                                                {coord_y:.4f}
+                                            </div>
+
+                                            <div style="font-size:12px; color:#9fb0c3; line-height:1.45;">
+                                                <b style="color:#ffffff;">Origem:</b> {fonte_y or 'desconhecida'}<br>
+                                                <b style="color:#ffffff;">Detalhe:</b> {detalhe_fonte}
+                                            </div>
                                         </div>
                                         """,
                                         unsafe_allow_html=True,
@@ -2501,38 +2595,61 @@ def main():
                     st.success("Histórico de compras entregues limpo com sucesso!")
                     st.rerun()
 
-            pedidos = client_data_loja.get("pedidos", [])
+                        pedidos = client_data_loja.get("pedidos", [])
             meus_pedidos = [p for p in pedidos if p.get("gamertag") == gamertag_vinculada]
 
+            st.caption("As compras mais recentes ficam visíveis neste console com rolagem.")
+
             if not meus_pedidos:
-                st.info("Você ainda não realizou nenhuma compra.")
+                compras_txt = "Você ainda não realizou nenhuma compra."
             else:
-                for pedido in meus_pedidos[:20]:
+                linhas_compras = []
+
+                for pedido in meus_pedidos[:200]:
                     status = pedido.get("status", "Aguardando Reset")
-                    cor_status = (
-                        "#00ff88" if status == "Entregue"
-                        else "#FFD700" if status == "Aguardando Reset"
-                        else "#aaa"
+                    spawn_pendente = pedido.get("spawn_pendente", False)
+
+                    if spawn_pendente:
+                        status_txt = "PENDENTE RESET"
+                        icone_status = "🟡"
+                    elif status == "Entregue":
+                        status_txt = "ENTREGUE"
+                        icone_status = "🟢"
+                    else:
+                        status_txt = str(status).upper()
+                        icone_status = "⚪"
+
+                    linha = (
+                        f"[{pedido.get('data_compra', '--')}] "
+                        f"{pedido.get('item_nome', '?')} x{pedido.get('quantidade', 1)}\n"
+                        f"💰 {pedido.get('preco', 0)} DzCoins | "
+                        f"{pedido.get('origem_pagamento', '?')} | "
+                        f"{icone_status} {status_txt}\n"
+                        f"📍 {pedido.get('coordenadas', '?')}"
                     )
-                    st.markdown(
-                        f"""
-                        <div style="background:#1a1a2e; border-radius:8px;
-                                    padding:10px 14px; border-left:3px solid {cor_status};
-                                    margin-bottom:6px;">
-                            <span style="font-size:13px; color:#00d4ff; font-weight:bold;">
-                                {pedido.get('data_compra','--')} — {pedido.get('item_nome','?')}
-                                x{pedido.get('quantidade',1)}
-                            </span><br>
-                            <span style="font-size:12px; color:#aaa;">
-                                💰 {pedido.get('preco',0)} DzCoins ({pedido.get('origem_pagamento','?')})
-                                &nbsp;|&nbsp; 📍 {pedido.get('coordenadas','?')}
-                                &nbsp;|&nbsp;
-                                <span style="color:{cor_status};">● {status}</span>
-                            </span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+
+                    linhas_compras.append(linha)
+
+                compras_txt = "\n\n".join(linhas_compras)
+
+            st.markdown(
+                f"""
+                <div style="
+                    background:#0f1117;
+                    border:1px solid #2b3240;
+                    border-radius:8px;
+                    padding:12px;
+                    height:340px;
+                    overflow-y:auto;
+                    font-family:Consolas, 'Courier New', monospace;
+                    font-size:12px;
+                    color:#d6e2f0;
+                    white-space:pre-wrap;
+                    line-height:1.55;
+                ">{compras_txt}</div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 if __name__ == "__main__":
     main()
