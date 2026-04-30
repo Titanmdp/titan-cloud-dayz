@@ -66,17 +66,31 @@ CHERNARUS_HEIGHTMAP_METADATA_JSON = MAP_DATA_DIR / "chernarus_heightmap_metadata
 CHERNARUS_HEIGHTMAP_ASC = MAP_DATA_DIR / "terrain_heightmap.asc"
 CHERNARUS_HEIGHTMAP_NPY = MAP_DATA_DIR / "chernarus_heightmap.npy"
 
+LIVONIA_ELEVATION_PY = MAPDATADIR / "livonia_elevation.py"
+LIVONIA_ZONE_LOOKUP_JSON = MAPDATADIR / "livonia_zone_lookup.json"
+LIVONIA_KNOWN_POINTS_JSON = MAPDATADIR / "livonia_known_points.json"
+LIVONIA_HEIGHTMAP_METADATA_JSON = MAPDATADIR / "livonia_heightmap_metadata.json"
+LIVONIA_HEIGHTMAP_ASC = MAPDATADIR / "enoch_heightmap.asc"
+LIVONIA_HEIGHTMAP_NPY = MAPDATADIR / "livonia_heightmap.npy"
+
 # Import seguro do módulo de elevação do Chernarus
 try:
     import sys
-
-    if str(MAP_DATA_DIR) not in sys.path:
-        sys.path.append(str(MAP_DATA_DIR))
-
+    if str(MAPDATADIR) not in sys.path:
+        sys.path.append(str(MAPDATADIR))
     from chernarus_elevation import ChernarusHeightmap
 except Exception as e:
     ChernarusHeightmap = None
     print(f"[Elevation] Módulo de elevação do Chernarus indisponível: {e}")
+
+try:
+    import sys
+    if str(MAPDATADIR) not in sys.path:
+        sys.path.append(str(MAPDATADIR))
+    from livonia_elevation import LivoniaHeightmap
+except Exception as e:
+    LivoniaHeightmap = None
+    print(f"[Elevation] Módulo de elevação do Livonia indisponível: {e}")
 
 # =========================================================
 # 2. FUNÇÕES DE PERSISTÊNCIA
@@ -150,17 +164,67 @@ def get_chernarus_elevation_local(x: float, z: float):
         print(f"[Elevation] Erro consultando elevação local ({x}, {z}): {e}")
         return None, "erro_consulta"
 
+@lru_cache(maxsize=1)
+def get_livonia_heightmap():
+    """
+    Carrega a fonte de elevação do Livonia uma única vez.
+    Prioridade:
+    1) enoch_heightmap.asc real
+    2) livonia_heightmap.npy real/preprocessado
+    3) lookup JSON aproximado
+    4) fallback interno do módulo
+    """
+    if LivoniaHeightmap is None:
+        return None, "modulo_indisponivel"
+
+    try:
+        if LIVONIA_HEIGHTMAP_ASC.exists():
+            hm = LivoniaHeightmap.from_asc(str(LIVONIA_HEIGHTMAP_ASC))
+            return hm, "asc_real"
+
+        if LIVONIA_HEIGHTMAP_NPY.exists():
+            hm = LivoniaHeightmap.from_npy(str(LIVONIA_HEIGHTMAP_NPY))
+            return hm, "npy_real"
+
+        if LIVONIA_ZONE_LOOKUP_JSON.exists():
+            hm = LivoniaHeightmap.from_zone_lookup(str(LIVONIA_ZONE_LOOKUP_JSON))
+            return hm, "json_lookup"
+
+        hm = LivoniaHeightmap()
+        return hm, "fallback_modulo"
+
+    except Exception as e:
+        print(f"[Elevation] Erro ao carregar heightmap Livonia: {e}")
+        return None, "erro_carregamento"
+
+
+def get_livonia_elevation_local(x: float, z: float):
+    """
+    Retorna y, fonte para Livonia a partir dos arquivos locais.
+    """
+    hm, source = get_livonia_heightmap()
+    if hm is None:
+        return None, source
+
+    try:
+        y = float(hm.get_elevation(float(x), float(z)))
+        return round(y, 4), source
+    except Exception as e:
+        print(f"[Elevation] Erro consultando elevação local Livonia ({x}, {z}): {e}")
+        return None, "erro_consulta"
 
 def get_local_elevation_by_map(x: float, z: float, mapa: str):
     """
     Dispatcher simples por mapa.
-    Hoje: Chernarus local.
-    Futuro: Livonia.
+    Suporta Chernarus e Livonia/Enoch.
     """
     mapa_norm = (mapa or "").strip().lower()
 
-    if mapa_norm in ("chernarus", "chernarusplus", "chernarus+"):
+    if mapa_norm in ("chernarus", "chernarusplus", "chernarus_plus"):
         return get_chernarus_elevation_local(x, z)
+
+    if mapa_norm in ("livonia", "enoch"):
+        return get_livonia_elevation_local(x, z)
 
     return None, "mapa_sem_suporte_local"
 
@@ -169,17 +233,15 @@ def resolver_y_loja(ftp_cfg: dict | None, x: float, z: float, mapa: str):
     Resolve a coordenada Y para compras da loja.
 
     Ordem de prioridade:
-    1) Elevação local por mapa (Chernarus)
-    2) FTP/cfgeventspawns.xml
+    1) Elevação local por mapa (Chernarus ou Livonia)
+    2) FTP / cfgeventspawns.xml
     3) Falha controlada
 
     Retorna dict com:
-    {
-        "y": float | None,
-        "fonte": str,
-        "distancia": float | None,
-        "detalhe": str
-    }
+    - y: float | None
+    - fonte: str
+    - distancia: float | None
+    - detalhe: str
     """
     # 1) tenta fonte local do mapa
     y_local, fonte_local = get_local_elevation_by_map(x, z, mapa)
@@ -2375,14 +2437,18 @@ def main():
                         st.markdown("#### 📍 Localização de entrega")
                         st.markdown(
                             """
-                            <div style="background:#141a24; border-radius:6px;
-                                        padding:8px 12px; border:1px solid #2a3650;
-                                        font-size:12px; color:#9fb3c8; margin-bottom:10px;">
-                                🗺️ Em <b style="color:#ffffff;">Chernarus</b>, o eixo Y é calculado
-                                automaticamente com base nos dados locais do terreno do mapa.
+                            <div style="
+                                background:#141a24;
+                                border-radius:6px;
+                                padding:8px 12px;
+                                border:1px solid #2a3650;
+                                font-size:12px;
+                                color:#9fb3c8;
+                                margin-bottom:10px;
+                            ">
+                                O eixo <b style="color:#ffffff">Y</b> é calculado automaticamente com base nos dados locais do terreno do mapa configurado no servidor.
                                 <br>
-                                🔄 Caso a base local não esteja disponível, o sistema tenta usar
-                                o <b style="color:#ffffff;">fallback do servidor</b>.
+                                Caso a base local não esteja disponível, o sistema tenta usar o <b style="color:#ffffff">fallback do servidor</b>.
                             </div>
                             """,
                             unsafe_allow_html=True,
