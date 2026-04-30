@@ -1485,7 +1485,7 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
 
     hora_br = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
 
-        if op == "📋 Extrato":
+    if op == "📋 Extrato":
         historico_comb = []
 
         for linha in wallet_reg.get("historico", []):
