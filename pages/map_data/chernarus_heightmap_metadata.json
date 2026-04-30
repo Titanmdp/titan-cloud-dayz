@@ -1,0 +1,39 @@
+{
+  "map": "ChernarusPlus",
+  "game": "DayZ Standalone",
+  "source": "Synthetic heightmap baseado em parametros reais do terrain",
+  "note": "Para dados 100% precisos, extraia o arquivo worlds_chernarusplus.pbo usando DayZ Tools e exporte o ASC heightmap via Terrain Builder",
+  "terrain_parameters": {
+    "grid_cols": 2048,
+    "grid_rows": 2048,
+    "cell_size_m": 7.5,
+    "map_width_m": 15360.0,
+    "map_height_m": 15360.0,
+    "xllcorner_engine": 200000.0,
+    "yllcorner_engine": 0.0,
+    "ingame_x_range": [
+      0,
+      15360.0
+    ],
+    "ingame_z_range": [
+      0,
+      15360.0
+    ],
+    "elevation_min_m": 0.0,
+    "elevation_max_m": 730.0,
+    "elevation_mean_m": 521.53759765625,
+    "coordinate_note": "In-game X=east-west (0=west), Z=south-north (0=south). Grid row = Z/cell_size, col = X/cell_size"
+  },
+  "extraction_guide": {
+    "step1": "Instale DayZ Tools via Steam (gratuito para donos do DayZ)",
+    "step2": "DayZ Tools Launcher > Tools > Extract Game Data (extrai para P: drive)",
+    "step3": "Abra Terrain Builder (incluido no DayZ Tools)",
+    "step4": "File > Open Project > navegue ate P:\\dz\\worlds\\chernarusplus\\source",
+    "step5": "File > Export > Terrain > formato ASC (heightmap bruto)",
+    "step6": "O arquivo ASC exportado tera: ncols 2048, nrows 2048, cellsize 7.5, xllcorner 200000",
+    "step7": "Use o modulo chernarus_elevation.py com load_from_asc() para carregar dados reais",
+    "alternative": "Use Mikero Tools (ExtractPBO) para desempacotar worlds_chernarusplus.pbo e obter o terrain.wrp"
+  },
+  "pbo_location": "DayZ/addons/worlds_chernarusplus.pbo",
+  "heightmap_file_in_pbo": "worlds\\chernarusplus\\data\\terrain.wrp (binary) ou exportar via Terrain Builder como ASC"
+}
