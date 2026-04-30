@@ -62,13 +62,13 @@ PLANOS = {
 
 # Caminhos padrão do types.xml por mapa no servidor DayZ
 TYPES_REMOTE_PATHS = {
-    "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
-    "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
+    "Chernarus": "mpmissions/dayzOffline.chernarusplus/db",
+    "Livonia": "mpmissions/dayzOffline.enoch/db",
 }
 
 GLOBALS_REMOTE_PATHS = {
-    "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
-    "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
+    "Chernarus": "mpmissions/dayzOffline.chernarusplus/db",
+    "Livonia": "mpmissions/dayzOffline.enoch/db",
 }
 
 EVENTS_REMOTE_PATHS = {
@@ -87,8 +87,8 @@ CFGEVENTSPAWNS_REMOTE_PATHS = {
 }
 
 CFGGAMEPLAY_REMOTE_PATHS = {
-    "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus",
-    "Livonia": "dayzxb_missions/dayzOffline.enoch",
+    "Chernarus": "mpmissions/dayzOffline.chernarusplus",
+    "Livonia": "mpmissions/dayzOffline.enoch",
 }
 
 # --- BANCO DE DADOS (JSON) / UPLOADS ---
@@ -196,6 +196,20 @@ def enviar_email(destino, assunto, mensagem):
         return False
 
 
+def enviar_whatsapp(numero, mensagem):
+    """
+    Envia uma mensagem via WhatsApp (integração com serviço externo).
+    Este é um stub que retorna False, pois requer integração com API.
+    Para implementar: usar twilio, baileys ou similar.
+    """
+    try:
+        print(f"Tentativa de enviar WhatsApp para {numero}: {mensagem[:50]}...")
+        return False
+    except Exception as e:
+        print(f"Erro ao enviar WhatsApp: {e}")
+        return False
+
+
 def registrar_log(client_id, mensagem, tipo="info"):
     db_disco = load_db(DB_CLIENTS, {})
 
@@ -296,7 +310,7 @@ def parse_types_xml(xmlbytes):
     return tree, root, df
 
 
-def applydftotypesxml(tree, root, df):
+def apply_df_to_types_xml(tree, root, df):
     """
     Aplica as alterações do DataFrame de volta no XML
     e devolve bytes do novo types.xml.
@@ -433,31 +447,6 @@ def start_worker_once():
         threading.Thread(target=proworker, daemon=True).start()
 
 # ---------- HELPERS BAIXAR FTP ----------
-
-def baixar_arquivo_via_ftp(clientid, remotedir, remotefilename):
-    dbatual = load_db(DB_CLIENTS, {})
-    if clientid not in dbatual:
-        return False, None, "Cliente não encontrado"
-
-    conf = dbatual[clientid].get("ftp", {})
-    if not conf or not conf.get("host"):
-        return False, None, "Configuração FTP não encontrada"
-
-    try:
-        ftp = ftplib.FTP()
-        ftp.connect(conf["host"], int(conf.get("port", 21)), timeout=20)
-        ftp.login(conf["user"], conf["pass"])
-        ftp.cwd(remotedir)
-
-        chunks = []
-        ftp.retrbinary(f"RETR {remotefilename}", chunks.append)
-        ftp.quit()
-
-        file_bytes = b"".join(chunks)
-        return True, file_bytes, "Sucesso"
-
-    except Exception as e:
-        return False, None, str(e)
 
 # ---------- HELPER GENÉRICO DE DOWNLOAD VIA FTP ----------
 
@@ -620,39 +609,6 @@ def aplicar_eventos_map_no_cfgeventspawns(tree, root, eventos_map):
     return header + xml_bytes
 
 
-def enviar_cfgeventspawns_via_ftp(clientid, localpath, mapa):
-    """
-    Envia o cfgeventspawns.xml para a raiz da missão do DayZ,
-    conforme o mapa selecionado.
-    """
-    CFGEVENTSPAWNS_REMOTE_PATHS = {
-        "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus",
-        "Livonia": "dayzxb_missions/dayzOffline.enoch",
-    }
-
-    dbatual = load_db(DB_CLIENTS, {})
-    if clientid not in dbatual:
-        return False, "Cliente não encontrado"
-
-    conf = dbatual[clientid].get("ftp", {})
-    remotedir = CFGEVENTSPAWNS_REMOTE_PATHS.get(mapa)
-
-    if not remotedir:
-        return False, f"Caminho remoto não configurado para o mapa {mapa}"
-
-    try:
-        ftp = ftplib.FTP()
-        ftp.connect(conf["host"], int(conf.get("port", 21)), timeout=15)
-        ftp.login(conf["user"], conf["pass"])
-        ftp.cwd(remotedir)
-
-        with open(localpath, "rb") as f:
-            ftp.storbinary("STOR cfgeventspawns.xml", f)
-
-        ftp.quit()
-        return True, "Sucesso"
-    except Exception as e:
-        return False, str(e)
 
 # ---------- HELPERS EVENTS.XML ----------
 
@@ -771,7 +727,7 @@ def apply_df_to_events_xml(tree, root, df_events):
         flags_elem.set("active", "1" if active_value else "0")
 
     xml_bytes = ET.tostring(root, encoding="utf-8", method="xml")
-    header = b'\n'
+    header = b'<?xml version="1.0" encoding="utf-8"?>\n'
     return header + xml_bytes
 
 # ---------- HELPERS MESSAGES.XML ----------
@@ -978,7 +934,7 @@ def enviar_arquivo_via_ftp(clientid, localpath, remotedir, remotefilename):
 
 # ---------- WRAPPERS ESPECÍFICOS ----------
 
-def enviartypesviaftp(clientid, localpath, mapa):
+def enviar_types_via_ftp(clientid, localpath, mapa):
     """
     Envia o arquivo types.xml já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
@@ -994,7 +950,7 @@ def enviartypesviaftp(clientid, localpath, mapa):
         remotefilename="types.xml",
     )
 
-def enviarglobalsviaftp(clientid, localpath, mapa):
+def enviar_globals_via_ftp(clientid, localpath, mapa):
     """
     Envia o arquivo globals.xml já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
@@ -1010,7 +966,7 @@ def enviarglobalsviaftp(clientid, localpath, mapa):
         remotefilename="globals.xml",
     )
 
-def enviarcfggameplayviaftp(clientid, localpath, mapa):
+def enviar_cfggameplay_via_ftp(clientid, localpath, mapa):
     """
     Envia o arquivo cfggameplay.json já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
@@ -1115,7 +1071,7 @@ def get_server_status_nitrado(client_id: str, nitrado_id: str) -> str:
 def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus") -> bool:
     """
     Envia um arquivo JSON com os pedidos para o servidor via FTP.
-    Arquivo é enviado para: dayzxb_missions/dayzOffline.{mapa}/custom/loja_pedidos.json
+    Arquivo é enviado para: mpmissions/dayzOffline.{mapa}/custom/loja_pedidos.json
     """
     try:
         db_atual = load_db(DB_CLIENTS, {})
@@ -1129,9 +1085,9 @@ def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus
         # Define caminho remoto de acordo com o mapa
         mapa_lower = mapa.lower()
         if "enoch" in mapa_lower or "livonia" in mapa_lower:
-            remote_base = "dayzxb_missions/dayzOffline.enoch"
+            remote_base = "mpmissions/dayzOffline.enoch"
         else:
-            remote_base = "dayzxb_missions/dayzOffline.chernarusplus"
+            remote_base = "mpmissions/dayzOffline.chernarusplus"
         
         remote_dir = f"{remote_base}/custom"
         
@@ -2855,8 +2811,8 @@ with tabcfggameplay:
             stamina_max = st.number_input(
                 "Stamina máxima (staminaMax)",
                 min_value=10.0,
-                max_value=50000.0,
-                step=100.0,
+                max_value=500.0,
+                step=5.0,
                 value=float(stamina.get("staminaMax", 100.0)),
             )
             stamina_min_cap = st.number_input(
@@ -3886,8 +3842,43 @@ with tab6:
     st.subheader("🛒 Loja / Trader")
     st.info("Configure aqui o catálogo de itens da loja do seu servidor.")
 
-    # Garante estrutura de loja no client_data
-    loja = load_loja_for_client(client_data)
+    # Descobre o server_id real vinculado ao usuário logado
+    server_id_loja = st.session_state.db_users.get("keys", {}).get(
+        user_id, {}
+    ).get("server_id", user_id)
+
+    # Recarrega a base mais atual do disco
+    db_completo = load_db(DB_CLIENTS, {})
+
+    # Garante estrutura mínima do servidor
+    if server_id_loja not in db_completo:
+        db_completo[server_id_loja] = {
+            "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
+            "agendas": [],
+            "logs": [],
+            "comunicados": [],
+            "players": {},
+            "loja": {
+                "mapa_padrao": "Chernarus",
+                "posicao_padrao": "",
+                "itens": [],
+            },
+        }
+
+    client_data_loja = db_completo[server_id_loja]
+
+    # Garante estrutura da loja
+    if "loja" not in client_data_loja:
+        client_data_loja["loja"] = {
+            "mapa_padrao": "Chernarus",
+            "posicao_padrao": "",
+            "itens": [],
+        }
+
+    loja = client_data_loja["loja"]
+    loja.setdefault("mapa_padrao", "Chernarus")
+    loja.setdefault("posicao_padrao", "")
+    loja.setdefault("itens", [])
 
     st.markdown("### ⚙️ Configurações gerais da Loja")
 
@@ -3913,10 +3904,18 @@ with tab6:
 
     st.markdown("### 📦 Itens da Loja")
 
-    # Converte itens para DataFrame editável
-    df_loja_key = f"df_loja_{user_id}"
-    if df_loja_key not in st.session_state:
+    df_loja_key = f"df_loja_{server_id_loja}"
+    loja_version_key = f"df_loja_version_{server_id_loja}"
+
+    loja_serializada = json.dumps(loja, sort_keys=True, ensure_ascii=False)
+
+    if (
+        df_loja_key not in st.session_state
+        or loja_version_key not in st.session_state
+        or st.session_state[loja_version_key] != loja_serializada
+    ):
         st.session_state[df_loja_key] = loja_itens_to_df(loja)
+        st.session_state[loja_version_key] = loja_serializada
 
     df_loja = st.session_state[df_loja_key]
 
@@ -3955,7 +3954,8 @@ with tab6:
                 help="Se desmarcado, o item não aparece para os jogadores.",
             ),
         },
-    )  # [web:67]
+        key=f"editor_loja_{server_id_loja}",
+    )
 
     st.markdown("### 💾 Salvar catálogo")
 
@@ -3963,22 +3963,13 @@ with tab6:
 
     with col_loja1:
         if st.button("Aplicar alterações na sessão (Loja)", use_container_width=True):
-            # Atualiza o DataFrame na sessão
             st.session_state[df_loja_key] = edited_df_loja
             st.success("Alterações aplicadas na sessão da Loja.")
 
     with col_loja2:
         if st.button("Salvar Loja no Titan Cloud", key=f"btn_salvar_{user_id}", use_container_width=True):
-
-            # Busca o server_id real a partir da user_key logada
-            server_id_loja = st.session_state.db_users.get("keys", {}).get(
-                user_id, {}
-            ).get("server_id", user_id)
-
-            # 1. Carrega o banco global atualizado do disco
             db_completo = load_db(DB_CLIENTS, {})
 
-            # 2. Garante que o servidor exista no banco
             if server_id_loja not in db_completo:
                 db_completo[server_id_loja] = {
                     "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
@@ -3988,7 +3979,9 @@ with tab6:
                     "players": {},
                 }
 
-            # 3. Prepara a estrutura da loja
+            if "loja" not in db_completo[server_id_loja]:
+                db_completo[server_id_loja]["loja"] = {}
+
             itens_atualizados = df_to_loja_itens(edited_df_loja)
             loja_obj = {
                 "mapa_padrao": loja_mapa_padrao,
@@ -3996,16 +3989,17 @@ with tab6:
                 "itens": itens_atualizados,
             }
 
-            # 4. Salva na chave correta do servidor
             db_completo[server_id_loja]["loja"] = loja_obj
-
-            # 5. Persiste no arquivo JSON
             save_db(DB_CLIENTS, db_completo)
 
-            # 6. Atualiza o session_state
             st.session_state.db_clients = db_completo
+            st.session_state[df_loja_key] = loja_itens_to_df(loja_obj)
+            st.session_state[loja_version_key] = json.dumps(
+                loja_obj, sort_keys=True, ensure_ascii=False
+            )
 
             st.success(f"✅ Catálogo salvo com sucesso para o Servidor {server_id_loja}!")
+            st.rerun()
 
     with col_loja3:
         if st.button("⬇️ Baixar Loja (JSON)", use_container_width=True):
@@ -4025,6 +4019,28 @@ with tab6:
                 mime="application/json",
                 use_container_width=True,
             )
+            
+    with col_loja4:
+        if st.button("🔄 Recarregar Loja da Base", use_container_width=True):
+            db_recarregado = load_db(DB_CLIENTS, {})
+
+            if server_id_loja not in db_recarregado:
+                st.warning("Servidor não encontrado na base de dados.")
+            else:
+                client_data_recarregado = db_recarregado[server_id_loja]
+                loja_recarregada = client_data_recarregado.get("loja", {})
+                loja_recarregada.setdefault("mapa_padrao", "Chernarus")
+                loja_recarregada.setdefault("posicao_padrao", "")
+                loja_recarregada.setdefault("itens", [])
+
+                st.session_state[df_loja_key] = loja_itens_to_df(loja_recarregada)
+                st.session_state[loja_version_key] = json.dumps(
+                    loja_recarregada, sort_keys=True, ensure_ascii=False
+                )
+                st.session_state.db_clients = db_recarregado
+
+                st.success("✅ Loja recarregada diretamente da base.")
+                st.rerun()
 
 with tab7:
     st.subheader("👤 Jogadores / Vínculos")
