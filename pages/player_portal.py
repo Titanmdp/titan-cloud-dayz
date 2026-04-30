@@ -2595,7 +2595,7 @@ def main():
                     st.success("Histórico de compras entregues limpo com sucesso!")
                     st.rerun()
 
-                        pedidos = client_data_loja.get("pedidos", [])
+            pedidos = client_data_loja.get("pedidos", [])
             meus_pedidos = [p for p in pedidos if p.get("gamertag") == gamertag_vinculada]
 
             st.caption("As compras mais recentes ficam visíveis neste console com rolagem.")
