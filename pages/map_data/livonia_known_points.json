@@ -1,0 +1,167 @@
+{
+  "map": "Livonia (Enoch)",
+  "points": {
+    "topolin": {
+      "x": 6200,
+      "z": 11200,
+      "elevation_m": 204.9,
+      "zone": "colinas",
+      "tier": 2,
+      "multiplier": 1.15,
+      "description": "Colinas e florestas densas"
+    },
+    "grabin": {
+      "x": 4500,
+      "z": 9800,
+      "elevation_m": 214.3,
+      "zone": "colinas",
+      "tier": 2,
+      "multiplier": 1.15,
+      "description": "Colinas e florestas densas"
+    },
+    "sitnik": {
+      "x": 8200,
+      "z": 9000,
+      "elevation_m": 229.1,
+      "zone": "colinas",
+      "tier": 2,
+      "multiplier": 1.15,
+      "description": "Colinas e florestas densas"
+    },
+    "nadbor": {
+      "x": 7800,
+      "z": 3200,
+      "elevation_m": 256.2,
+      "zone": "montanha",
+      "tier": 3,
+      "multiplier": 1.3,
+      "description": "Região montanhosa (sul)"
+    },
+    "lukow_airfield": {
+      "x": 10800,
+      "z": 7200,
+      "elevation_m": 157.2,
+      "zone": "campos",
+      "tier": 1,
+      "multiplier": 1.05,
+      "description": "Campos e florestas abertas"
+    },
+    "dambog_bunker": {
+      "x": 1300,
+      "z": 1800,
+      "elevation_m": 224.6,
+      "zone": "colinas",
+      "tier": 2,
+      "multiplier": 1.15,
+      "description": "Colinas e florestas densas"
+    },
+    "sowa_hill": {
+      "x": 10400,
+      "z": 2500,
+      "elevation_m": 231.6,
+      "zone": "montanha",
+      "tier": 3,
+      "multiplier": 1.3,
+      "description": "Região montanhosa (sul)"
+    },
+    "rodzanica": {
+      "x": 5800,
+      "z": 3000,
+      "elevation_m": 269.5,
+      "zone": "montanha",
+      "tier": 3,
+      "multiplier": 1.3,
+      "description": "Região montanhosa (sul)"
+    },
+    "kopa_prison": {
+      "x": 7200,
+      "z": 3800,
+      "elevation_m": 247.1,
+      "zone": "montanha",
+      "tier": 3,
+      "multiplier": 1.3,
+      "description": "Região montanhosa (sul)"
+    },
+    "swarog_base": {
+      "x": 4600,
+      "z": 2700,
+      "elevation_m": 260.8,
+      "zone": "montanha",
+      "tier": 3,
+      "multiplier": 1.3,
+      "description": "Região montanhosa (sul)"
+    },
+    "krsnik_base": {
+      "x": 8700,
+      "z": 3400,
+      "elevation_m": 232.1,
+      "zone": "montanha",
+      "tier": 3,
+      "multiplier": 1.3,
+      "description": "Região montanhosa (sul)"
+    },
+    "bagno_swamp": {
+      "x": 1800,
+      "z": 5400,
+      "elevation_m": 161.9,
+      "zone": "colinas",
+      "tier": 2,
+      "multiplier": 1.15,
+      "description": "Colinas e florestas densas"
+    },
+    "biela_river_mid": {
+      "x": 6400,
+      "z": 6100,
+      "elevation_m": 192.7,
+      "zone": "colinas",
+      "tier": 2,
+      "multiplier": 1.15,
+      "description": "Colinas e florestas densas"
+    },
+    "polana": {
+      "x": 3200,
+      "z": 2200,
+      "elevation_m": 284.9,
+      "zone": "montanha",
+      "tier": 3,
+      "multiplier": 1.3,
+      "description": "Região montanhosa (sul)"
+    },
+    "dolnik": {
+      "x": 5000,
+      "z": 1500,
+      "elevation_m": 332.3,
+      "zone": "alto",
+      "tier": 4,
+      "multiplier": 1.5,
+      "description": "Altitude alta — bases militares remotas"
+    },
+    "karlin": {
+      "x": 6800,
+      "z": 8800,
+      "elevation_m": 209.1,
+      "zone": "colinas",
+      "tier": 2,
+      "multiplier": 1.15,
+      "description": "Colinas e florestas densas"
+    },
+    "kolembrody": {
+      "x": 9400,
+      "z": 8500,
+      "elevation_m": 199.1,
+      "zone": "colinas",
+      "tier": 2,
+      "multiplier": 1.15,
+      "description": "Colinas e florestas densas"
+    },
+    "tarnow": {
+      "x": 3800,
+      "z": 9200,
+      "elevation_m": 183.3,
+      "zone": "colinas",
+      "tier": 2,
+      "multiplier": 1.15,
+      "description": "Colinas e florestas densas"
+    }
+  }
+}
