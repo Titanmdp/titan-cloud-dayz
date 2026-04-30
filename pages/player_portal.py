@@ -7,6 +7,8 @@ import io
 import re
 from datetime import datetime, timezone, timedelta
 from ftplib import FTP
+from functools import lru_cache
+from pathlib import Path
 
 # Import seguro da função de FTP
 try:
@@ -14,8 +16,6 @@ try:
 except ImportError as e:
     st.error(f"Erro ao importar função enviar_pedidos_via_ftp: {e}")
     enviar_pedidos_via_ftp = None
-
-
 
 # =========================================================
 # 1. CONFIG / AMBIENTE / CONSTANTES
@@ -50,9 +50,33 @@ NITRADO_TOKEN = os.environ.get("NITRADO_TOKEN", "")
 NITRADO_API = "https://api.nitrado.net"
 
 FUSO_BR = timezone(timedelta(hours=-3))
-
 DAYZ_LOG_DIR = "dayzxb/config"
 RESTART_LOG_FILENAME = "restart.log"
+
+# =========================================================
+# 1.1 DADOS DE MAPA / ELEVAÇÃO
+# =========================================================
+MODULE_DIR = Path(__file__).resolve().parent
+MAP_DATA_DIR = MODULE_DIR / "map_data"
+
+CHERNARUS_ELEVATION_PY = MAP_DATA_DIR / "chernarus_elevation.py"
+CHERNARUS_ZONE_LOOKUP_JSON = MAP_DATA_DIR / "chernarus_zone_lookup.json"
+CHERNARUS_KNOWN_POINTS_JSON = MAP_DATA_DIR / "chernarus_known_points.json"
+CHERNARUS_HEIGHTMAP_METADATA_JSON = MAP_DATA_DIR / "chernarus_heightmap_metadata.json"
+CHERNARUS_HEIGHTMAP_ASC = MAP_DATA_DIR / "terrain_heightmap.asc"
+CHERNARUS_HEIGHTMAP_NPY = MAP_DATA_DIR / "chernarus_heightmap.npy"
+
+# Import seguro do módulo de elevação do Chernarus
+try:
+    import sys
+
+    if str(MAP_DATA_DIR) not in sys.path:
+        sys.path.append(str(MAP_DATA_DIR))
+
+    from chernarus_elevation import ChernarusHeightmap
+except Exception as e:
+    ChernarusHeightmap = None
+    print(f"[Elevation] Módulo de elevação do Chernarus indisponível: {e}")
 
 # =========================================================
 # 2. FUNÇÕES DE PERSISTÊNCIA
@@ -73,6 +97,121 @@ def save_db(path, data):
             json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e:
         st.error(f"Erro ao salvar dados: {e}")
+
+# =========================================================
+# 2.1 FUNÇÕES DE ELEVAÇÃO / MAPA
+# =========================================================
+@lru_cache(maxsize=1)
+def get_chernarus_heightmap():
+    """
+    Carrega a fonte de elevação do Chernarus uma única vez.
+    Prioridade:
+    1) terrain_heightmap.asc real
+    2) chernarus_heightmap.npy real/preprocessado
+    3) lookup JSON aproximado
+    4) fallback interno do módulo
+    """
+    if ChernarusHeightmap is None:
+        return None, "modulo_indisponivel"
+
+    try:
+        if CHERNARUS_HEIGHTMAP_ASC.exists():
+            hm = ChernarusHeightmap.from_asc(str(CHERNARUS_HEIGHTMAP_ASC))
+            return hm, "asc_real"
+
+        if CHERNARUS_HEIGHTMAP_NPY.exists():
+            hm = ChernarusHeightmap.from_npy(str(CHERNARUS_HEIGHTMAP_NPY))
+            return hm, "npy_real"
+
+        if CHERNARUS_ZONE_LOOKUP_JSON.exists():
+            hm = ChernarusHeightmap.from_json_lookup(str(CHERNARUS_ZONE_LOOKUP_JSON))
+            return hm, "json_lookup"
+
+        hm = ChernarusHeightmap()
+        return hm, "fallback_modulo"
+
+    except Exception as e:
+        print(f"[Elevation] Erro ao carregar heightmap Chernarus: {e}")
+        return None, "erro_carregamento"
+
+
+def get_chernarus_elevation_local(x: float, z: float):
+    """
+    Retorna (y, fonte) para Chernarus a partir dos arquivos locais.
+    """
+    hm, source = get_chernarus_heightmap()
+    if hm is None:
+        return None, source
+
+    try:
+        y = float(hm.get_elevation(float(x), float(z)))
+        return round(y, 4), source
+    except Exception as e:
+        print(f"[Elevation] Erro consultando elevação local ({x}, {z}): {e}")
+        return None, "erro_consulta"
+
+
+def get_local_elevation_by_map(x: float, z: float, mapa: str):
+    """
+    Dispatcher simples por mapa.
+    Hoje: Chernarus local.
+    Futuro: Livonia.
+    """
+    mapa_norm = (mapa or "").strip().lower()
+
+    if mapa_norm in ("chernarus", "chernarusplus", "chernarus+"):
+        return get_chernarus_elevation_local(x, z)
+
+    return None, "mapa_sem_suporte_local"
+
+def resolver_y_loja(ftp_cfg: dict | None, x: float, z: float, mapa: str):
+    """
+    Resolve a coordenada Y para compras da loja.
+
+    Ordem de prioridade:
+    1) Elevação local por mapa (Chernarus)
+    2) FTP/cfgeventspawns.xml
+    3) Falha controlada
+
+    Retorna dict com:
+    {
+        "y": float | None,
+        "fonte": str,
+        "distancia": float | None,
+        "detalhe": str
+    }
+    """
+    # 1) tenta fonte local do mapa
+    y_local, fonte_local = get_local_elevation_by_map(x, z, mapa)
+    if y_local is not None:
+        return {
+            "y": round(float(y_local), 4),
+            "fonte": f"local:{fonte_local}",
+            "distancia": None,
+            "detalhe": "Elevação obtida por dados locais do mapa",
+        }
+
+    # 2) fallback FTP
+    if ftp_cfg:
+        try:
+            y_ftp, dist_ftp = ftp_buscar_y_por_coordenadas(ftp_cfg, x, z, mapa)
+            if y_ftp is not None:
+                return {
+                    "y": round(float(y_ftp), 4),
+                    "fonte": "ftp:cfgeventspawns",
+                    "distancia": round(float(dist_ftp), 2),
+                    "detalhe": "Elevação obtida por ponto mais próximo do cfgeventspawns.xml",
+                }
+        except Exception as e:
+            print(f"[Elevation] Falha no fallback FTP ({mapa} {x}, {z}): {e}")
+
+    # 3) falha final
+    return {
+        "y": None,
+        "fonte": "indisponivel",
+        "distancia": None,
+        "detalhe": "Não foi possível resolver a elevação",
+    }
 
 # =========================================================
 # 3. FUNÇÕES DE DOMÍNIO
@@ -2205,49 +2344,71 @@ def main():
                                 key=f"coord_z_{item['id']}",
                             )
 
-                        # Calcula Y em background quando X e Z forem preenchidos
+                                                # Calcula Y em background quando X e Z forem preenchidos
                         coord_y = None
                         dist_ref = None
+                        fonte_y = None
+                        detalhe_y = None
+
                         if coord_x.strip() and coord_z.strip():
                             try:
                                 fx = float(coord_x.strip())
                                 fz = float(coord_z.strip())
-                                cache_key = f"y_cache_{server_id}_{fx:.1f}_{fz:.1f}"
+                                mapa_loja = loja.get("mapa_padrao", "Chernarus")
+                                cache_key = f"y_cache_{server_id}_{mapa_loja}_{fx:.1f}_{fz:.1f}"
 
                                 if cache_key not in st.session_state:
                                     ftp_cfg_loja = get_client_ftp_config(client_data_loja)
-                                    mapa_loja = loja.get("mapa_padrao", "Chernarus")
-                                    if ftp_cfg_loja:
-                                        y_val, dist_val = ftp_buscar_y_por_coordenadas(
-                                            ftp_cfg_loja, fx, fz, mapa_loja
-                                        )
-                                        st.session_state[cache_key] = (y_val, dist_val)
-                                    else:
-                                        st.session_state[cache_key] = (None, 0.0)
 
-                                coord_y, dist_ref = st.session_state[cache_key]
+                                    resultado_y = resolver_y_loja(
+                                        ftp_cfg=ftp_cfg_loja,
+                                        x=fx,
+                                        z=fz,
+                                        mapa=mapa_loja,
+                                    )
+                                    st.session_state[cache_key] = resultado_y
+
+                                resultado_y = st.session_state[cache_key]
+
+                                coord_y = resultado_y.get("y")
+                                dist_ref = resultado_y.get("distancia")
+                                fonte_y = resultado_y.get("fonte")
+                                detalhe_y = resultado_y.get("detalhe")
 
                                 if coord_y is not None:
-                                    qualidade = (
-                                        "✅ Alta precisão"   if dist_ref < 300  else
-                                        "⚠️ Precisão média" if dist_ref < 800  else
-                                        "🔴 Precisão baixa"
-                                    )
+                                    if fonte_y and fonte_y.startswith("local:"):
+                                        qualidade = "🗺️ Dados locais do mapa"
+                                        referencia_txt = "Referência local"
+                                    elif dist_ref is not None:
+                                        qualidade = (
+                                            "✅ Alta precisão"   if dist_ref < 300 else
+                                            "⚠️ Precisão média" if dist_ref < 800 else
+                                            "🔴 Precisão baixa"
+                                        )
+                                        referencia_txt = f"Referência a <b>{dist_ref:.0f}m</b>"
+                                    else:
+                                        qualidade = "ℹ️ Fonte alternativa"
+                                        referencia_txt = "Referência não disponível"
+
                                     st.markdown(
                                         f"""
                                         <div style="background:#0d1f0d; border-radius:6px;
                                                     padding:8px 12px; border:1px solid #1a4a1a;
                                                     font-size:12px; color:#aaa; margin-bottom:6px;">
-                                            🧭 Eixo Y calculado automaticamente: 
+                                            🧭 Eixo Y calculado automaticamente:
                                             <b style="color:#00ff88;">{coord_y:.4f}</b>
-                                            &nbsp;|&nbsp; Referência a <b>{dist_ref:.0f}m</b>
+                                            &nbsp;|&nbsp; {referencia_txt}
                                             &nbsp;|&nbsp; {qualidade}
+                                            <br>
+                                            <span style="color:#7fd1ff;">Fonte: {fonte_y or 'desconhecida'}</span>
                                         </div>
                                         """,
                                         unsafe_allow_html=True,
                                     )
                                 else:
-                                    st.warning("⚠️ Não foi possível calcular o Y. Verifique se o FTP está configurado.")
+                                    st.warning(
+                                        "⚠️ Não foi possível calcular o Y. Verifique os dados do mapa ou o FTP configurado."
+                                    )
                             except ValueError:
                                 st.error("❌ X e Z devem ser números. Ex: 4106.11")
 
@@ -2294,7 +2455,11 @@ def main():
                                 )
                                 if ok:
                                     # Limpa cache das coordenadas após compra confirmada
-                                    cache_key = f"y_cache_{server_id}_{float(coord_x.strip()):.1f}_{float(coord_z.strip()):.1f}"
+                                    mapa_loja = loja.get("mapa_padrao", "Chernarus")
+                                    cache_key = (
+                                        f"y_cache_{server_id}_{mapa_loja}_"
+                                        f"{float(coord_x.strip()):.1f}_{float(coord_z.strip()):.1f}"
+                                    )
                                     st.session_state.pop(cache_key, None)
                                     save_db(DB_CLIENTS, clients_db_loja)
                                     st.success(
