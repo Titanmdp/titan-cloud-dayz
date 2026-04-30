@@ -3959,7 +3959,7 @@ with tab6:
 
     st.markdown("### 💾 Salvar catálogo")
 
-    col_loja1, col_loja2, col_loja3 = st.columns(3)
+    col_loja1, col_loja2, col_loja3, col_loja4 = st.columns(4)
 
     with col_loja1:
         if st.button("Aplicar alterações na sessão (Loja)", use_container_width=True):
