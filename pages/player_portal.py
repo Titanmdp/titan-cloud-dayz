@@ -2500,37 +2500,37 @@ def main():
                                 fonte_y = resultado_y.get("fonte")
                                 detalhe_y = resultado_y.get("detalhe")
 
-                                if coordy is not None:
-                                    fonteraw = (fontey or "").strip().lower()
-                                    badgeorigem = "Fonte alternativa"
-                                    detalhefonte = detalhey or "Referência não especificada"
-                                    bgbox = "#1b1b1b"
-                                    borderbox = "#444444"
-                                    cory = "#cccccc"
+                                if coord_y is not None:
+                                    fonte_raw = (fonte_y or "").strip().lower()
+                                    badge_origem = "Fonte alternativa"
+                                    detalhe_fonte = detalhe_y or "Referência não especificada"
+                                    bg_box = "#1b1b1b"
+                                    border_box = "#444444"
+                                    cor_y = "#cccccc"
 
-                                    if fonteraw.startswith("local"):
-                                        badgeorigem = "🗺️ Terreno local"
-                                        if "asc" in fonteraw:
-                                            detalhefonte = "Base local do mapa (ASC real)"
-                                        elif "npy" in fonteraw:
-                                            detalhefonte = "Base local do mapa (NPY pré-processado)"
-                                        elif "json" in fonteraw:
-                                            detalhefonte = "Base local do mapa (lookup JSON)"
+                                    if fonte_raw.startswith("local"):
+                                        badge_origem = "🗺️ Terreno local"
+                                        if "asc" in fonte_raw:
+                                            detalhe_fonte = "Base local do mapa (ASC real)"
+                                        elif "npy" in fonte_raw:
+                                            detalhe_fonte = "Base local do mapa (NPY pré-processado)"
+                                        elif "json" in fonte_raw:
+                                            detalhe_fonte = "Base local do mapa (lookup JSON)"
                                         else:
-                                            detalhefonte = "Base local do mapa carregada no portal"
-                                        bgbox = "#0f1b12"
-                                        borderbox = "#1f5a34"
-                                        cory = "#57ff9a"
+                                            detalhe_fonte = "Base local do mapa carregada no portal"
+                                        bg_box = "#0f1b12"
+                                        border_box = "#1f5a34"
+                                        cor_y = "#57ff9a"
 
-                                    elif fonteraw.startswith("ftp"):
-                                        badgeorigem = "🌐 Fallback do servidor"
-                                        if distref is not None:
-                                            detalhefonte = f"Ponto de referência encontrado a {distref:.0f}m"
+                                    elif fonte_raw.startswith("ftp"):
+                                        badge_origem = "🌐 Fallback do servidor"
+                                        if dist_ref is not None:
+                                            detalhe_fonte = f"Ponto de referência encontrado a {dist_ref:.0f}m"
                                         else:
-                                            detalhefonte = detalhey or "Referência encontrada no servidor"
-                                        bgbox = "#22170d"
-                                        borderbox = "#7a4b1f"
-                                        cory = "#ffcc66"
+                                            detalhe_fonte = detalhe_y or "Referência encontrada no servidor"
+                                        bg_box = "#22170d"
+                                        border_box = "#7a4b1f"
+                                        cor_y = "#ffcc66"
 
                                     html_y = f"""
                                     <div style="
