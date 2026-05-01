@@ -2500,78 +2500,92 @@ def main():
                                 fonte_y = resultado_y.get("fonte")
                                 detalhe_y = resultado_y.get("detalhe")
 
-                                if coord_y is not None:
-                                    fonte_raw = (fonte_y or "").strip().lower()
+                                                                if coordy is not None:
+                                    fonteraw = (fontey or "").strip().lower()
+                                    badgeorigem = "Fonte alternativa"
+                                    detalhefonte = detalhey or "Referência não especificada"
+                                    bgbox = "#1b1b1b"
+                                    borderbox = "#444444"
+                                    cory = "#cccccc"
 
-                                    badge_origem = "ℹ️ Fonte alternativa"
-                                    detalhe_fonte = detalhe_y or "Referência não especificada"
-                                    bg_box = "#1b1b1b"
-                                    border_box = "#444444"
-                                    cor_y = "#cccccc"
-
-                                    if fonte_raw.startswith("local:"):
-                                        badge_origem = "🗺️ Terreno local"
-
-                                        if "asc" in fonte_raw:
-                                            detalhe_fonte = "Base local do mapa (ASC real)"
-                                        elif "npy" in fonte_raw:
-                                            detalhe_fonte = "Base local do mapa (NPY pré-processado)"
-                                        elif "json" in fonte_raw:
-                                            detalhe_fonte = "Base local do mapa (lookup JSON)"
+                                    if fonteraw.startswith("local"):
+                                        badgeorigem = "🗺️ Terreno local"
+                                        if "asc" in fonteraw:
+                                            detalhefonte = "Base local do mapa (ASC real)"
+                                        elif "npy" in fonteraw:
+                                            detalhefonte = "Base local do mapa (NPY pré-processado)"
+                                        elif "json" in fonteraw:
+                                            detalhefonte = "Base local do mapa (lookup JSON)"
                                         else:
-                                            detalhe_fonte = "Base local do mapa carregada no portal"
+                                            detalhefonte = "Base local do mapa carregada no portal"
+                                        bgbox = "#0f1b12"
+                                        borderbox = "#1f5a34"
+                                        cory = "#57ff9a"
 
-                                        bg_box = "#0f1b12"
-                                        border_box = "#1f5a34"
-                                        cor_y = "#57ff9a"
-
-                                    elif fonte_raw.startswith("ftp"):
-                                        badge_origem = "📡 Fallback do servidor"
-
-                                        if dist_ref is not None:
-                                            detalhe_fonte = f"Ponto de referência encontrado a {dist_ref:.0f}m"
+                                    elif fonteraw.startswith("ftp"):
+                                        badgeorigem = "🌐 Fallback do servidor"
+                                        if distref is not None:
+                                            detalhefonte = f"Ponto de referência encontrado a {distref:.0f}m"
                                         else:
-                                            detalhe_fonte = detalhe_y or "Referência encontrada no servidor"
+                                            detalhefonte = detalhey or "Referência encontrada no servidor"
+                                        bgbox = "#22170d"
+                                        borderbox = "#7a4b1f"
+                                        cory = "#ffcc66"
 
-                                        bg_box = "#22170d"
-                                        border_box = "#7a4b1f"
-                                        cor_y = "#ffcc66"
-
-                                    st.markdown(
-                                        f"""
+                                    html_y = f"""
+                                    <div style="
+                                        background:{bgbox};
+                                        border-radius:8px;
+                                        padding:10px 12px;
+                                        border:1px solid {borderbox};
+                                        font-size:12px;
+                                        color:#b8c0cc;
+                                        margin-bottom:8px;
+                                    ">
                                         <div style="
-                                            background:{bg_box};
-                                            border-radius:8px;
-                                            padding:10px 12px;
-                                            border:1px solid {border_box};
-                                            font-size:12px;
-                                            color:#b8c0cc;
-                                            margin-bottom:8px;
+                                            display:flex;
+                                            justify-content:space-between;
+                                            align-items:center;
+                                            margin-bottom:6px;
+                                            gap:8px;
+                                            flex-wrap:wrap;
                                         ">
-                                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                                <span style="font-size:12px; color:#d7dde8;">🧭 Eixo Y calculado automaticamente</span>
-                                                <span style="font-size:11px; padding:3px 8px; border-radius:999px; background:rgba(255,255,255,0.08); color:#fff;">
-                                                    {badge_origem}
-                                                </span>
-                                            </div>
-
-                                            <div style="font-size:20px; font-weight:bold; color:{cor_y}; margin-bottom:6px;">
-                                                {coord_y:.4f}
-                                            </div>
-
-                                            <div style="font-size:12px; color:#9fb0c3; line-height:1.45;">
-                                                <b style="color:#ffffff;">Origem:</b> {fonte_y or 'desconhecida'}<br>
-                                                <b style="color:#ffffff;">Detalhe:</b> {detalhe_fonte}
-                                            </div>
+                                            <span style="font-size:12px; color:#d7dde8;">🧭 Eixo Y calculado automaticamente</span>
+                                            <span style="
+                                                font-size:11px;
+                                                padding:3px 8px;
+                                                border-radius:999px;
+                                                background:rgba(255,255,255,0.08);
+                                                color:#ffffff;
+                                            ">
+                                                {badgeorigem}
+                                            </span>
                                         </div>
-                                        """,
-                                        unsafe_allow_html=True,
-                                    )
-                                
-                                else:
-                                    st.warning(
-                                        "⚠️ Não foi possível calcular o Y. Verifique os dados do mapa ou o FTP configurado."
-                                    )
+
+                                        <div style="
+                                            font-size:20px;
+                                            font-weight:bold;
+                                            color:{cory};
+                                            margin-bottom:6px;
+                                        ">
+                                            {coordy:.4f}
+                                        </div>
+
+                                        <div style="
+                                            font-size:12px;
+                                            color:#9fb0c3;
+                                            line-height:1.45;
+                                        ">
+                                            <b style="color:#ffffff;">Origem:</b> {fontey or 'desconhecida'}<br>
+                                            <b style="color:#ffffff;">Detalhe:</b> {detalhefonte}
+                                        </div>
+                                    </div>
+                                    """
+
+                                    st.markdown(html_y, unsafe_allow_html=True)
+
+                        else:
+                            st.warning("⚠️ Não foi possível calcular o Y. Verifique os dados do mapa ou o FTP configurado.")
 
                             except ValueError:
                                 st.error("❌ X e Z devem ser números. Ex: 4106.11")
