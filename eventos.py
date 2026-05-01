@@ -2885,7 +2885,7 @@ with tabcfggameplay:
             stamina_max = st.number_input(
                 "Stamina máxima (staminaMax)",
                 min_value=10.0,
-                max_value=500.0,
+                max_value=50000.0,
                 step=5.0,
                 value=float(stamina.get("staminaMax", 100.0)),
             )
