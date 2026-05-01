@@ -2154,7 +2154,10 @@ if user_id not in st.session_state.db_clients:
     save_db(DB_CLIENTS, st.session_state.db_clients)
 
 client_data = st.session_state.db_clients[user_id]
-user_info = st.session_state.db_users["keys"].get(
+# Sempre relê do disco para garantir que alterações do admin sejam refletidas
+_db_users_fresh = load_db(DB_USERS, {"admin_key": "ALEXADMIN", "keys": {}})
+
+user_info = _db_users_fresh["keys"].get(
     user_id,
     {
         "server": "Servidor (Admin Teste)",
@@ -2162,6 +2165,9 @@ user_info = st.session_state.db_users["keys"].get(
         "expires": "31/12/2099",
     }
 )
+
+# Atualiza o session_state para manter consistência
+st.session_state.db_users = _db_users_fresh
 
 if st.session_state.role == "client":
     token_valido = user_info.get("last_session")
@@ -2244,7 +2250,7 @@ with st.sidebar:
                         color:{cor_plano}; margin-top:4px;">
                 Plano {plano_atual}
             </div>
-            <div style="font-size:11px; color:#888; margin-top:2px;">
+            <div style="font-size:11px; color:#bbbbbb; margin-top:2px;">
                 Expira em: {exp_status}
             </div>
         </div>
@@ -2254,7 +2260,7 @@ with st.sidebar:
 
     # --- Funcionalidades do plano ---
     st.markdown(
-        "<div style='font-size:12px; color:#aaa; margin-bottom:4px;'>"
+        "<div style='font-size:12px; color:#cccccc; margin-bottom:4px;'>"
         "Funcionalidades do seu plano:</div>",
         unsafe_allow_html=True,
     )
@@ -2273,7 +2279,7 @@ with st.sidebar:
     for chave, label in funcionalidades_exibir:
         permitido = plano_permite(plano_atual, chave)
         icone = "✅" if permitido else "🔒"
-        cor_label = "#d6e2f0" if permitido else "#666666"
+        cor_label = "#ffffff" if permitido else "#999999"
         st.markdown(
             f"""
             <div style="
@@ -2345,19 +2351,11 @@ with st.sidebar:
 
 # --- TABS PRINCIPAIS CLIENTE ---
 st.title(f"🎮 {user_info['server']}")
-tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab6, tab7, tab8 = st.tabs([
-    "📅 Eventos Agendados",
-    "📜 Histórico / Logs",
-    "📢 Comunicados",
-    "📦 Loot / types.xml",
-    "🌍 Ambiente / globals.xml",
-    "⚙️ Gameplay / cfggameplay.json",
-    "🎪 Eventos / events.xml",
-    "💬 Mensagens / messages.xml",
-    "📍 Spawns / cfgeventspawns.xml",
-    "🛒 Loja Trader",
-    "👥 Jogadores",
-    "🏦 Banco / Carteira",
+tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab6, tab7, tab8, tab_planos = st.tabs([
+    "📅 Eventos Agendados", "📋 Histórico Logs", "📢 Comunicados", "🧬 Loot / types.xml",
+    "🌍 Ambiente / globals.xml", "⚙️ Gameplay / cfggameplay.json", "📅 Eventos / events.xml",
+    "💬 Mensagens / messages.xml", "📍 Spawns / cfgeventspawns.xml",
+    "🛒 Loja / Trader", "👥 Jogadores", "🏦 Banco / Carteira", "💎 Planos",
 ])
 
 with tab1:
@@ -4757,7 +4755,7 @@ with tab8:
                 client_data["bank"] = bank
                 clients_data[server_id] = client_data
 
-        # 6) Histórico consolidado
+    # 6) Histórico consolidado
     st.markdown("### 📜 Histórico de movimentações")
 
     col_hist_1, col_hist_2 = st.columns([3, 1])
@@ -4815,6 +4813,266 @@ with tab8:
         """,
         unsafe_allow_html=True,
     )
+
+# --- ABA PLANOS ---
+with tab_planos:
+    st.markdown("### 💎 Planos Titan Cloud Pro")
+    st.caption("Confira as funcionalidades disponíveis em cada plano.")
+
+    st.markdown(
+        f"""
+        <div style="
+            background:#0f1117;
+            border-radius:12px;
+            padding:24px;
+            margin-bottom:20px;
+        ">
+            <div style="text-align:center; margin-bottom:24px;">
+                <div style="font-size:26px; font-weight:bold; color:#00d4ff;">
+                    💎 Planos Titan Cloud Pro
+                </div>
+                <div style="font-size:13px; color:#888; margin-top:6px;">
+                    Escolha o plano ideal para o seu servidor DayZ
+                </div>
+            </div>
+
+            <div style="display:flex; gap:16px; flex-wrap:wrap; justify-content:center;">
+
+                <!-- STARTER -->
+                <div style="
+                    flex:1; min-width:220px; max-width:300px;
+                    background:#1a1a2e;
+                    border:{"2px solid #aaaaaa" if plano_atual == "Starter" else "1px solid #444"};
+                    border-radius:10px;
+                    padding:20px;
+                    text-align:center;
+                    position:relative;
+                ">
+                    {"<div style='position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#aaaaaa; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;'>SEU PLANO</div>" if plano_atual == "Starter" else ""}
+                    <div style="font-size:28px; margin-top:8px;">🔹</div>
+                    <div style="font-size:18px; font-weight:bold;
+                                color:#aaaaaa; margin:8px 0 4px;">Starter</div>
+                    <div style="font-size:26px; font-weight:bold;
+                                color:#ffffff; margin-bottom:4px;">R$ 14,99</div>
+                    <div style="font-size:11px; color:#666;
+                                margin-bottom:16px;">por mês</div>
+                    <hr style="border-color:#333; margin-bottom:16px;">
+                    <div style="font-size:12px; color:#d6e2f0;
+                                text-align:left; line-height:2;">
+                        ✅ 2 agendamentos ativos<br>
+                        ✅ Agendamento único/diário/semanal<br>
+                        ✅ Painel web básico<br>
+                        ✅ Histórico de logs<br>
+                        ✅ Backup e restore<br>
+                        ✅ Banco e Carteira DzCoins<br>
+                        ✅ Loja Virtual (Trader)<br>
+                        ✅ Worker DzCoins automático<br>
+                        ✅ Portal do Jogador (Discord)<br>
+                        ✅ Players online + reset<br>
+                        ✅ Chernarus ou Livonia<br>
+                        🔒 Editores XML/JSON<br>
+                        🔒 Ranking Semanal<br>
+                        🔒 Transferência DzCoins<br>
+                    </div>
+                    <div style="
+                        margin-top:16px;
+                        background:#333;
+                        border-radius:6px;
+                        padding:8px;
+                        font-size:12px;
+                        color:#aaa;
+                    ">
+                        📧 Suporte por E-mail
+                    </div>
+                </div>
+
+                <!-- PRO -->
+                <div style="
+                    flex:1; min-width:220px; max-width:300px;
+                    background:#1a1a2e;
+                    border:{"2px solid #00d4ff" if plano_atual == "Pro" else "1px solid #00d4ff55"};
+                    border-radius:10px;
+                    padding:20px;
+                    text-align:center;
+                    position:relative;
+                ">
+                    <div style="
+                        position:absolute; top:-12px; left:50%;
+                        transform:translateX(-50%);
+                        background:#00d4ff;
+                        color:#000;
+                        font-size:11px;
+                        font-weight:bold;
+                        padding:3px 14px;
+                        border-radius:999px;
+                    ">{"SEU PLANO" if plano_atual == "Pro" else "MAIS POPULAR"}</div>
+                    <div style="font-size:28px; margin-top:8px;">⭐</div>
+                    <div style="font-size:18px; font-weight:bold;
+                                color:#00d4ff; margin:8px 0 4px;">Pro</div>
+                    <div style="font-size:26px; font-weight:bold;
+                                color:#ffffff; margin-bottom:4px;">R$ 29,90</div>
+                    <div style="font-size:11px; color:#666;
+                                margin-bottom:16px;">por mês</div>
+                    <hr style="border-color:#333; margin-bottom:16px;">
+                    <div style="font-size:12px; color:#d6e2f0;
+                                text-align:left; line-height:2;">
+                        ✅ 8 agendamentos ativos<br>
+                        ✅ Agendamento único/diário/semanal<br>
+                        ✅ Painel web completo<br>
+                        ✅ Histórico de logs<br>
+                        ✅ Backup e restore<br>
+                        ✅ Banco e Carteira DzCoins<br>
+                        ✅ Loja Virtual (Trader) completa<br>
+                        ✅ Worker DzCoins automático<br>
+                        ✅ Portal do Jogador (Discord)<br>
+                        ✅ Players online + reset<br>
+                        ✅ Chernarus ou Livonia<br>
+                        ✅ Editores XML/JSON<br>
+                        ✅ Ranking Semanal<br>
+                        ✅ Transferência DzCoins<br>
+                    </div>
+                    <div style="
+                        margin-top:16px;
+                        background:#00d4ff22;
+                        border:1px solid #00d4ff44;
+                        border-radius:6px;
+                        padding:8px;
+                        font-size:12px;
+                        color:#00d4ff;
+                    ">
+                        📧 Suporte por E-mail
+                    </div>
+                </div>
+
+                <!-- ENTERPRISE -->
+                <div style="
+                    flex:1; min-width:220px; max-width:300px;
+                    background:#1a1a2e;
+                    border:{"2px solid #FFD700" if plano_atual == "Enterprise" else "1px solid #FFD70055"};
+                    border-radius:10px;
+                    padding:20px;
+                    text-align:center;
+                    position:relative;
+                ">
+                    {"<div style='position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#FFD700; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;'>SEU PLANO</div>" if plano_atual == "Enterprise" else ""}
+                    <div style="font-size:28px; margin-top:8px;">👑</div>
+                    <div style="font-size:18px; font-weight:bold;
+                                color:#FFD700; margin:8px 0 4px;">Enterprise</div>
+                    <div style="font-size:26px; font-weight:bold;
+                                color:#ffffff; margin-bottom:4px;">R$ 49,90</div>
+                    <div style="font-size:11px; color:#666;
+                                margin-bottom:16px;">por mês</div>
+                    <hr style="border-color:#333; margin-bottom:16px;">
+                    <div style="font-size:12px; color:#d6e2f0;
+                                text-align:left; line-height:2;">
+                        ✅ 16 agendamentos ativos<br>
+                        ✅ Agendamento único/diário/semanal<br>
+                        ✅ Painel web completo<br>
+                        ✅ Histórico de logs<br>
+                        ✅ Backup e restore<br>
+                        ✅ Banco e Carteira DzCoins<br>
+                        ✅ Loja Virtual (Trader) completa<br>
+                        ✅ Worker DzCoins automático<br>
+                        ✅ Portal do Jogador (Discord)<br>
+                        ✅ Players online + reset<br>
+                        ✅ Chernarus ou Livonia<br>
+                        ✅ Editores XML/JSON<br>
+                        ✅ Ranking Semanal<br>
+                        ✅ Transferência DzCoins<br>
+                    </div>
+                    <div style="
+                        margin-top:16px;
+                        background:#FFD70022;
+                        border:1px solid #FFD70044;
+                        border-radius:6px;
+                        padding:8px;
+                        font-size:12px;
+                        color:#FFD700;
+                    ">
+                        🎫 Suporte Ticket Prioritário
+                    </div>
+                </div>
+
+            </div>
+
+            <div style="
+                text-align:center;
+                font-size:11px;
+                color:#555;
+                margin-top:24px;
+            ">
+                DzCoins são moedas virtuais fictícias sem valor monetário real.<br>
+                Planos renovados mensalmente. Entre em contato para assinar ou fazer upgrade.
+            </div>
+
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # --- Bloco de contato para upgrade ---
+    st.markdown("---")
+    col_up1, col_up2, col_up3 = st.columns(3)
+
+    with col_up1:
+        st.markdown(
+            """
+            <div style="
+                background:#1a1a2e;
+                border:1px solid #333;
+                border-radius:8px;
+                padding:14px;
+                text-align:center;
+                font-size:12px;
+                color:#aaa;
+            ">
+                <div style="font-size:20px; margin-bottom:6px;">📧</div>
+                <b style="color:#fff;">E-mail</b><br>
+                suporte@titancloud.pro
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with col_up2:
+        st.markdown(
+            """
+            <div style="
+                background:#1a1a2e;
+                border:1px solid #333;
+                border-radius:8px;
+                padding:14px;
+                text-align:center;
+                font-size:12px;
+                color:#aaa;
+            ">
+                <div style="font-size:20px; margin-bottom:6px;">💬</div>
+                <b style="color:#fff;">Discord</b><br>
+                discord.gg/titancloud
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with col_up3:
+        st.markdown(
+            """
+            <div style="
+                background:#1a1a2e;
+                border:1px solid #333;
+                border-radius:8px;
+                padding:14px;
+                text-align:center;
+                font-size:12px;
+                color:#aaa;
+            ">
+                <div style="font-size:20px; margin-bottom:6px;">📱</div>
+                <b style="color:#fff;">WhatsApp</b><br>
+                (11) 9 3349-2240
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 # --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
 if "worker_started" not in st.session_state:
