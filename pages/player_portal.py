@@ -1543,7 +1543,7 @@ def render_reset_info(client_data: dict):
 # 6. ABA BANCO DZCOINS
 # =========================================================
 
-def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: str):
+def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: str, plano_atual: str = "Starter"):
     players = client_data.get("players", {})
 
     if gamertag not in players:
@@ -1570,16 +1570,22 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
 
     st.divider()
 
+    opcoes_banco = [
+        "📋 Extrato",
+        "➡️ Depositar (Carteira → Banco)",
+        "⬅️ Sacar (Banco → Carteira)",
+        "🔁 Transferir para outro jogador",
+    ]
+
+    if plano_permite(plano_atual, "transferencia_jogador"):
+        opcoes_banco.append("Transferir para outro jogador")
+
     op = st.radio(
         "Operação",
-        [
-            "📋 Extrato",
-            "➡️ Depositar (Carteira → Banco)",
-            "⬅️ Sacar (Banco → Carteira)",
-            "🔁 Transferir para outro jogador",
-        ],
+        opcoes_banco,
         horizontal=False,
         label_visibility="collapsed",
+        key="op_banco_radio",
     )
 
     hora_br = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
@@ -1695,7 +1701,10 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
                 st.rerun()
 
     elif op == "🔁 Transferir para outro jogador":
-        st.markdown("#### 🔁 Transferir DzCoins")
+        if not plano_permite(plano_atual, "transferencia_jogador"):
+            bloquear_funcionalidade(plano_atual, "🔁 Transferência entre Jogadores")
+        else:
+            st.markdown("🔁 Transferir DzCoins")
         outros_players = [p for p in players.keys() if p != gamertag]
         if not outros_players:
             st.info("Nenhum outro jogador vinculado neste servidor ainda.")
@@ -2383,19 +2392,24 @@ def main():
             clients_db_fresh,
             server_id,
             gamertag_vinculada,
+            plano_atual,
         )
 
     # --- ABA RANKING ---
     with tab_ranking:
         st.markdown("### 🏆 Ranking Semanal")
-        clients_db_fresh = load_db(DB_CLIENTS, {})
-        client_data_fresh = clients_db_fresh.get(server_id, {})
-        render_ranking(
-            client_data_fresh,
-            gamertag_vinculada,
-            clients_db_fresh,
-            server_id,
-        )
+
+        if not plano_permite(plano_atual, "ranking_semanal"):
+            bloquear_funcionalidade(plano_atual, "🏆 Ranking Semanal")
+        else:
+            clients_db_fresh = load_db(DB_CLIENTS, {})
+            client_data_fresh = clients_db_fresh.get(server_id, {})
+            render_ranking(
+                client_data_fresh,
+                gamertag_vinculada,
+                clients_db_fresh,
+                server_id,
+            )
 
         # --- ABA LOJA VIRTUAL ---
     with tab_loja:
