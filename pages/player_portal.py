@@ -5,6 +5,7 @@ import requests
 import urllib.parse
 import io
 import re
+import html
 from datetime import datetime, timezone, timedelta
 from ftplib import FTP
 from functools import lru_cache
@@ -2558,7 +2559,7 @@ def main():
                                                 background:rgba(255,255,255,0.08);
                                                 color:#ffffff;
                                             ">
-                                                {badge_origem}
+                                                {html.escape(str(badge_origem))}
                                             </span>
                                         </div>
 
@@ -2576,8 +2577,8 @@ def main():
                                             color:#9fb0c3;
                                             line-height:1.45;
                                         ">
-                                            <b style="color:#ffffff;">Origem:</b> {fonte_y or 'desconhecida'}<br>
-                                            <b style="color:#ffffff;">Detalhe:</b> {detalhe_fonte}
+                                            <b style="color:#ffffff;">Origem:</b> {html.escape(str(fonte_y or 'desconhecida'))}<br>
+                                            <b style="color:#ffffff;">Detalhe:</b> {html.escape(str(detalhe_fonte))}
                                         </div>
                                     </div>
                                     """
