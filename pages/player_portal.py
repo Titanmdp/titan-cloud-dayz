@@ -1422,7 +1422,30 @@ def render_relogio():
         )
     _clock()
 
-def render_players_online(nitrado_id: str):
+def get_online_from_adm(ftp_cfg: dict) -> list:
+    """Lê o log ADM do dia e retorna lista de jogadores atualmente online."""
+    log_text, _ = ftp_download_latest_adm(ftp_cfg)
+    if not log_text:
+        return []
+    conectados = {}
+    for line in log_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)"', line)
+        if not m:
+            continue
+        nome = m.group(2)
+        if "(DEAD)" in line:
+            continue
+        if "is connected" in line and "is connecting" not in line:
+            conectados[nome] = True
+        elif "has been disconnected" in line:
+            conectados.pop(nome, None)
+    return [n for n, v in conectados.items() if v]
+
+
+def render_players_online(nitrado_id: str, ftp_cfg: dict = None):
     @st.fragment(run_every=60)
     def _players():
         dados = get_players_online(nitrado_id)
@@ -1435,19 +1458,15 @@ def render_players_online(nitrado_id: str):
         players = dados.get("players", [])
         maximo = dados.get("max", 0)
 
+        # Se a API não retornou nomes, tenta pelo log ADM
+        if total > 0 and not players and ftp_cfg:
+            players = get_online_from_adm(ftp_cfg)
+
         st.markdown(
-            f"""
-            <div style="background:#1a1a2e; border-radius:10px; padding:14px;
-                        border:1px solid #444; margin-bottom:8px;">
-                <div style="font-size:13px; color:#aaa; margin-bottom:4px;">
-                    🌐 Players Online
-                </div>
-                <div style="font-size:28px; font-weight:bold; color:#00ff88;">
-                    {total}
-                    <span style="font-size:14px; color:#666;">/ {maximo}</span>
-                </div>
-            </div>
-            """,
+            f'<div style="background:#1a1a2e;border-radius:10px;padding:14px;border:1px solid #444;margin-bottom:8px;">'
+            f'<div style="font-size:13px;color:#aaa;margin-bottom:4px;">🌐 Players Online</div>'
+            f'<div style="font-size:28px;font-weight:bold;color:#00ff88;">{total}'
+            f'<span style="font-size:14px;color:#666;">/ {maximo}</span></div></div>',
             unsafe_allow_html=True,
         )
 
@@ -2335,7 +2354,8 @@ def main():
 
         with col_a:
             st.markdown("#### 🌐 Players Online")
-            render_players_online(nitrado_id)
+            ftp_cfg_online = get_client_ftp_config(client_data)
+            render_players_online(nitrado_id, ftp_cfg=ftp_cfg_online)
 
         with col_b:
             st.markdown("#### 🔄 Reset do Servidor")
