@@ -1417,6 +1417,9 @@ if "db_users" not in st.session_state:
 # Garante estrutura mínima em db_users, sem duplicar config_planos
 st.session_state.db_users.setdefault("admin_key", "ALEX_ADMIN")
 st.session_state.db_users.setdefault("keys", {})
+st.session_state.db_users.setdefault("admin_email", "")
+st.session_state.db_users.setdefault("mfa_code", "")
+st.session_state.db_users.setdefault("mfa_expiry", "")
 
 if "db_clients" not in st.session_state:
     st.session_state.db_clients = load_db(DB_CLIENTS, {})
@@ -1446,6 +1449,66 @@ if not st.session_state.get("authenticated"):
 
     dados_geo = buscar_localizacao_cliente()
     login_key = st.text_input("Insira sua KeyUser de administrador", type="password")
+
+with st.expander("🔑 Esqueci minha senha"):
+        db_users_rec = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
+        admin_email_rec = db_users_rec.get("admin_email", "")
+
+        if not admin_email_rec:
+            st.warning("Nenhum e-mail de recuperação cadastrado. Acesse o painel e cadastre em **Segurança da Conta**.")
+        else:
+            st.info(f"Um código será enviado para: **{admin_email_rec[:3]}***@{admin_email_rec.split('@')[-1]}")
+            if st.button("📧 Enviar código de recuperação", use_container_width=True):
+                import random
+                codigo = str(random.randint(100000, 999999))
+                expiry = (get_hora_brasilia() + timedelta(minutes=10)).strftime("%d/%m/%Y %H:%M")
+                db_users_rec["mfa_code"] = codigo
+                db_users_rec["mfa_expiry"] = expiry
+                save_db(DB_USERS, db_users_rec)
+                ok_email = enviar_email(
+                    admin_email_rec,
+                    "Titan Cloud - Código de recuperação",
+                    f"Seu código de acesso é: {codigo}\nVálido por 10 minutos.",
+                )
+                if ok_email:
+                    st.success("Código enviado! Verifique seu e-mail.")
+                    st.session_state["mfa_recovery_mode"] = True
+                else:
+                    st.error("Falha ao enviar e-mail. Verifique as credenciais EMAIL_USER e EMAIL_PASS no ambiente.")
+
+        if st.session_state.get("mfa_recovery_mode"):
+            codigo_input = st.text_input("Digite o código recebido", max_chars=6)
+            nova_senha = st.text_input("Nova senha (KeyUser)", type="password")
+            confirmar_senha = st.text_input("Confirmar nova senha", type="password")
+
+            if st.button("✅ Redefinir senha", use_container_width=True):
+                db_users_rec2 = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
+                codigo_salvo = db_users_rec2.get("mfa_code", "")
+                expiry_str = db_users_rec2.get("mfa_expiry", "")
+                agora_str = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
+
+                try:
+                    expiry_dt = datetime.strptime(expiry_str, "%d/%m/%Y %H:%M").replace(tzinfo=FUSO_BR)
+                    ainda_valido = get_hora_brasilia() <= expiry_dt
+                except Exception:
+                    ainda_valido = False
+
+                if not codigo_salvo or codigo_input != codigo_salvo:
+                    st.error("Código inválido.")
+                elif not ainda_valido:
+                    st.error("Código expirado. Solicite um novo.")
+                elif nova_senha != confirmar_senha:
+                    st.error("As senhas não coincidem.")
+                elif len(nova_senha) < 6:
+                    st.error("A nova senha deve ter pelo menos 6 caracteres.")
+                else:
+                    db_users_rec2["admin_key"] = nova_senha
+                    db_users_rec2["mfa_code"] = ""
+                    db_users_rec2["mfa_expiry"] = ""
+                    save_db(DB_USERS, db_users_rec2)
+                    st.session_state.db_users = db_users_rec2
+                    st.session_state["mfa_recovery_mode"] = False
+                    st.success("Senha redefinida com sucesso! Faça login com a nova senha.")
 
     if st.button("Entrar no Painel", use_container_width=True):
         ok, cargo = validar_acesso(login_key)
@@ -1510,6 +1573,44 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
             st.rerun()
 
     st.title("🛡️ Painel de Controle - Administrador")
+
+    # -------------------------------------------------------
+    # SEGURANÇA DA CONTA (troca de senha + cadastro de email)
+    # -------------------------------------------------------
+    with st.expander("🔐 Segurança da Conta", expanded=False):
+        db_seg = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
+
+        st.markdown("#### 📧 E-mail de recuperação")
+        email_atual = db_seg.get("admin_email", "")
+        novo_email = st.text_input("E-mail para recuperação de senha", value=email_atual, key="seg_email_input")
+        if st.button("💾 Salvar e-mail", key="btn_salvar_email", use_container_width=True):
+            if "@" not in novo_email or "." not in novo_email:
+                st.error("E-mail inválido.")
+            else:
+                db_seg["admin_email"] = novo_email
+                save_db(DB_USERS, db_seg)
+                st.session_state.db_users["admin_email"] = novo_email
+                st.success(f"E-mail de recuperação salvo: {novo_email}")
+
+        st.divider()
+        st.markdown("#### 🔑 Trocar senha (KeyUser Admin)")
+        senha_atual_input = st.text_input("Senha atual", type="password", key="seg_senha_atual")
+        nova_senha_input = st.text_input("Nova senha", type="password", key="seg_nova_senha")
+        confirmar_nova = st.text_input("Confirmar nova senha", type="password", key="seg_confirmar_nova")
+
+        if st.button("🔄 Alterar senha", key="btn_alterar_senha", use_container_width=True):
+            db_seg2 = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
+            if senha_atual_input != db_seg2.get("admin_key", ""):
+                st.error("Senha atual incorreta.")
+            elif nova_senha_input != confirmar_nova:
+                st.error("As novas senhas não coincidem.")
+            elif len(nova_senha_input) < 6:
+                st.error("A nova senha deve ter pelo menos 6 caracteres.")
+            else:
+                db_seg2["admin_key"] = nova_senha_input
+                save_db(DB_USERS, db_seg2)
+                st.session_state.db_users["admin_key"] = nova_senha_input
+                st.success("Senha alterada com sucesso! Use a nova senha no próximo login.")
 
     tab_adm1, tab_adm2, tab_adm3, tab_adm4, tab_adm5 = st.tabs(
         [
