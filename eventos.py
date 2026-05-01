@@ -364,18 +364,73 @@ def dispararftppro(clientid, acao, filename, localpath, mapapath):
     except Exception:
         return False, "Erro"
 
+def worker_dzcoins_automatico():
+    """
+    Worker que distribui DzCoins automaticamente para jogadores online
+    conforme configurado pelo admin em dzcoins_config.
+    Roda em loop contínuo em thread separada.
+    """
+    while True:
+        try:
+            db = load_db(DB_CLIENTS, {})
+            for server_id, client_data in db.items():
+                config = client_data.get("dzcoins_config", {})
+                if not config.get("ativo", False):
+                    continue
+
+                quantidade = int(config.get("quantidade_dzcoins", 0))
+                intervalo = int(config.get("intervalo_minutos", 60))
+
+                if quantidade <= 0 or intervalo <= 0:
+                    continue
+
+                players = client_data.get("players", {})
+                if not players:
+                    continue
+
+                wallets = client_data.setdefault("wallets", {})
+                hora_atual = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
+                alterou = False
+
+                for gamertag in players:
+                    wallet = wallets.setdefault(gamertag, {"balance": 0, "historico": []})
+                    wallet["balance"] = wallet.get("balance", 0) + quantidade
+                    wallet["historico"].append(
+                        f"[{hora_atual}] GANHO AUTOMÁTICO +{quantidade} DzCoins (tempo de jogo)"
+                    )
+                    alterou = True
+
+                if alterou:
+                    db[server_id] = client_data
+                    save_db(DB_CLIENTS, db)
+
+        except Exception as e:
+            print(f"[worker_dzcoins] Erro: {e}")
+
+        try:
+            db2 = load_db(DB_CLIENTS, {})
+            intervalos = [
+                int(c.get("dzcoins_config", {}).get("intervalo_minutos", 60))
+                for c in db2.values()
+                if c.get("dzcoins_config", {}).get("ativo", False)
+            ]
+            sleep_min = min(intervalos) if intervalos else 60
+        except Exception:
+            sleep_min = 60
+
+        time.sleep(sleep_min * 60)
+
+
 def proworker():
     while True:
         try:
             now = get_hora_brasilia()
             db_all = load_db(DB_CLIENTS, {})
             mudou = False
-
             for cid, cinfo in db_all.items():
                 for ag in cinfo.get("agendas", []):
                     hora_entrada = str_to_time(ag.get("data"), ag.get("in"))
                     hora_saida = str_to_time(ag.get("data"), ag.get("out"))
-
                     if hora_entrada and now >= hora_entrada and ag.get("status") == "Aguardando":
                         if not os.path.exists(ag["localpath"]) and ag.get("filecontent"):
                             try:
@@ -384,7 +439,6 @@ def proworker():
                                     f.write(base64.b64decode(ag["filecontent"]))
                             except Exception as e:
                                 print("Erro ao recriar arquivo:", e)
-
                         if not os.path.exists(ag["localpath"]):
                             ag["status"] = "Erro"
                             registrar_log(cid, f"Arquivo perdido: {ag['file']}", "erro")
@@ -404,7 +458,6 @@ def proworker():
                                 "sucesso" if ok else "erro",
                             )
                             mudou = True
-
                     if hora_saida and now >= hora_saida and ag.get("status") == "Ativo":
                         ok, msg = dispararftppro(
                             cid,
@@ -418,7 +471,6 @@ def proworker():
                             f"DELETE {ag['file']} {'OK' if ok else msg}",
                             "sucesso" if ok else "erro",
                         )
-
                         if ag.get("rec") == "Diário":
                             ag["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
                             ag["status"] = "Aguardando"
@@ -427,24 +479,21 @@ def proworker():
                             ag["status"] = "Aguardando"
                         else:
                             ag["status"] = "Finalizado"
-
                         mudou = True
-
             if mudou:
                 save_db(DB_CLIENTS, db_all)
-
         except Exception as e:
             print("Erro no proworker:", e)
-
         time.sleep(15)
 
-WORKER_STARTED = False
 
+WORKER_STARTED = False
 def start_worker_once():
     global WORKER_STARTED
     if not WORKER_STARTED:
         WORKER_STARTED = True
         threading.Thread(target=proworker, daemon=True).start()
+        threading.Thread(target=worker_dzcoins_automatico, daemon=True).start()
 
 # ---------- HELPERS BAIXAR FTP ----------
 
