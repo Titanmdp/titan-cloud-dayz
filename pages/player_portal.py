@@ -6,6 +6,7 @@ import urllib.parse
 import io
 import re
 import html
+import textwrap
 from datetime import datetime, timezone, timedelta
 from ftplib import FTP
 from functools import lru_cache
@@ -2583,7 +2584,7 @@ def main():
                                     </div>
                                     """
 
-                                    st.markdown(html_y, unsafe_allow_html=True)
+                                    st.markdown(textwrap.dedent(html_y).strip(), unsafe_allow_html=True)
 
                                 else:
                                     st.warning("⚠️ Não foi possível calcular o Y. Verifique os dados do mapa ou o FTP configurado.")
