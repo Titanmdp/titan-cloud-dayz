@@ -1122,10 +1122,19 @@ def parse_adm_semanal(log_text: str) -> dict:
                 if delta > 0:
                     p["total_play_seconds"] += int(delta)
                     p["session_count"] += 1
+            # Fecha período de sobrevivência se jogador desconectou ainda vivo
+            if p.get("last_spawn_dt") and dt_evento:
+                delta_surv = (dt_evento - p["last_spawn_dt"]).total_seconds()
+                if delta_surv > 0:
+                    surv = int(delta_surv)
+                    p["total_survival_seconds"] += surv
+                    if surv > p["max_survival_seconds"]:
+                        p["max_survival_seconds"] = surv
             p["last_connect_dt"] = None
+            p["last_spawn_dt"] = None
 
-        # Hit por Infected (dano real)
-        if key_hit_infected in line and not is_dead_line:
+        # Hit por Infected (dano real) — inclui golpe fatal (linha com DEAD)
+        if key_hit_infected in line:
             m_hit = re_hit_infected.search(line)
             if m_hit:
                 try:
@@ -1134,16 +1143,17 @@ def parse_adm_semanal(log_text: str) -> dict:
                 except Exception:
                     pass
 
-        # Suicídio / EmoteSuicide
+        # Suicídio / EmoteSuicide — no DayZ Console a linha já vem com (DEAD)
         if key_suicide_emote in line or key_committed_sui in line:
-            if not is_dead_line:
-                p["pve_suicides"] += 1
+            p["pve_suicides"] += 1
             registrar_morte(p, dt_evento)
 
-        # Morte real (DEAD died)
+        # Morte real (DEAD died) — só conta PvP se houver killer identificado na linha
         if is_dead_line and "died." in line and key_committed_sui not in line:
             registrar_morte(p, dt_evento)
-            p["pvp_deaths"] += 1
+            # pvp_deaths só incrementa se killer for identificado via key_killed
+            if key_killed not in line:
+                p["pve_suicides"] += 0  # morte por ambiente (zumbi, fome, queda) — não conta PvP
 
         # Kill PvP — credita para o assassino
         if key_killed in line and not is_dead_line:
@@ -1157,14 +1167,21 @@ def parse_adm_semanal(log_text: str) -> dict:
 
     # Recalcula XP final para todos
     for nome, p in players.items():
-        # Se jogador ainda está vivo (sem morte registrada), estima sobrevivência atual
         if p.get("last_spawn_dt") and p.get("last_connect_dt"):
             agora = datetime.now(FUSO_BR)
             delta_atual = (agora - p["last_spawn_dt"]).total_seconds()
             if delta_atual > 0:
-                p["current_survival_seconds"] = int(delta_atual)
-        # XP final baseado em total_survival_seconds
-        p["xp"] = round(p["total_survival_seconds"] / 60, 2)
+                current = int(delta_atual)
+                p["current_survival_seconds"] = current
+                total_xp_base = p["total_survival_seconds"] + current
+            else:
+                total_xp_base = p["total_survival_seconds"]
+        else:
+            total_xp_base = p["total_survival_seconds"]
+
+        p["xp"] = round(total_xp_base / 60, 2)
+        p["nivel"] = max(1, int(p["xp"] // 100) + 1)
+        p["xp_no_nivel"] = round(p["xp"] % 100, 2)
 
     return players
 
@@ -1733,6 +1750,25 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
             st.info("Nenhuma estatística encontrada nos logs da semana.")
             return
 
+        # Persiste XP e nível no clients_data (nunca regride)
+        clients_db_fresh = load_db(DB_CLIENTS, {})
+        client_fresh = clients_db_fresh.get(server_id, {})
+        if "xp_stats" not in client_fresh:
+            client_fresh["xp_stats"] = {}
+        for nome_xp, dados_xp in stats.items():
+            xp_atual = dados_xp.get("xp", 0.0)
+            nivel_atual = dados_xp.get("nivel", 1)
+            xp_salvo = client_fresh["xp_stats"].get(nome_xp, {}).get("xp", 0.0)
+            if xp_atual > xp_salvo:
+                client_fresh["xp_stats"][nome_xp] = {
+                    "xp": xp_atual,
+                    "nivel": nivel_atual,
+                    "xp_no_nivel": dados_xp.get("xp_no_nivel", 0.0),
+                    "ultima_atualizacao": datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M"),
+                }
+        clients_db_fresh[server_id] = client_fresh
+        save_db(DB_CLIENTS, clients_db_fresh)
+
         st.caption(
             f"📊 {len(stats)} jogadores encontrados nos logs dos últimos 7 dias — "
             "dados atualizados a cada 5 minutos."
@@ -1840,8 +1876,9 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
                     destaque = (nome == gamertag_vinculada)
                     cor = "#00d4ff" if destaque else "#e0e0e0"
                     xp = dados.get("xp", 0.0)
-                    nivel = max(1, int(xp // 100) + 1)
-                    barra_pct = int((xp / max(xp_max, 1)) * 100)
+                    nivel = dados.get("nivel", max(1, int(xp // 100) + 1))
+                    xp_no_nivel = dados.get("xp_no_nivel", round(xp % 100, 2))
+                    barra_pct = int((xp_no_nivel / 100) * 100)
                     st.markdown(
                         f"""
                         <div style="background:#1a1a2e; border-radius:8px; padding:10px 14px;
@@ -1852,7 +1889,7 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
                                 {nome}
                             </span>
                             <span style="color:#aaa; float:right;">
-                                Nvl {nivel} &nbsp;|&nbsp; ⭐ {xp:.1f} XP
+                                Nvl {nivel} &nbsp;|&nbsp; ⭐ {xp:.1f} XP &nbsp;|&nbsp; {xp_no_nivel:.1f}/100 XP p/ próx. nível
                             </span>
                             <div style="background:#333; border-radius:4px; height:4px;
                                         margin-top:6px;">
@@ -1991,7 +2028,7 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
             col1, col2, col3, col4, col5 = st.columns(5)
             col1.metric("⏱️ Tempo de Jogo", format_seconds_hhmmss(meu.get("total_play_seconds", 0)))
             col2.metric("🏕️ Melhor Vida", format_seconds_hhmmss(meu.get("max_survival_seconds", 0)))
-            col3.metric("⭐ XP", f"{meu.get('xp', 0.0):.1f}")
+            col3.metric("⭐ XP", f"{meu.get('xp', 0.0):.1f}", f"Nível {meu.get('nivel', 1)}")
             col4.metric("⚔️ Kills PvP", meu.get("pvp_kills", 0))
             col5.metric("🧟 Hits PvE", meu.get("pve_hits", 0))
 
