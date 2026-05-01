@@ -2500,7 +2500,7 @@ def main():
                                 fonte_y = resultado_y.get("fonte")
                                 detalhe_y = resultado_y.get("detalhe")
 
-                                                                if coordy is not None:
+                                if coordy is not None:
                                     fonteraw = (fontey or "").strip().lower()
                                     badgeorigem = "Fonte alternativa"
                                     detalhefonte = detalhey or "Referência não especificada"
