@@ -2339,7 +2339,7 @@ def main():
             server_id,
         )
 
-    # --- ABA LOJA VIRTUAL ---
+        # --- ABA LOJA VIRTUAL ---
     with tab_loja:
         st.markdown("### 🛒 Loja Virtual")
 
@@ -2374,7 +2374,8 @@ def main():
             )
 
             itens_filtrados = (
-                itens if cat_sel == "Todas"
+                itens
+                if cat_sel == "Todas"
                 else [i for i in itens if i.get("categoria") == cat_sel]
             )
 
@@ -2453,6 +2454,7 @@ def main():
                             """,
                             unsafe_allow_html=True,
                         )
+
                         col_cx, col_cz = st.columns(2)
                         with col_cx:
                             coord_x = st.text_input(
@@ -2467,7 +2469,7 @@ def main():
                                 key=f"coord_z_{item['id']}",
                             )
 
-                                                # Calcula Y em background quando X e Z forem preenchidos
+                        # Calcula Y em background quando X e Z forem preenchidos
                         coord_y = None
                         dist_ref = None
                         fonte_y = None
@@ -2499,44 +2501,41 @@ def main():
                                 detalhe_y = resultado_y.get("detalhe")
 
                                 if coord_y is not None:
-                                    if fonte_y and fonte_y.startswith("local:"):
-                                        qualidade = "🗺️ Dados locais do mapa"
-                                        referencia_txt = "Referência local"
-                                    elif dist_ref is not None:
-                                        qualidade = (
-                                            "✅ Alta precisão"   if dist_ref < 300 else
-                                            "⚠️ Precisão média" if dist_ref < 800 else
-                                            "🔴 Precisão baixa"
-                                        )
-                                        referencia_txt = f"Referência a <b>{dist_ref:.0f}m</b>"
-                                    else:
-                                        qualidade = "ℹ️ Fonte alternativa"
-                                        referencia_txt = "Referência não disponível"
+                                    fonte_raw = (fonte_y or "").strip().lower()
 
-                                    if fonte_y and fonte_y.startswith("local:"):
+                                    badge_origem = "ℹ️ Fonte alternativa"
+                                    detalhe_fonte = detalhe_y or "Referência não especificada"
+                                    bg_box = "#1b1b1b"
+                                    border_box = "#444444"
+                                    cor_y = "#cccccc"
+
+                                    if fonte_raw.startswith("local:"):
+                                        badge_origem = "🗺️ Terreno local"
+
+                                        if "asc" in fonte_raw:
+                                            detalhe_fonte = "Base local do mapa (ASC real)"
+                                        elif "npy" in fonte_raw:
+                                            detalhe_fonte = "Base local do mapa (NPY pré-processado)"
+                                        elif "json" in fonte_raw:
+                                            detalhe_fonte = "Base local do mapa (lookup JSON)"
+                                        else:
+                                            detalhe_fonte = "Base local do mapa carregada no portal"
+
                                         bg_box = "#0f1b12"
                                         border_box = "#1f5a34"
                                         cor_y = "#57ff9a"
-                                        badge_origem = "🗺️ Terreno local"
-                                        detalhe_fonte = (
-                                            "Base local do mapa carregada no portal"
-                                        )
-                                    elif fonte_y == "ftp:cfgeventspawns":
+
+                                    elif fonte_raw.startswith("ftp"):
+                                        badge_origem = "📡 Fallback do servidor"
+
+                                        if dist_ref is not None:
+                                            detalhe_fonte = f"Ponto de referência encontrado a {dist_ref:.0f}m"
+                                        else:
+                                            detalhe_fonte = detalhe_y or "Referência encontrada no servidor"
+
                                         bg_box = "#22170d"
                                         border_box = "#7a4b1f"
                                         cor_y = "#ffcc66"
-                                        badge_origem = "🔄 Fallback do servidor"
-                                        detalhe_fonte = (
-                                            f"Ponto de referência encontrado a {dist_ref:.0f}m"
-                                            if dist_ref is not None else
-                                            "Referência encontrada no servidor"
-                                        )
-                                    else:
-                                        bg_box = "#1b1b1b"
-                                        border_box = "#444"
-                                        cor_y = "#cccccc"
-                                        badge_origem = "ℹ️ Fonte alternativa"
-                                        detalhe_fonte = detalhe_y or "Sem detalhes"
 
                                     st.markdown(
                                         f"""
@@ -2569,6 +2568,7 @@ def main():
                                     st.warning(
                                         "⚠️ Não foi possível calcular o Y. Verifique os dados do mapa ou o FTP configurado."
                                     )
+
                             except ValueError:
                                 st.error("❌ X e Z devem ser números. Ex: 4106.11")
 
@@ -2614,7 +2614,6 @@ def main():
                                     hora_br,
                                 )
                                 if ok:
-                                    # Limpa cache das coordenadas após compra confirmada
                                     mapa_loja = loja.get("mapa_padrao", "Chernarus")
                                     cache_key = (
                                         f"y_cache_{server_id}_{mapa_loja}_"
@@ -2647,7 +2646,8 @@ def main():
                 ):
                     pedidos_atuais = client_data_loja.get("pedidos", [])
                     pedidos_filtrados = [
-                        p for p in pedidos_atuais
+                        p
+                        for p in pedidos_atuais
                         if not (
                             p.get("gamertag") == gamertag_vinculada
                             and p.get("status") == "Entregue"
