@@ -1450,7 +1450,7 @@ if not st.session_state.get("authenticated"):
     dados_geo = buscar_localizacao_cliente()
     login_key = st.text_input("Insira sua KeyUser de administrador", type="password")
 
-with st.expander("🔑 Esqueci minha senha"):
+    with st.expander("🔑 Esqueci minha senha"):
         db_users_rec = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
         admin_email_rec = db_users_rec.get("admin_email", "")
 
@@ -1485,7 +1485,6 @@ with st.expander("🔑 Esqueci minha senha"):
                 db_users_rec2 = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
                 codigo_salvo = db_users_rec2.get("mfa_code", "")
                 expiry_str = db_users_rec2.get("mfa_expiry", "")
-                agora_str = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
 
                 try:
                     expiry_dt = datetime.strptime(expiry_str, "%d/%m/%Y %H:%M").replace(tzinfo=FUSO_BR)
@@ -1521,7 +1520,6 @@ with st.expander("🔑 Esqueci minha senha"):
             else:
                 local_final = "Localização não capturada"
 
-            # Opcional: registrar log de acesso do admin
             db_users = st.session_state.db_users
             db_users["admin_last_session"] = token_sessao
             db_users["admin_local"] = local_final
