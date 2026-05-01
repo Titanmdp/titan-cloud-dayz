@@ -6,7 +6,6 @@ import urllib.parse
 import io
 import re
 import html
-import textwrap
 from datetime import datetime, timezone, timedelta
 from ftplib import FTP
 from functools import lru_cache
@@ -2534,57 +2533,19 @@ def main():
                                         border_box = "#7a4b1f"
                                         cor_y = "#ffcc66"
 
-                                    html_y = f"""
-                                    <div style="
-                                        background:{bg_box};
-                                        border-radius:8px;
-                                        padding:10px 12px;
-                                        border:1px solid {border_box};
-                                        font-size:12px;
-                                        color:#b8c0cc;
-                                        margin-bottom:8px;
-                                    ">
-                                        <div style="
-                                            display:flex;
-                                            justify-content:space-between;
-                                            align-items:center;
-                                            margin-bottom:6px;
-                                            gap:8px;
-                                            flex-wrap:wrap;
-                                        ">
-                                            <span style="font-size:12px; color:#d7dde8;">🧭 Eixo Y calculado automaticamente</span>
-                                            <span style="
-                                                font-size:11px;
-                                                padding:3px 8px;
-                                                border-radius:999px;
-                                                background:rgba(255,255,255,0.08);
-                                                color:#ffffff;
-                                            ">
-                                                {html.escape(str(badge_origem))}
-                                            </span>
-                                        </div>
-
-                                        <div style="
-                                            font-size:20px;
-                                            font-weight:bold;
-                                            color:{cor_y};
-                                            margin-bottom:6px;
-                                        ">
-                                            {coord_y:.4f}
-                                        </div>
-
-                                        <div style="
-                                            font-size:12px;
-                                            color:#9fb0c3;
-                                            line-height:1.45;
-                                        ">
-                                            <b style="color:#ffffff;">Origem:</b> {html.escape(str(fonte_y or 'desconhecida'))}<br>
-                                            <b style="color:#ffffff;">Detalhe:</b> {html.escape(str(detalhe_fonte))}
-                                        </div>
-                                    </div>
-                                    """
-
-                                    st.markdown(textwrap.dedent(html_y).strip(), unsafe_allow_html=True)
+                                    html_y = (
+                                        f'<div style="background:{bg_box};border-radius:8px;padding:10px 12px;border:1px solid {border_box};font-size:12px;color:#b8c0cc;margin-bottom:8px;">'
+                                        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
+                                        f'<span style="font-size:12px;color:#d7dde8;">🧭 Eixo Y calculado automaticamente</span>'
+                                        f'<span style="font-size:11px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.08);color:#fff;">{html.escape(str(badge_origem))}</span>'
+                                        f'</div>'
+                                        f'<div style="font-size:20px;font-weight:bold;color:{cor_y};margin-bottom:6px;">{coord_y:.4f}</div>'
+                                        f'<div style="font-size:12px;color:#9fb0c3;">'
+                                        f'<b style="color:#fff;">Origem:</b> {html.escape(str(fonte_y or "desconhecida"))}<br>'
+                                        f'<b style="color:#fff;">Detalhe:</b> {html.escape(str(detalhe_fonte))}'
+                                        f'</div></div>'
+                                    )
+                                    st.markdown(html_y, unsafe_allow_html=True)
 
                                 else:
                                     st.warning("⚠️ Não foi possível calcular o Y. Verifique os dados do mapa ou o FTP configurado.")
