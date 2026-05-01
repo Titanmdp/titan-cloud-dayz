@@ -2904,27 +2904,20 @@ with tabcfggameplay:
                 value=float(stamina.get("staminaWeightLimitThreshold", 6000.0)),
             )
         with col_s2:
-            stamina_penalty = st.number_input(
-                "Penalidade kg → % (staminaKgToStaminaPercentPenalty)",
-                min_value=0.0,
-                max_value=10.0,
-                step=0.05,
-                value=float(stamina.get("staminaKgToStaminaPercentPenalty", 1.75)),
-            )
-            sprint_sta_mod_erc = st.number_input(
-                "Sprint em pé (sprintStaminaModifierErc)",
-                min_value=0.1,
-                max_value=5.0,
-                step=0.1,
-                value=float(stamina.get("sprintStaminaModifierErc", 1.0)),
-            )
-            sprint_sta_mod_cro = st.number_input(
-                "Sprint abaixado (sprintStaminaModifierCro)",
-                min_value=0.1,
-                max_value=5.0,
-                step=0.1,
-                value=float(stamina.get("sprintStaminaModifierCro", 1.0)),
-            )
+            stamina_penalty = st.number_input("Penalidade kg → % (staminaKgToStaminaPercentPenalty)", min_value=0.0, max_value=10.0, step=0.05, value=float(stamina.get("staminaKgToStaminaPercentPenalty", 1.75)))
+            sprint_sta_mod_erc = st.number_input("Sprint em pé (sprintStaminaModifierErc)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("sprintStaminaModifierErc", 1.0)))
+            sprint_sta_mod_cro = st.number_input("Sprint abaixado (sprintStaminaModifierCro)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("sprintStaminaModifierCro", 1.0)))
+
+        col_s3, col_s4 = st.columns(2)
+        with col_s3:
+            sprint_swim_mod = st.number_input("Sprint nadando (sprintSwimmingStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("sprintSwimmingStaminaModifier", 1.0)))
+            sprint_ladder_mod = st.number_input("Sprint em escada (sprintLadderStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("sprintLadderStaminaModifier", 1.0)))
+            melee_sta_mod = st.number_input("Stamina corpo a corpo (meleeStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("meleeStaminaModifier", 1.0)))
+        with col_s4:
+            obstacle_sta_mod = st.number_input("Stamina obstáculos (obstacleTraversalStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("obstacleTraversalStaminaModifier", 1.0)))
+            hold_breath_mod = st.number_input("Segurar respiração (holdBreathStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("holdBreathStaminaModifier", 1.0)))
+        
+        disable_personal_light = st.checkbox("Desativar luz pessoal (disablePersonalLight)", value=player.get("disablePersonalLight", False))
 
         # -------------------------------
         # Shock / Movimento
@@ -2955,32 +2948,70 @@ with tabcfggameplay:
 
         col_m1, col_m2 = st.columns(2)
         with col_m1:
-            time_to_sprint = st.number_input(
-                "Tempo para sprint (timeToSprint)",
-                min_value=0.0,
-                max_value=5.0,
-                step=0.05,
-                value=float(movement.get("timeToSprint", 0.45)),
-            )
-            rot_speed_jog = st.number_input(
-                "Rotação correndo (rotationSpeedJog)",
-                min_value=0.0,
-                max_value=2.0,
-                step=0.05,
-                value=float(movement.get("rotationSpeedJog", 0.3)),
-            )
+            time_to_sprint = st.number_input("Tempo para sprint (timeToSprint)", min_value=0.0, max_value=5.0, step=0.05, value=float(movement.get("timeToSprint", 0.45)))
+            time_to_strafe_jog = st.number_input("Tempo para strafe correndo (timeToStrafeJog)", min_value=0.0, max_value=5.0, step=0.05, value=float(movement.get("timeToStrafeJog", 0.1)))
+            time_to_strafe_sprint = st.number_input("Tempo para strafe sprint (timeToStrafeSprint)", min_value=0.0, max_value=5.0, step=0.05, value=float(movement.get("timeToStrafeSprint", 0.3)))
         with col_m2:
-            rot_speed_sprint = st.number_input(
-                "Rotação sprint (rotationSpeedSprint)",
-                min_value=0.0,
-                max_value=2.0,
-                step=0.05,
-                value=float(movement.get("rotationSpeedSprint", 0.15)),
-            )
-            allow_sta_inertia = st.checkbox(
-                "Stamina afeta inércia (allowStaminaAffectInertia)",
-                value=movement.get("allowStaminaAffectInertia", True),
-            )
+            rot_speed_jog = st.number_input("Rotação correndo (rotationSpeedJog)", min_value=0.0, max_value=2.0, step=0.05, value=float(movement.get("rotationSpeedJog", 0.3)))
+            rot_speed_sprint = st.number_input("Rotação sprint (rotationSpeedSprint)", min_value=0.0, max_value=2.0, step=0.05, value=float(movement.get("rotationSpeedSprint", 0.15)))
+            allow_sta_inertia = st.checkbox("Stamina afeta inércia (allowStaminaAffectInertia)", value=movement.get("allowStaminaAffectInertia", True))
+
+        # -------------------------------
+        # Drowning
+        # -------------------------------
+        st.markdown("### 🌊 Afogamento")
+        drowning = player.get("DrowningData", {})
+        col_d1, col_d2, col_d3 = st.columns(3)
+        with col_d1:
+            drown_stamina = st.number_input("Depleção stamina (staminaDepletionSpeed)", min_value=0.0, max_value=100.0, step=1.0, value=float(drowning.get("staminaDepletionSpeed", 10.0)))
+        with col_d2:
+            drown_health = st.number_input("Depleção vida (healthDepletionSpeed)", min_value=0.0, max_value=100.0, step=1.0, value=float(drowning.get("healthDepletionSpeed", 10.0)))
+        with col_d3:
+            drown_shock = st.number_input("Depleção choque (shockDepletionSpeed)", min_value=0.0, max_value=100.0, step=1.0, value=float(drowning.get("shockDepletionSpeed", 10.0)))
+
+        # -------------------------------
+        # Weapon Obstruction
+        # -------------------------------
+        st.markdown("### 🔫 Obstrução de Armas")
+        weapon_obs = player.get("WeaponObstructionData", {})
+        col_w1, col_w2 = st.columns(2)
+        with col_w1:
+            weapon_static_mode = st.selectbox("Modo estático (staticMode)", options=[0, 1], index=int(weapon_obs.get("staticMode", 1)), help="0 = desativado, 1 = ativado")
+        with col_w2:
+            weapon_dynamic_mode = st.selectbox("Modo dinâmico (dynamicMode)", options=[0, 1], index=int(weapon_obs.get("dynamicMode", 1)), help="0 = desativado, 1 = ativado")
+
+        # -------------------------------
+        # Base Building
+        # -------------------------------
+        st.markdown("### 🏗️ Construção de Bases")
+        base = cfg.get("BaseBuildingData", {})
+        hologram = base.get("HologramData", {})
+        construction = base.get("ConstructionData", {})
+
+        st.markdown("**Hologram (verificações ao posicionar)**")
+        col_h1, col_h2 = st.columns(2)
+        with col_h1:
+            dis_bbox = st.checkbox("Desativar colisão BBox (disableIsCollidingBBoxCheck)", value=hologram.get("disableIsCollidingBBoxCheck", False))
+            dis_player = st.checkbox("Desativar colisão jogador (disableIsCollidingPlayerCheck)", value=hologram.get("disableIsCollidingPlayerCheck", False))
+            dis_roof = st.checkbox("Desativar verificação teto (disableIsClippingRoofCheck)", value=hologram.get("disableIsClippingRoofCheck", False))
+            dis_base_viable = st.checkbox("Desativar base viável (disableIsBaseViableCheck)", value=hologram.get("disableIsBaseViableCheck", False))
+            dis_gplot = st.checkbox("Desativar colisão GPlot (disableIsCollidingGPlotCheck)", value=hologram.get("disableIsCollidingGPlotCheck", False))
+            dis_angle = st.checkbox("Desativar verificação ângulo (disableIsCollidingAngleCheck)", value=hologram.get("disableIsCollidingAngleCheck", False))
+        with col_h2:
+            dis_placement = st.checkbox("Desativar permissão de colocação (disableIsPlacementPermittedCheck)", value=hologram.get("disableIsPlacementPermittedCheck", False))
+            dis_height = st.checkbox("Desativar verificação altura (disableHeightPlacementCheck)", value=hologram.get("disableHeightPlacementCheck", False))
+            dis_underwater = st.checkbox("Desativar verificação subaquática (disableIsUnderwaterCheck)", value=hologram.get("disableIsUnderwaterCheck", False))
+            dis_terrain = st.checkbox("Desativar verificação terreno (disableIsInTerrainCheck)", value=hologram.get("disableIsInTerrainCheck", False))
+            dis_cold = st.checkbox("Desativar verificação área fria (disableColdAreaBuildingCheck)", value=hologram.get("disableColdAreaBuildingCheck", False))
+
+        st.markdown("**Construção**")
+        col_c1, col_c2, col_c3 = st.columns(3)
+        with col_c1:
+            dis_roof_check = st.checkbox("Desativar check teto (disablePerformRoofCheck)", value=construction.get("disablePerformRoofCheck", False))
+        with col_c2:
+            dis_colliding_check = st.checkbox("Desativar check colisão (disableIsCollidingCheck)", value=construction.get("disableIsCollidingCheck", False))
+        with col_c3:
+            dis_distance_check = st.checkbox("Desativar check distância (disableDistanceCheck)", value=construction.get("disableDistanceCheck", False))
 
         # -------------------------------
         # Mundo / Clima
@@ -3015,10 +3046,23 @@ with tabcfggameplay:
                 value=map_data.get("displayNavInfo", True),
             )
         with col_map2:
-            use_3d_map = st.checkbox(
-                "Usar mapa 3D (use3DMap)",
-                value=ui_data.get("use3DMap", False),
-            )
+            use_3d_map = st.checkbox("Usar mapa 3D (use3DMap)", value=ui_data.get("use3DMap", False))
+            ignore_map_ownership = st.checkbox("Ignorar posse do mapa (ignoreMapOwnership)", value=map_data.get("ignoreMapOwnership", False))
+            ignore_nav_ownership = st.checkbox("Ignorar posse de nav items (ignoreNavItemsOwnership)", value=map_data.get("ignoreNavItemsOwnership", False))
+
+        st.markdown("**Indicação de Hit**")
+        hit = ui_data.get("HitIndicationData", {})
+        col_hi1, col_hi2 = st.columns(2)
+        with col_hi1:
+            hit_dir_override = st.checkbox("Override direção hit (hitDirectionOverrideEnabled)", value=hit.get("hitDirectionOverrideEnabled", False))
+            hit_dir_behaviour = st.selectbox("Comportamento direção hit (hitDirectionBehaviour)", options=[0, 1, 2], index=min(int(hit.get("hitDirectionBehaviour", 1)), 2))
+            hit_dir_style = st.selectbox("Estilo indicador hit (hitDirectionStyle)", options=[0, 1, 2], index=min(int(hit.get("hitDirectionStyle", 0)), 2))
+            hit_post_process = st.checkbox("Post process indicação hit (hitIndicationPostProcessEnabled)", value=hit.get("hitIndicationPostProcessEnabled", True))
+        with col_hi2:
+            hit_max_duration = st.number_input("Duração máx. indicador (hitDirectionMaxDuration, seg.)", min_value=0.1, max_value=10.0, step=0.1, value=float(hit.get("hitDirectionMaxDuration", 2.0)))
+            hit_breakpoint = st.number_input("Breakpoint relativo (hitDirectionBreakPointRelative)", min_value=0.0, max_value=1.0, step=0.05, value=float(hit.get("hitDirectionBreakPointRelative", 0.2)))
+            hit_scatter = st.number_input("Dispersão indicador (hitDirectionScatter)", min_value=0.0, max_value=90.0, step=1.0, value=float(hit.get("hitDirectionScatter", 10.0)))
+            hit_color = st.text_input("Cor indicador hex (hitDirectionIndicatorColorStr)", value=hit.get("hitDirectionIndicatorColorStr", "0xffbb0a1e"))
 
         # -------------------------------
         # Veículos
@@ -3053,40 +3097,99 @@ with tabcfggameplay:
                 }
 
                 # Stamina
-                stamina.update(
-                    {
-                        "staminaMax": stamina_max,
-                        "staminaMinCap": stamina_min_cap,
-                        "staminaWeightLimitThreshold": stamina_weight_threshold,
-                        "staminaKgToStaminaPercentPenalty": stamina_penalty,
-                        "sprintStaminaModifierErc": sprint_sta_mod_erc,
-                        "sprintStaminaModifierCro": sprint_sta_mod_cro,
-                    }
-                )
+                stamina.update({
+                    "staminaMax": stamina_max,
+                    "staminaMinCap": stamina_min_cap,
+                    "staminaWeightLimitThreshold": stamina_weight_threshold,
+                    "staminaKgToStaminaPercentPenalty": stamina_penalty,
+                    "sprintStaminaModifierErc": sprint_sta_mod_erc,
+                    "sprintStaminaModifierCro": sprint_sta_mod_cro,
+                    "sprintSwimmingStaminaModifier": sprint_swim_mod,
+                    "sprintLadderStaminaModifier": sprint_ladder_mod,
+                    "meleeStaminaModifier": melee_sta_mod,
+                    "obstacleTraversalStaminaModifier": obstacle_sta_mod,
+                    "holdBreathStaminaModifier": hold_breath_mod,
+                })
                 player["StaminaData"] = stamina
 
                 # Shock
-                shock.update(
-                    {
-                        "shockRefillSpeedConscious": shock_refill_con,
-                        "shockRefillSpeedUnconscious": shock_refill_uncon,
-                        "allowRefillSpeedModifier": allow_refill_mod,
-                    }
-                )
+                shock.update({
+                    "shockRefillSpeedConscious": shock_refill_con,
+                    "shockRefillSpeedUnconscious": shock_refill_uncon,
+                    "allowRefillSpeedModifier": allow_refill_mod,
+                })
                 player["ShockHandlingData"] = shock
 
                 # Movement
-                movement.update(
-                    {
-                        "timeToSprint": time_to_sprint,
-                        "rotationSpeedJog": rot_speed_jog,
-                        "rotationSpeedSprint": rot_speed_sprint,
-                        "allowStaminaAffectInertia": allow_sta_inertia,
-                    }
-                )
+                movement.update({
+                    "timeToSprint": time_to_sprint,
+                    "timeToStrafeJog": time_to_strafe_jog,
+                    "timeToStrafeSprint": time_to_strafe_sprint,
+                    "rotationSpeedJog": rot_speed_jog,
+                    "rotationSpeedSprint": rot_speed_sprint,
+                    "allowStaminaAffectInertia": allow_sta_inertia,
+                })
                 player["MovementData"] = movement
 
+                # Drowning
+                player["DrowningData"] = {
+                    "staminaDepletionSpeed": drown_stamina,
+                    "healthDepletionSpeed": drown_health,
+                    "shockDepletionSpeed": drown_shock,
+                }
+
+                # Weapon Obstruction
+                player["WeaponObstructionData"] = {
+                    "staticMode": weapon_static_mode,
+                    "dynamicMode": weapon_dynamic_mode,
+                }
+
+                player["disablePersonalLight"] = disable_personal_light
                 cfg["PlayerData"] = player
+
+                # Base Building
+                cfg["BaseBuildingData"] = {
+                    "HologramData": {
+                        "disableIsCollidingBBoxCheck": dis_bbox,
+                        "disableIsCollidingPlayerCheck": dis_player,
+                        "disableIsClippingRoofCheck": dis_roof,
+                        "disableIsBaseViableCheck": dis_base_viable,
+                        "disableIsCollidingGPlotCheck": dis_gplot,
+                        "disableIsCollidingAngleCheck": dis_angle,
+                        "disableIsPlacementPermittedCheck": dis_placement,
+                        "disableHeightPlacementCheck": dis_height,
+                        "disableIsUnderwaterCheck": dis_underwater,
+                        "disableIsInTerrainCheck": dis_terrain,
+                        "disableColdAreaBuildingCheck": dis_cold,
+                        "disallowedTypesInUnderground": hologram.get("disallowedTypesInUnderground", ["FenceKit","TerritoryFlagKit","WatchtowerKit"]),
+                    },
+                    "ConstructionData": {
+                        "disablePerformRoofCheck": dis_roof_check,
+                        "disableIsCollidingCheck": dis_colliding_check,
+                        "disableDistanceCheck": dis_distance_check,
+                    }
+                }
+
+                # Mapa
+                map_data["displayPlayerPosition"] = display_player_pos
+                map_data["displayNavInfo"] = display_nav_info
+                map_data["ignoreMapOwnership"] = ignore_map_ownership
+                map_data["ignoreNavItemsOwnership"] = ignore_nav_ownership
+                cfg["MapData"] = map_data
+
+                # UI + HitIndication
+                ui_data["use3DMap"] = use_3d_map
+                ui_data["HitIndicationData"] = {
+                    "hitDirectionOverrideEnabled": hit_dir_override,
+                    "hitDirectionBehaviour": hit_dir_behaviour,
+                    "hitDirectionStyle": hit_dir_style,
+                    "hitDirectionIndicatorColorStr": hit_color,
+                    "hitDirectionMaxDuration": hit_max_duration,
+                    "hitDirectionBreakPointRelative": hit_breakpoint,
+                    "hitDirectionScatter": hit_scatter,
+                    "hitIndicationPostProcessEnabled": hit_post_process,
+                }
+                cfg["UIData"] = ui_data
 
                 # Mundo
                 worlds["lightingConfig"] = lighting_config
