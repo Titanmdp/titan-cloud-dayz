@@ -2540,10 +2540,10 @@ def main():
                                     st.markdown(
                                         f"""
                                         <div style="
-                                            background:{bgbox};
+                                            background:{bg_box};
                                             border-radius:8px;
                                             padding:10px 12px;
-                                            border:1px solid {borderbox};
+                                            border:1px solid {border_box};
                                             font-size:12px;
                                             color:#b8c0cc;
                                             margin-bottom:8px;
@@ -2551,17 +2551,17 @@ def main():
                                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                                                 <span style="font-size:12px; color:#d7dde8;">🧭 Eixo Y calculado automaticamente</span>
                                                 <span style="font-size:11px; padding:3px 8px; border-radius:999px; background:rgba(255,255,255,0.08); color:#fff;">
-                                                    {badgeorigem}
+                                                    {badge_origem}
                                                 </span>
                                             </div>
 
-                                            <div style="font-size:20px; font-weight:bold; color:{cory}; margin-bottom:6px;">
-                                                {coordy:.4f}
+                                            <div style="font-size:20px; font-weight:bold; color:{cor_y}; margin-bottom:6px;">
+                                                {coord_y:.4f}
                                             </div>
 
                                             <div style="font-size:12px; color:#9fb0c3; line-height:1.45;">
-                                                <b style="color:#ffffff;">Origem:</b> {fontey or 'desconhecida'}<br>
-                                                <b style="color:#ffffff;">Detalhe:</b> {detalhefonte}
+                                                <b style="color:#ffffff;">Origem:</b> {fonte_y or 'desconhecida'}<br>
+                                                <b style="color:#ffffff;">Detalhe:</b> {detalhe_fonte}
                                             </div>
                                         </div>
                                         """,
