@@ -66,18 +66,18 @@ CHERNARUS_HEIGHTMAP_METADATA_JSON = MAP_DATA_DIR / "chernarus_heightmap_metadata
 CHERNARUS_HEIGHTMAP_ASC = MAP_DATA_DIR / "terrain_heightmap.asc"
 CHERNARUS_HEIGHTMAP_NPY = MAP_DATA_DIR / "chernarus_heightmap.npy"
 
-LIVONIA_ELEVATION_PY = MAPDATADIR / "livonia_elevation.py"
-LIVONIA_ZONE_LOOKUP_JSON = MAPDATADIR / "livonia_zone_lookup.json"
-LIVONIA_KNOWN_POINTS_JSON = MAPDATADIR / "livonia_known_points.json"
-LIVONIA_HEIGHTMAP_METADATA_JSON = MAPDATADIR / "livonia_heightmap_metadata.json"
-LIVONIA_HEIGHTMAP_ASC = MAPDATADIR / "enoch_heightmap.asc"
-LIVONIA_HEIGHTMAP_NPY = MAPDATADIR / "livonia_heightmap.npy"
+LIVONIA_ELEVATION_PY = MAP_DATA_DIR / "livonia_elevation.py"
+LIVONIA_ZONE_LOOKUP_JSON = MAP_DATA_DIR / "livonia_zone_lookup.json"
+LIVONIA_KNOWN_POINTS_JSON = MAP_DATA_DIR / "livonia_known_points.json"
+LIVONIA_HEIGHTMAP_METADATA_JSON = MAP_DATA_DIR / "livonia_heightmap_metadata.json"
+LIVONIA_HEIGHTMAP_ASC = MAP_DATA_DIR / "enoch_heightmap.asc"
+LIVONIA_HEIGHTMAP_NPY = MAP_DATA_DIR / "livonia_heightmap.npy"
 
 # Import seguro do módulo de elevação do Chernarus
 try:
     import sys
-    if str(MAPDATADIR) not in sys.path:
-        sys.path.append(str(MAPDATADIR))
+    if str(MAP_DATA_DIR) not in sys.path:
+        sys.path.append(str(MAP_DATA_DIR))
     from chernarus_elevation import ChernarusHeightmap
 except Exception as e:
     ChernarusHeightmap = None
@@ -85,8 +85,8 @@ except Exception as e:
 
 try:
     import sys
-    if str(MAPDATADIR) not in sys.path:
-        sys.path.append(str(MAPDATADIR))
+    if str(MAP_DATA_DIR) not in sys.path:
+        sys.path.append(str(MAP_DATA_DIR))
     from livonia_elevation import LivoniaHeightmap
 except Exception as e:
     LivoniaHeightmap = None
