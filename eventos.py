@@ -4174,6 +4174,14 @@ with tab7:
     with col_p2:
         if st.button("Salvar Jogadores no Titan Cloud", use_container_width=True):
             players_atualizados = df_to_players(edited_df_players)
+            gamertags_ativas = set(players_atualizados.keys())
+
+            # Remove wallets e bank de jogadores que foram excluídos
+            for secao in ("wallets", "bank"):
+                if secao in client_data:
+                    removidos = [g for g in client_data[secao] if g not in gamertags_ativas]
+                    for g in removidos:
+                        del client_data[secao][g]
 
             # Atualiza o client_data e o dicionário carregado do arquivo
             client_data["players"] = players_atualizados
