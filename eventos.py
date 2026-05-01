@@ -62,13 +62,13 @@ PLANOS = {
 
 # Caminhos padrão do types.xml por mapa no servidor DayZ
 TYPES_REMOTE_PATHS = {
-    "Chernarus": "mpmissions/dayzOffline.chernarusplus/db",
-    "Livonia": "mpmissions/dayzOffline.enoch/db",
+    "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
+    "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
 }
 
 GLOBALS_REMOTE_PATHS = {
-    "Chernarus": "mpmissions/dayzOffline.chernarusplus/db",
-    "Livonia": "mpmissions/dayzOffline.enoch/db",
+    "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
+    "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
 }
 
 EVENTS_REMOTE_PATHS = {
@@ -87,8 +87,8 @@ CFGEVENTSPAWNS_REMOTE_PATHS = {
 }
 
 CFGGAMEPLAY_REMOTE_PATHS = {
-    "Chernarus": "mpmissions/dayzOffline.chernarusplus",
-    "Livonia": "mpmissions/dayzOffline.enoch",
+    "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus",
+    "Livonia": "dayzxb_missions/dayzOffline.enoch",
 }
 
 # --- BANCO DE DADOS (JSON) / UPLOADS ---
@@ -1120,7 +1120,7 @@ def get_server_status_nitrado(client_id: str, nitrado_id: str) -> str:
 def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus") -> bool:
     """
     Envia um arquivo JSON com os pedidos para o servidor via FTP.
-    Arquivo é enviado para: mpmissions/dayzOffline.{mapa}/custom/loja_pedidos.json
+    Arquivo é enviado para: dayzxb_missions/dayzOffline.{mapa}/custom/loja_pedidos.json
     """
     try:
         db_atual = load_db(DB_CLIENTS, {})
@@ -1134,9 +1134,9 @@ def enviar_pedidos_via_ftp(client_id: str, pedidos: list, mapa: str = "Chernarus
         # Define caminho remoto de acordo com o mapa
         mapa_lower = mapa.lower()
         if "enoch" in mapa_lower or "livonia" in mapa_lower:
-            remote_base = "mpmissions/dayzOffline.enoch"
+            remote_base = "dayzxb_missions/dayzOffline.enoch"
         else:
-            remote_base = "mpmissions/dayzOffline.chernarusplus"
+            remote_base = "dayzxb_missions/dayzOffline.chernarusplus"
         
         remote_dir = f"{remote_base}/custom"
         
