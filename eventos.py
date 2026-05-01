@@ -4595,21 +4595,64 @@ with tab8:
                 client_data["bank"] = bank
                 clients_data[server_id] = client_data
 
-    # 6) Histórico consolidado
+        # 6) Histórico consolidado
     st.markdown("### 📜 Histórico de movimentações")
+
+    col_hist_1, col_hist_2 = st.columns([3, 1])
+
+    with col_hist_2:
+        if st.button("🧹 Limpar Histórico", key=f"limpar_historico_console_{gamertag_sel}", use_container_width=True):
+            wallet_reg["historico"] = []
+            bank_reg["historico"] = []
+
+            wallets[gamertag_sel] = wallet_reg
+            bank[gamertag_sel] = bank_reg
+            client_data["wallets"] = wallets
+            client_data["bank"] = bank
+            clients_data[server_id] = client_data
+            save_db(DB_CLIENTS, clients_data)
+
+            st.success("✅ Histórico visual limpo com sucesso.")
+            st.rerun()
 
     historico_comb = []
 
     for linha in wallet_reg.get("historico", []):
-        historico_comb.append(f"[CARTEIRA] {linha}")
-    for linha in bank_reg.get("historico", []):
-        historico_comb.append(f"[BANCO] {linha}")
+        historico_comb.append(("CARTEIRA", linha))
 
-    if historico_comb:
-        for linha in reversed(historico_comb[-50:]):
-            st.write(linha)
+    for linha in bank_reg.get("historico", []):
+        historico_comb.append(("BANCO", linha))
+
+    st.caption("As movimentações mais recentes ficam visíveis neste console com rolagem.")
+
+    if not historico_comb:
+        historico_txt = "Nenhuma movimentação registrada ainda."
     else:
-        st.info("Ainda não há movimentações registradas para este jogador.")
+        linhas_console = []
+        for origem, linha in reversed(historico_comb[-200:]):
+            icone = "💰" if origem == "CARTEIRA" else "🏦"
+            linhas_console.append(f"{icone} [{origem}] {linha}")
+        historico_txt = "\n".join(linhas_console)
+
+    st.markdown(
+        f"""
+        <div style="
+            background:#0f1117;
+            border:1px solid #2b3240;
+            border-radius:8px;
+            padding:12px;
+            height:320px;
+            overflow-y:auto;
+            font-family:Consolas, 'Courier New', monospace;
+            font-size:12px;
+            color:#d6e2f0;
+            white-space:pre-wrap;
+            line-height:1.5;
+            margin-bottom:12px;
+        ">{historico_txt}</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
 if "worker_started" not in st.session_state:
