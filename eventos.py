@@ -2593,7 +2593,6 @@ with tab5:
 
         st.markdown("### 🧩 Parâmetros principais")
 
-        # Pega valores atuais com fallback
         def get_val(name, default):
             info = g_vars.get(name, None)
             if info is None:
@@ -2601,71 +2600,73 @@ with tab5:
             return info.get("value", default)
 
         col1, col2 = st.columns(2)
-
         with col1:
-            animal_max = st.slider(
-                "AnimalMaxCount (máx. animais no mapa)",
-                min_value=0,
-                max_value=1000,
-                value=int(get_val("AnimalMaxCount", 200)),
-                step=10,
-            )
-            zombie_max = st.slider(
-                "ZombieMaxCount (máx. zumbis no mapa)",
-                min_value=0,
-                max_value=5000,
-                value=int(get_val("ZombieMaxCount", 1000)),
-                step=50,
-            )
-            cleanup_dead = st.slider(
-                "CleanupLifetimeDeadPlayer (limpeza corpo jogador, em seg.)",
-                min_value=300,
-                max_value=6 * 3600,
-                value=int(get_val("CleanupLifetimeDeadPlayer", 3600)),
-                step=300,
-            )
-
+            animal_max = st.slider("AnimalMaxCount (máx. animais no mapa)", 0, 1000, int(get_val("AnimalMaxCount", 200)), 10)
+            zombie_max = st.slider("ZombieMaxCount (máx. zumbis no mapa)", 0, 5000, int(get_val("ZombieMaxCount", 1000)), 50)
+            cleanup_dead = st.slider("CleanupLifetimeDeadPlayer (limpeza corpo jogador, seg.)", 300, 21600, int(get_val("CleanupLifetimeDeadPlayer", 3600)), 300)
         with col2:
-            idle_mode = st.slider(
-                "IdleModeCountdown (segundos até modo idle em servidor vazio)",
-                min_value=0,
-                max_value=24 * 3600,
-                value=int(get_val("IdleModeCountdown", 60)),
-                step=60,
-            )
-            time_login = st.slider(
-                "TimeLogin (tempo de login, seg.)",
-                min_value=5,
-                max_value=120,
-                value=int(get_val("TimeLogin", 15)),
-                step=1,
-            )
-            time_logout = st.slider(
-                "TimeLogout (tempo de logout, seg.)",
-                min_value=5,
-                max_value=120,
-                value=int(get_val("TimeLogout", 15)),
-                step=1,
-            )
+            idle_mode = st.slider("IdleModeCountdown (seg. até idle em servidor vazio)", 0, 86400, int(get_val("IdleModeCountdown", 60)), 60)
+            time_login = st.slider("TimeLogin (tempo de login, seg.)", 5, 120, int(get_val("TimeLogin", 15)), 1)
+            time_logout = st.slider("TimeLogout (tempo de logout, seg.)", 5, 120, int(get_val("TimeLogout", 15)), 1)
+
+        st.markdown("### 🧹 Limpeza e ambiente")
+        col3, col4 = st.columns(2)
+        with col3:
+            cleanup_animal = st.slider("CleanupLifetimeDeadAnimal (corpo animal, seg.)", 60, 7200, int(get_val("CleanupLifetimeDeadAnimal", 1200)), 60)
+            cleanup_infected = st.slider("CleanupLifetimeDeadInfected (corpo zumbi, seg.)", 60, 3600, int(get_val("CleanupLifetimeDeadInfected", 330)), 30)
+            cleanup_default = st.slider("CleanupLifetimeDefault (limpeza padrão, seg.)", 10, 300, int(get_val("CleanupLifetimeDefault", 45)), 5)
+            cleanup_ruined = st.slider("CleanupLifetimeRuined (item destruído, seg.)", 60, 3600, int(get_val("CleanupLifetimeRuined", 330)), 30)
+        with col4:
+            cleanup_avoidance = st.slider("CleanupAvoidance (distância evitar limpeza, m)", 0, 500, int(get_val("CleanupAvoidance", 100)), 10)
+            cleanup_limit = st.slider("CleanupLifetimeLimit (limite limpeza)", 10, 200, int(get_val("CleanupLifetimeLimit", 50)), 5)
+            food_decay = st.slider("FoodDecay (deterioração de comida: 0=off, 1=on)", 0, 1, int(get_val("FoodDecay", 1)), 1)
+            world_wet = st.slider("WorldWetTempUpdate (atualização temperatura/molhado: 0=off, 1=on)", 0, 1, int(get_val("WorldWetTempUpdate", 1)), 1)
+
+        st.markdown("### 🎯 Spawn e loot")
+        col5, col6 = st.columns(2)
+        with col5:
+            initial_spawn = st.slider("InitialSpawn (% spawn inicial de loot)", 0, 100, int(get_val("InitialSpawn", 100)), 5)
+            spawn_initial = st.slider("SpawnInitial (tempo inicial spawn CE, seg.)", 0, 3600, int(get_val("SpawnInitial", 1200)), 60)
+            respawn_attempt = st.slider("RespawnAttempt (tentativas de respawn CE)", 1, 20, int(get_val("RespawnAttempt", 2)), 1)
+            respawn_limit = st.slider("RespawnLimit (limite de respawn CE)", 1, 100, int(get_val("RespawnLimit", 20)), 1)
+            respawn_types = st.slider("RespawnTypes (tipos de respawn CE)", 1, 50, int(get_val("RespawnTypes", 12)), 1)
+        with col6:
+            restart_spawn = st.slider("RestartSpawn (respawn no restart: 0=off, 1=on)", 0, 1, int(get_val("RestartSpawn", 0)), 1)
+            loot_proxy = st.slider("LootProxyPlacement (loot em proxies: 0=off, 1=on)", 0, 1, int(get_val("LootProxyPlacement", 1)), 1)
+            loot_spawn_avoidance = st.slider("LootSpawnAvoidance (distância evitar loot, m)", 0, 500, int(get_val("LootSpawnAvoidance", 100)), 10)
+            loot_dmg_min = st.slider("LootDamageMin (dano mín. loot ao spawnar)", 0.0, 1.0, float(get_val("LootDamageMin", 0.0)), 0.01)
+            loot_dmg_max = st.slider("LootDamageMax (dano máx. loot ao spawnar)", 0.0, 1.0, float(get_val("LootDamageMax", 0.82)), 0.01)
+
+        st.markdown("### ⏱️ Tempo e penalidades")
+        col7, col8 = st.columns(2)
+        with col7:
+            time_hopping = st.slider("TimeHopping (penalidade server hop, seg.)", 0, 600, int(get_val("TimeHopping", 60)), 10)
+            time_penalty = st.slider("TimePenalty (tempo de penalidade geral, seg.)", 0, 300, int(get_val("TimePenalty", 20)), 5)
+            zone_spawn_dist = st.slider("ZoneSpawnDist (distância zona de spawn, m)", 0, 1000, int(get_val("ZoneSpawnDist", 300)), 10)
+        with col8:
+            flag_refresh_freq = st.slider("FlagRefreshFrequency (frequência refresh bandeira, seg.)", 3600, 864000, int(get_val("FlagRefreshFrequency", 432000)), 3600)
+            flag_refresh_max = st.slider("FlagRefreshMaxDuration (duração máx. bandeira, seg.)", 3600, 8640000, int(get_val("FlagRefreshMaxDuration", 3456000)), 3600)
+            idle_startup = st.slider("IdleModeStartup (iniciar em idle: 0=off, 1=on)", 0, 1, int(get_val("IdleModeStartup", 1)), 1)
 
         st.markdown("### 📝 Resumo do ambiente")
 
-        dia_aprox_horas = 24  # informativo
         idle_min = idle_mode // 60
-        cleanup_min = cleanup_dead // 60
+        cleanup_player_min = cleanup_dead // 60
+        cleanup_animal_min = cleanup_animal // 60
+        cleanup_infected_min = cleanup_infected // 60
+        cleanup_ruined_min = cleanup_ruined // 60
+        flag_refresh_dias = round(flag_refresh_freq / 86400, 1)
+        flag_refresh_max_dias = round(flag_refresh_max / 86400, 1)
 
-        st.write(
-            f"- Máx. **{zombie_max}** zumbis e **{animal_max}** animais configurados no mapa."
-        )  # [web:91]
-        st.write(
-            f"- Corpos de jogadores ficam por ~**{cleanup_min} minutos** antes de serem limpos."
-        )  # [web:91]
-        st.write(
-            f"- Servidor entra em modo idle após **{idle_min} minutos** sem jogadores (IdleModeCountdown)."
-        )  # [web:90][web:103]
-        st.write(
-            f"- Tempo de login: **{time_login} s**, tempo de logout: **{time_logout} s**."
-        )  # [web:97]
+        st.write(f"- Máx. **{zombie_max}** zumbis e **{animal_max}** animais no mapa.")
+        st.write(f"- Corpos de jogadores somem em ~**{cleanup_player_min} min** | animais em ~**{cleanup_animal_min} min** | zumbis em ~**{cleanup_infected_min} min** | itens destruídos em ~**{cleanup_ruined_min} min**.")
+        st.write(f"- Servidor entra em idle após **{idle_min} min** sem jogadores. Iniciar em idle: **{'Sim' if idle_startup else 'Não'}**.")
+        st.write(f"- Tempo de login: **{time_login} s** | logout: **{time_logout} s** | penalidade: **{time_penalty} s** | server hop: **{time_hopping} s**.")
+        st.write(f"- Loot spawna com dano entre **{loot_dmg_min:.2f}** e **{loot_dmg_max:.2f}** | Loot em proxies: **{'Sim' if loot_proxy else 'Não'}** | Avoidance: **{loot_spawn_avoidance} m**.")
+        st.write(f"- Spawn inicial de loot: **{initial_spawn}%** | Tempo CE inicial: **{spawn_initial} s** | Respawn: **{respawn_attempt}** tentativas, limite **{respawn_limit}**, tipos **{respawn_types}**.")
+        st.write(f"- Deterioração de comida: **{'Ativada' if food_decay else 'Desativada'}** | Temperatura/molhado: **{'Ativado' if world_wet else 'Desativado'}**.")
+        st.write(f"- Bandeira de território: refresh a cada **{flag_refresh_dias} dias**, duração máx. **{flag_refresh_max_dias} dias**.")
+        st.write(f"- Zona de spawn: **{zone_spawn_dist} m** | Avoidance de limpeza: **{cleanup_avoidance} m** | Limite de limpeza: **{cleanup_limit}**.")
 
         st.markdown("### 💾 Salvar alterações no globals.xml")
 
@@ -2683,6 +2684,30 @@ with tab5:
             set_val("IdleModeCountdown", idle_mode)
             set_val("TimeLogin", time_login)
             set_val("TimeLogout", time_logout)
+            set_val("CleanupLifetimeDeadAnimal", cleanup_animal)
+            set_val("CleanupLifetimeDeadInfected", cleanup_infected)
+            set_val("CleanupLifetimeDefault", cleanup_default)
+            set_val("CleanupLifetimeRuined", cleanup_ruined)
+            set_val("CleanupAvoidance", cleanup_avoidance)
+            set_val("CleanupLifetimeLimit", cleanup_limit)
+            set_val("FoodDecay", food_decay)
+            set_val("WorldWetTempUpdate", world_wet)
+            set_val("InitialSpawn", initial_spawn)
+            set_val("SpawnInitial", spawn_initial)
+            set_val("RespawnAttempt", respawn_attempt)
+            set_val("RespawnLimit", respawn_limit)
+            set_val("RespawnTypes", respawn_types)
+            set_val("RestartSpawn", restart_spawn)
+            set_val("LootProxyPlacement", loot_proxy)
+            set_val("LootSpawnAvoidance", loot_spawn_avoidance)
+            set_val("LootDamageMin", loot_dmg_min)
+            set_val("LootDamageMax", loot_dmg_max)
+            set_val("TimeHopping", time_hopping)
+            set_val("TimePenalty", time_penalty)
+            set_val("ZoneSpawnDist", zone_spawn_dist)
+            set_val("FlagRefreshFrequency", flag_refresh_freq)
+            set_val("FlagRefreshMaxDuration", flag_refresh_max)
+            set_val("IdleModeStartup", idle_startup)
 
             st.session_state[key_gvars] = g_vars
             st.success("Alterações aplicadas internamente ao globals.xml (sessão).")
