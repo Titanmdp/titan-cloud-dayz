@@ -60,6 +60,64 @@ PLANOS = {
     "Enterprise": 999,
 }
 
+def plano_permite(plano_atual: str, funcionalidade: str) -> bool:
+    """
+    Retorna True se o plano do cliente permite acessar a funcionalidade.
+    """
+    PERMISSOES = {
+        # Livre para todos
+        "banco_carteira":        ["Starter", "Pro", "Enterprise"],
+        "loja":                  ["Starter", "Pro", "Enterprise"],
+        "worker_dzcoins_auto":   ["Starter", "Pro", "Enterprise"],
+        "agendamento":           ["Starter", "Pro", "Enterprise"],
+        # Apenas Pro e Enterprise
+        "editor_types":          ["Pro", "Enterprise"],
+        "editor_globals":        ["Pro", "Enterprise"],
+        "editor_cfggameplay":    ["Pro", "Enterprise"],
+        "editor_events":         ["Pro", "Enterprise"],
+        "editor_messages":       ["Pro", "Enterprise"],
+        "editor_cfgeventspawns": ["Pro", "Enterprise"],
+        "ranking_semanal":       ["Pro", "Enterprise"],
+        "transferencia_jogador": ["Pro", "Enterprise"],
+        "multimapa":             ["Pro", "Enterprise"],
+        "jogadores_completo":    ["Pro", "Enterprise"],
+    }
+    return plano_atual in PERMISSOES.get(funcionalidade, [])
+
+
+def bloquear_funcionalidade(plano_atual: str, funcionalidade_nome: str, plano_minimo: str = "Pro"):
+    """
+    Exibe aviso de bloqueio amigável quando o plano não permite acesso.
+    """
+    st.markdown(
+        f"""
+        <div style="
+            background:#1a1a2e;
+            border:1px solid #7a4b1f;
+            border-radius:10px;
+            padding:28px 20px;
+            text-align:center;
+            margin-top:20px;
+        ">
+            <div style="font-size:36px; margin-bottom:10px;">🔒</div>
+            <div style="font-size:16px; font-weight:bold;
+                        color:#ffcc66; margin-bottom:8px;">
+                {funcionalidade_nome}
+            </div>
+            <div style="font-size:13px; color:#aaa; margin-bottom:12px;">
+                Esta funcionalidade está disponível a partir do plano
+                <b style="color:#00d4ff;">{plano_minimo}</b>.<br>
+                Seu plano atual é
+                <b style="color:#ff6b6b;">{plano_atual}</b>.
+            </div>
+            <div style="font-size:12px; color:#666;">
+                Entre em contato com o suporte para fazer upgrade do seu plano.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # Caminhos padrão do types.xml por mapa no servidor DayZ
 TYPES_REMOTE_PATHS = {
     "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
@@ -2097,7 +2155,12 @@ if user_id not in st.session_state.db_clients:
 
 client_data = st.session_state.db_clients[user_id]
 user_info = st.session_state.db_users["keys"].get(
-    user_id, {"server": "Servidor (Admin Teste)", "plano": "Admin", "expires": "31/12/2099"}
+    user_id,
+    {
+        "server": "Servidor (Admin Teste)",
+        "plano": "Admin",
+        "expires": "31/12/2099",
+    }
 )
 
 if st.session_state.role == "client":
@@ -2105,13 +2168,21 @@ if st.session_state.role == "client":
     if st.session_state.get("session_token") != token_valido:
         st.error("⚠️ Sessão Finalizada: Esta conta foi conectada em outro local.")
         if st.button(
-            "Fazer Login Novamente", use_container_width=True, key="relogin_btn"
+            "Fazer Login Novamente",
+            use_container_width=True,
+            key="relogin_btn",
         ):
             st.session_state.authenticated = False
             st.rerun()
         st.stop()
 
+# Leitura segura do plano com fallback para Starter
 plano_atual = user_info.get("plano", "Starter")
+
+# Admin sempre tem acesso total
+if st.session_state.get("role") == "admin":
+    plano_atual = "Enterprise"
+
 limite_agendas = int(
     user_info.get(
         "limite_extra",
@@ -2145,11 +2216,82 @@ with st.sidebar:
             st.rerun()
 
     st.write(f"Servidor: **{user_info['server']}**")
-    st.write(f"Plano: **{plano_atual}**")
-    st.markdown(f"Expira em: **{exp_status}**")
+
+    # --- Badge do plano ---
+    cor_plano = (
+        "#FFD700" if plano_atual == "Enterprise"
+        else "#00d4ff" if plano_atual == "Pro"
+        else "#aaaaaa"
+    )
+    icone_plano = (
+        "👑" if plano_atual == "Enterprise"
+        else "⭐" if plano_atual == "Pro"
+        else "🔹"
+    )
+
+    st.markdown(
+        f"""
+        <div style="
+            background:#1a1a2e;
+            border:1px solid {cor_plano};
+            border-radius:8px;
+            padding:10px 12px;
+            margin-bottom:10px;
+            text-align:center;
+        ">
+            <div style="font-size:20px;">{icone_plano}</div>
+            <div style="font-size:14px; font-weight:bold;
+                        color:{cor_plano}; margin-top:4px;">
+                Plano {plano_atual}
+            </div>
+            <div style="font-size:11px; color:#888; margin-top:2px;">
+                Expira em: {exp_status}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # --- Funcionalidades do plano ---
+    st.markdown(
+        "<div style='font-size:12px; color:#aaa; margin-bottom:4px;'>"
+        "Funcionalidades do seu plano:</div>",
+        unsafe_allow_html=True,
+    )
+
+    funcionalidades_exibir = [
+        ("editor_types",          "🧬 Editor Loot (types.xml)"),
+        ("editor_globals",        "🌍 Editor Ambiente (globals.xml)"),
+        ("editor_cfggameplay",    "⚙️ Editor Gameplay"),
+        ("editor_events",         "📅 Editor Eventos"),
+        ("editor_messages",       "💬 Editor Mensagens"),
+        ("editor_cfgeventspawns", "📍 Editor Spawns"),
+        ("ranking_semanal",       "🏆 Ranking Semanal"),
+        ("transferencia_jogador", "🔁 Transferência DzCoins"),
+    ]
+
+    for chave, label in funcionalidades_exibir:
+        permitido = plano_permite(plano_atual, chave)
+        icone = "✅" if permitido else "🔒"
+        cor_label = "#d6e2f0" if permitido else "#666666"
+        st.markdown(
+            f"""
+            <div style="
+                font-size:11px;
+                color:{cor_label};
+                padding:3px 0;
+                border-bottom:1px solid #1e2535;
+            ">
+                {icone} {label}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
 
     progresso = min(total_agendas / limite_agendas, 1.0) if limite_agendas > 0 else 0
-    st.progress(progresso, text=f"Uso: {total_agendas}/{limite_agendas}")
+    st.progress(progresso, text=f"Uso agendamentos: {total_agendas}/{limite_agendas}")
 
     st.divider()
 
@@ -2168,7 +2310,7 @@ with st.sidebar:
     )
 
     col_f1, col_f2 = st.columns(2)
-    if col_f1.button("Salvar Dados", use_container_width=True, key="f_save_main"):
+    if col_f1.button("💾 Salvar Dados", use_container_width=True, key="f_save_main"):
         save_db(DB_CLIENTS, st.session_state.db_clients)
         st.success("Salvo!")
         registrar_log(user_id, "Configurações FTP atualizadas.")
@@ -2184,12 +2326,13 @@ with st.sidebar:
             ftp_t.login(client_data["ftp"]["user"], client_data["ftp"]["pass"])
             ftp_t.quit()
             registrar_log(user_id, "Teste FTP: Sucesso", "sucesso")
-            st.success("Conexão OK!")
+            st.success("✅ Conexão OK!")
         except Exception as e:
             registrar_log(user_id, f"Teste FTP: Falha ({str(e)})", "erro")
-            st.error("Erro FTP")
+            st.error("❌ Erro FTP")
 
     st.divider()
+
     if st.button("🚪 Sair do Sistema", use_container_width=True, key="logout_btn_final"):
         st.session_state.authenticated = False
         st.rerun()
@@ -2436,7 +2579,10 @@ with tab3:
                     st.rerun()
                     
 with tab4:
-    st.subheader("⚙️ Editor de Loot (types.xml)")
+    if not plano_permite(plano_atual, "editor_types"):
+        bloquear_funcionalidade(plano_atual, "🧬 Editor de Loot (types.xml)")
+    else:
+        st.subheader("⚙️ Editor de Loot (types.xml)")
     st.info("Você pode enviar o types.xml manualmente ou carregar direto do servidor via FTP.")
 
     mapa_types = st.selectbox(
@@ -2655,7 +2801,10 @@ with tab4:
         )  # [web:65]
 
 with tab5:
-    st.subheader("🌍 Ambiente / globals.xml")
+    if not plano_permite(plano_atual, "editor_globals"):
+        bloquear_funcionalidade(plano_atual, "🌍 Editor de Ambiente (globals.xml)")
+    else:
+        st.subheader("🌍 Ambiente / globals.xml")
     st.info("Você pode enviar o globals.xml manualmente ou carregar direto do servidor via FTP.")
 
     mapa_globals = st.selectbox(
@@ -2904,7 +3053,11 @@ with tab5:
                     st.error(f"Erro ao salvar/enviar globals.xml: {e}")
                     
 with tabcfggameplay:
-    st.subheader("⚙️ Gameplay / cfggameplay.json")
+    if not plano_permite(plano_atual, "editor_cfggameplay"):
+        bloquear_funcionalidade(plano_atual, "⚙️ Editor de Gameplay (cfggameplay.json)")
+    else:
+        st.subheader("⚙️ Gameplay / cfggameplay.json")
+        # ... resto dentro do else
     st.info("Você pode enviar o cfggameplay.json manualmente ou carregar direto do servidor via FTP.")
 
     # chave única de sessão para este usuário
@@ -3414,7 +3567,10 @@ with tabcfggameplay:
         st.info("Envie o cfggameplay.json do seu servidor para começar a editar.")
 
 with tabevents:
-    st.subheader("🎪 Eventos / events.xml")
+    if not plano_permite(plano_atual, "editor_events"):
+        bloquear_funcionalidade(plano_atual, "📅 Editor de Eventos (events.xml)")
+    else:
+        st.subheader("🎪 Eventos / events.xml")
     st.info("Você pode enviar o events.xml manualmente ou carregar direto do servidor via FTP.")
 
     # chaves únicas da sessão para este usuário
@@ -3680,7 +3836,10 @@ with tabevents:
 
 
 with tabmessages:
-    st.subheader("💬 Mensagens / messages.xml")
+    if not plano_permite(plano_atual, "editor_messages"):
+        bloquear_funcionalidade(plano_atual, "💬 Editor de Mensagens (messages.xml)")
+    else:
+        st.subheader("💬 Mensagens / messages.xml")
     st.info("Você pode enviar o messages.xml manualmente ou carregar direto do servidor via FTP.")
 
     # chaves únicas da sessão para este usuário
@@ -3955,7 +4114,10 @@ with tabmessages:
 
 
 with tabcfgeventspawns:
-    st.subheader("📍 Spawns / cfgeventspawns.xml")
+    if not plano_permite(plano_atual, "editor_cfgeventspawns"):
+        bloquear_funcionalidade(plano_atual, "📍 Editor de Spawns (cfgeventspawns.xml)")
+    else:
+        st.subheader("📍 Spawns / cfgeventspawns.xml")
     st.info("Você pode enviar o cfgeventspawns.xml manualmente ou carregar direto do servidor via FTP.")
 
     # chaves únicas da sessão para este usuário
