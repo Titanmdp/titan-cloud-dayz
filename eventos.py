@@ -1460,7 +1460,19 @@ if not st.session_state.get("authenticated"):
             st.info(f"Um código será enviado para: **{admin_email_rec[:3]}***@{admin_email_rec.split('@')[-1]}")
             if st.button("📧 Enviar código de recuperação", use_container_width=True):
                 import random
+                # Bloqueia novo envio se já foi enviado há menos de 2 minutos
+                ultimo_envio = db_users_rec.get("mfa_last_sent", "")
+                if ultimo_envio:
+                    try:
+                        ultimo_dt = datetime.strptime(ultimo_envio, "%d/%m/%Y %H:%M:%S").replace(tzinfo=FUSO_BR)
+                        segundos_passados = (get_hora_brasilia() - ultimo_dt).total_seconds()
+                        if segundos_passados < 120:
+                            st.warning(f"Aguarde {int(120 - segundos_passados)}s antes de solicitar outro código.")
+                            st.stop()
+                    except Exception:
+                        pass
                 codigo = str(random.randint(100000, 999999))
+                db_users_rec["mfa_last_sent"] = get_hora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
                 expiry = (get_hora_brasilia() + timedelta(minutes=10)).strftime("%d/%m/%Y %H:%M")
                 db_users_rec["mfa_code"] = codigo
                 db_users_rec["mfa_expiry"] = expiry
@@ -1492,8 +1504,16 @@ if not st.session_state.get("authenticated"):
                 except Exception:
                     ainda_valido = False
 
-                if not codigo_salvo or codigo_input != codigo_salvo:
-                    st.error("Código inválido.")
+                tentativas = db_users_rec2.get("mfa_tentativas", 0)
+                if tentativas >= 5:
+                    st.error("Muitas tentativas inválidas. Solicite um novo código.")
+                    db_users_rec2["mfa_code"] = ""
+                    db_users_rec2["mfa_tentativas"] = 0
+                    save_db(DB_USERS, db_users_rec2)
+                elif not codigo_salvo or codigo_input != codigo_salvo:
+                    db_users_rec2["mfa_tentativas"] = tentativas + 1
+                    save_db(DB_USERS, db_users_rec2)
+                    st.error(f"Código inválido. Tentativa {tentativas + 1}/5.")
                 elif not ainda_valido:
                     st.error("Código expirado. Solicite um novo.")
                 elif nova_senha != confirmar_senha:
@@ -1504,6 +1524,8 @@ if not st.session_state.get("authenticated"):
                     db_users_rec2["admin_key"] = nova_senha
                     db_users_rec2["mfa_code"] = ""
                     db_users_rec2["mfa_expiry"] = ""
+                    db_users_rec2["mfa_tentativas"] = 0
+                    db_users_rec2["mfa_last_sent"] = ""
                     save_db(DB_USERS, db_users_rec2)
                     st.session_state.db_users = db_users_rec2
                     st.session_state["mfa_recovery_mode"] = False
