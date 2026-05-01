@@ -2534,10 +2534,10 @@ def main():
 
                                     html_y = f"""
                                     <div style="
-                                        background:{bgbox};
+                                        background:{bg_box};
                                         border-radius:8px;
                                         padding:10px 12px;
-                                        border:1px solid {borderbox};
+                                        border:1px solid {border_box};
                                         font-size:12px;
                                         color:#b8c0cc;
                                         margin-bottom:8px;
@@ -2558,17 +2558,17 @@ def main():
                                                 background:rgba(255,255,255,0.08);
                                                 color:#ffffff;
                                             ">
-                                                {badgeorigem}
+                                                {badge_origem}
                                             </span>
                                         </div>
 
                                         <div style="
                                             font-size:20px;
                                             font-weight:bold;
-                                            color:{cory};
+                                            color:{cor_y};
                                             margin-bottom:6px;
                                         ">
-                                            {coordy:.4f}
+                                            {coord_y:.4f}
                                         </div>
 
                                         <div style="
@@ -2576,8 +2576,8 @@ def main():
                                             color:#9fb0c3;
                                             line-height:1.45;
                                         ">
-                                            <b style="color:#ffffff;">Origem:</b> {fontey or 'desconhecida'}<br>
-                                            <b style="color:#ffffff;">Detalhe:</b> {detalhefonte}
+                                            <b style="color:#ffffff;">Origem:</b> {fonte_y or 'desconhecida'}<br>
+                                            <b style="color:#ffffff;">Detalhe:</b> {detalhe_fonte}
                                         </div>
                                     </div>
                                     """
