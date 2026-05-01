@@ -2584,8 +2584,8 @@ def main():
 
                                     st.markdown(html_y, unsafe_allow_html=True)
 
-                        else:
-                            st.warning("⚠️ Não foi possível calcular o Y. Verifique os dados do mapa ou o FTP configurado.")
+                                else:
+                                    st.warning("⚠️ Não foi possível calcular o Y. Verifique os dados do mapa ou o FTP configurado.")
 
                             except ValueError:
                                 st.error("❌ X e Z devem ser números. Ex: 4106.11")
