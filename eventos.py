@@ -2155,7 +2155,7 @@ if user_id not in st.session_state.db_clients:
 
 client_data = st.session_state.db_clients[user_id]
 # Sempre relê do disco para garantir que alterações do admin sejam refletidas
-_db_users_fresh = load_db(DB_USERS, {"admin_key": "ALEXADMIN", "keys": {}})
+_db_users_fresh = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
 
 user_info = _db_users_fresh["keys"].get(
     user_id,
@@ -2229,6 +2229,17 @@ with st.sidebar:
         else "#00d4ff" if plano_atual == "Pro"
         else "#aaaaaa"
     )
+    # Cores de texto para melhor legibilidade no fundo escuro
+    cor_texto_plano = (
+        "#FFD700" if plano_atual == "Enterprise"
+        else "#00d4ff" if plano_atual == "Pro"
+        else "#aaaaaa"
+    )
+    cor_label_escura = (
+        "#FFD700" if plano_atual == "Enterprise"
+        else "#00d4ff" if plano_atual == "Pro"
+        else "#aaaaaa"
+    )
     icone_plano = (
         "👑" if plano_atual == "Enterprise"
         else "⭐" if plano_atual == "Pro"
@@ -2239,18 +2250,18 @@ with st.sidebar:
         f"""
         <div style="
             background:#1a1a2e;
-            border:1px solid {cor_plano};
+            border:2px solid {cor_plano};
             border-radius:8px;
-            padding:10px 12px;
+            padding:14px 12px;
             margin-bottom:10px;
             text-align:center;
         ">
-            <div style="font-size:20px;">{icone_plano}</div>
-            <div style="font-size:14px; font-weight:bold;
-                        color:{cor_plano}; margin-top:4px;">
+            <div style="font-size:24px;">{icone_plano}</div>
+            <div style="font-size:15px; font-weight:bold;
+                        color:#ffffff; margin-top:6px;">
                 Plano {plano_atual}
             </div>
-            <div style="font-size:11px; color:#bbbbbb; margin-top:2px;">
+            <div style="font-size:12px; color:{cor_label_escura}; margin-top:3px; font-weight:600;">
                 Expira em: {exp_status}
             </div>
         </div>
@@ -2260,7 +2271,7 @@ with st.sidebar:
 
     # --- Funcionalidades do plano ---
     st.markdown(
-        "<div style='font-size:12px; color:#cccccc; margin-bottom:4px;'>"
+        "<div style='font-size:12px; color:#222222; margin-bottom:4px;'>"
         "Funcionalidades do seu plano:</div>",
         unsafe_allow_html=True,
     )
@@ -2279,7 +2290,7 @@ with st.sidebar:
     for chave, label in funcionalidades_exibir:
         permitido = plano_permite(plano_atual, chave)
         icone = "✅" if permitido else "🔒"
-        cor_label = "#ffffff" if permitido else "#999999"
+        cor_label = "#000000" if permitido else "#333333"
         st.markdown(
             f"""
             <div style="
