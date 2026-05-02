@@ -2186,7 +2186,7 @@ if st.session_state.role == "client":
 plano_atual = user_info.get("plano", "Starter")
 
 # Admin sempre tem acesso total
-if st.session_state.get("role") == "admin":
+if st.session_state.get("role") == "admin" and st.session_state.get("view_mode") == "admin":
     plano_atual = "Enterprise"
 
 limite_agendas = int(
@@ -2592,2252 +2592,2252 @@ with tab4:
         bloquear_funcionalidade(plano_atual, "🧬 Editor de Loot (types.xml)")
     else:
         st.subheader("⚙️ Editor de Loot (types.xml)")
-    st.info("Você pode enviar o types.xml manualmente ou carregar direto do servidor via FTP.")
-
-    mapa_types = st.selectbox(
-        "Mapa do types.xml",
-        ["Chernarus", "Livonia"],
-        key=f"mapa_types_ftp_{user_id}"
-    )
-
-    colftp1, colftp2 = st.columns([1, 1])
-
-    with colftp1:
-        if st.button(
-            "📥 Carregar types.xml do servidor via FTP",
-            use_container_width=True,
-            key=f"btn_load_types_ftp_{user_id}"
-        ):
-            ok, xml_bytes, msg = baixartypesviaftp(user_id, mapa_types)
-
-            if ok:
-                try:
-                    tree, root, df_types = parse_types_xml(xml_bytes)
-
-                    st.session_state[f"types_xml_tree_{user_id}"] = tree
-                    st.session_state[f"types_xml_root_{user_id}"] = root
-                    st.session_state[f"types_xml_df_{user_id}"] = df_types
-
-                    st.success(f"types.xml carregado do servidor com sucesso! ({len(df_types)} itens)")
-                except Exception as e:
-                    st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
-            else:
-                st.error(f"Erro ao baixar types.xml via FTP: {msg}")
-
-    with colftp2:
-        up_types = st.file_uploader(
-            "Enviar types.xml",
-            type=["xml"],
-            key="up_types_xml_client"
+        st.info("Você pode enviar o types.xml manualmente ou carregar direto do servidor via FTP.")
+    
+        mapa_types = st.selectbox(
+            "Mapa do types.xml",
+            ["Chernarus", "Livonia"],
+            key=f"mapa_types_ftp_{user_id}"
         )
-
-    if up_types is not None:
-        try:
-            xml_bytes = up_types.read()
-            tree, root, df_types = parse_types_xml(xml_bytes)
-
-            st.session_state[f"types_xml_tree_{user_id}"] = tree
-            st.session_state[f"types_xml_root_{user_id}"] = root
-            st.session_state[f"types_xml_df_{user_id}"] = df_types
-
-            st.success(f"Arquivo carregado: {up_types.name} ({len(df_types)} itens)")
-        except Exception as e:
-            st.error(f"Erro ao ler types.xml: {e}")
-
-    # daqui para baixo continua o restante da lógica da tab4
-    # que usa st.session_state[f"types_xml_df_{user_id}"]
-
-    # 2) Se já temos algo carregado na sessão, mostra a interface
-    key_df = f"types_xml_df_{user_id}"
-    if key_df in st.session_state:
-        df_types = st.session_state[key_df]
-
-        st.markdown("### 🔍 Filtros rápidos")
-
-        col_f1, col_f2, col_f3 = st.columns(3)
-        with col_f1:
-            categoria_sel = st.selectbox(
-                "Categoria",
-                options=["Todas"] + sorted(
-                    [c for c in df_types["category"].dropna().unique().tolist()]
-                ),
-                index=0,
+    
+        colftp1, colftp2 = st.columns([1, 1])
+    
+        with colftp1:
+            if st.button(
+                "📥 Carregar types.xml do servidor via FTP",
+                use_container_width=True,
+                key=f"btn_load_types_ftp_{user_id}"
+            ):
+                ok, xml_bytes, msg = baixartypesviaftp(user_id, mapa_types)
+    
+                if ok:
+                    try:
+                        tree, root, df_types = parse_types_xml(xml_bytes)
+    
+                        st.session_state[f"types_xml_tree_{user_id}"] = tree
+                        st.session_state[f"types_xml_root_{user_id}"] = root
+                        st.session_state[f"types_xml_df_{user_id}"] = df_types
+    
+                        st.success(f"types.xml carregado do servidor com sucesso! ({len(df_types)} itens)")
+                    except Exception as e:
+                        st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
+                else:
+                    st.error(f"Erro ao baixar types.xml via FTP: {msg}")
+    
+        with colftp2:
+            up_types = st.file_uploader(
+                "Enviar types.xml",
+                type=["xml"],
+                key="up_types_xml_client"
             )
-        with col_f2:
-            only_nom_zero = st.checkbox("Mostrar apenas itens sem spawn (nominal = 0)")
-        with col_f3:
-            nome_busca = st.text_input("Buscar por nome (contém)", "")
-
-        df_view = df_types.copy()
-
-        if categoria_sel != "Todas":
-            df_view = df_view[df_view["category"] == categoria_sel]
-
-        if only_nom_zero:
-            df_view = df_view[df_view["nominal"] == 0]
-
-        if nome_busca.strip():
-            df_view = df_view[df_view["name"].str.contains(nome_busca.strip(), case=False)]
-
-        st.markdown("### ✏️ Ajuste de parâmetros")
-
-        edited_df = st.data_editor(
-            df_view,
-            num_rows="fixed",
-            hide_index=True,
-            column_config={
-                "name": "Classe",
-                "category": "Categoria",
-                "nominal": st.column_config.NumberColumn(
-                    "Nominal",
-                    help="Quantidade alvo do item no mapa.",
-                    min_value=0,
-                    step=1,
-                ),
-                "min": st.column_config.NumberColumn(
-                    "Min",
-                    help="Quantidade mínima a manter.",
-                    min_value=0,
-                    step=1,
-                ),
-                "lifetime": st.column_config.NumberColumn(
-                    "Lifetime (s)",
-                    help="Tempo, em segundos, que o item fica no mundo.",
-                    min_value=0,
-                    step=60,
-                ),
-            },
-            disabled=["name", "category"],
-        )  # [web:67][web:61]
-
-        st.markdown("### 💾 Salvar alterações no types.xml")
-
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            if st.button("Aplicar alterações na sessão", use_container_width=True):
-                # Atualiza apenas as linhas filtradas, de volta no df original
-                df_merged = df_types.set_index("name")
-                edited_indexed = edited_df.set_index("name")
-
-                for idx in edited_indexed.index:
-                    if idx in df_merged.index:
-                        for col in ["nominal", "min", "lifetime"]:
-                            df_merged.loc[idx, col] = edited_indexed.loc[idx, col]
-
-                st.session_state[key_df] = df_merged.reset_index()
-                st.success("Alterações aplicadas internamente (ainda não gerou novo XML).")
-
-        with col_s2:
-            if st.button("⬇️ Baixar types.xml ajustado", use_container_width=True):
+    
+        if up_types is not None:
+            try:
+                xml_bytes = up_types.read()
+                tree, root, df_types = parse_types_xml(xml_bytes)
+    
+                st.session_state[f"types_xml_tree_{user_id}"] = tree
+                st.session_state[f"types_xml_root_{user_id}"] = root
+                st.session_state[f"types_xml_df_{user_id}"] = df_types
+    
+                st.success(f"Arquivo carregado: {up_types.name} ({len(df_types)} itens)")
+            except Exception as e:
+                st.error(f"Erro ao ler types.xml: {e}")
+    
+        # daqui para baixo continua o restante da lógica da tab4
+        # que usa st.session_state[f"types_xml_df_{user_id}"]
+    
+        # 2) Se já temos algo carregado na sessão, mostra a interface
+        key_df = f"types_xml_df_{user_id}"
+        if key_df in st.session_state:
+            df_types = st.session_state[key_df]
+    
+            st.markdown("### 🔍 Filtros rápidos")
+    
+            col_f1, col_f2, col_f3 = st.columns(3)
+            with col_f1:
+                categoria_sel = st.selectbox(
+                    "Categoria",
+                    options=["Todas"] + sorted(
+                        [c for c in df_types["category"].dropna().unique().tolist()]
+                    ),
+                    index=0,
+                )
+            with col_f2:
+                only_nom_zero = st.checkbox("Mostrar apenas itens sem spawn (nominal = 0)")
+            with col_f3:
+                nome_busca = st.text_input("Buscar por nome (contém)", "")
+    
+            df_view = df_types.copy()
+    
+            if categoria_sel != "Todas":
+                df_view = df_view[df_view["category"] == categoria_sel]
+    
+            if only_nom_zero:
+                df_view = df_view[df_view["nominal"] == 0]
+    
+            if nome_busca.strip():
+                df_view = df_view[df_view["name"].str.contains(nome_busca.strip(), case=False)]
+    
+            st.markdown("### ✏️ Ajuste de parâmetros")
+    
+            edited_df = st.data_editor(
+                df_view,
+                num_rows="fixed",
+                hide_index=True,
+                column_config={
+                    "name": "Classe",
+                    "category": "Categoria",
+                    "nominal": st.column_config.NumberColumn(
+                        "Nominal",
+                        help="Quantidade alvo do item no mapa.",
+                        min_value=0,
+                        step=1,
+                    ),
+                    "min": st.column_config.NumberColumn(
+                        "Min",
+                        help="Quantidade mínima a manter.",
+                        min_value=0,
+                        step=1,
+                    ),
+                    "lifetime": st.column_config.NumberColumn(
+                        "Lifetime (s)",
+                        help="Tempo, em segundos, que o item fica no mundo.",
+                        min_value=0,
+                        step=60,
+                    ),
+                },
+                disabled=["name", "category"],
+            )  # [web:67][web:61]
+    
+            st.markdown("### 💾 Salvar alterações no types.xml")
+    
+            col_s1, col_s2 = st.columns(2)
+            with col_s1:
+                if st.button("Aplicar alterações na sessão", use_container_width=True):
+                    # Atualiza apenas as linhas filtradas, de volta no df original
+                    df_merged = df_types.set_index("name")
+                    edited_indexed = edited_df.set_index("name")
+    
+                    for idx in edited_indexed.index:
+                        if idx in df_merged.index:
+                            for col in ["nominal", "min", "lifetime"]:
+                                df_merged.loc[idx, col] = edited_indexed.loc[idx, col]
+    
+                    st.session_state[key_df] = df_merged.reset_index()
+                    st.success("Alterações aplicadas internamente (ainda não gerou novo XML).")
+    
+            with col_s2:
+                if st.button("⬇️ Baixar types.xml ajustado", use_container_width=True):
+                    tree = st.session_state.get(f"types_xml_tree_{user_id}")
+                    root = st.session_state.get(f"types_xml_root_{user_id}")
+                    df_full = st.session_state.get(key_df)
+    
+                    if tree is None or root is None or df_full is None:
+                        st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
+                    else:
+                        new_xml_bytes = apply_df_to_types_xml(tree, root, df_full)
+                        st.download_button(
+                            label="Baixar types.xml",
+                            data=new_xml_bytes,
+                            file_name="types_editado.xml",
+                            mime="application/xml",
+                            use_container_width=True,
+                        )
+                        st.success("types.xml atualizado gerado com sucesso!")
+    
+            # --- AÇÃO EXTRA: Salvar no Titan Cloud + aplicar via FTP ---
+            st.markdown("### 🚀 Salvar e aplicar no servidor DayZ")
+    
+            mapa_dest = st.selectbox(
+                "Mapa de destino (onde o types.xml será aplicado)",
+                ["Chernarus", "Livonia"],
+                key="types_mapa_dest",
+            )
+    
+            if st.button("Salvar no Titan Cloud e enviar via FTP", use_container_width=True):
                 tree = st.session_state.get(f"types_xml_tree_{user_id}")
                 root = st.session_state.get(f"types_xml_root_{user_id}")
                 df_full = st.session_state.get(key_df)
-
+    
                 if tree is None or root is None or df_full is None:
                     st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
                 else:
+                    # 1) Gerar XML em memória
                     new_xml_bytes = apply_df_to_types_xml(tree, root, df_full)
-                    st.download_button(
-                        label="Baixar types.xml",
-                        data=new_xml_bytes,
-                        file_name="types_editado.xml",
-                        mime="application/xml",
-                        use_container_width=True,
-                    )
-                    st.success("types.xml atualizado gerado com sucesso!")
-
-        # --- AÇÃO EXTRA: Salvar no Titan Cloud + aplicar via FTP ---
-        st.markdown("### 🚀 Salvar e aplicar no servidor DayZ")
-
-        mapa_dest = st.selectbox(
-            "Mapa de destino (onde o types.xml será aplicado)",
-            ["Chernarus", "Livonia"],
-            key="types_mapa_dest",
-        )
-
-        if st.button("Salvar no Titan Cloud e enviar via FTP", use_container_width=True):
-            tree = st.session_state.get(f"types_xml_tree_{user_id}")
-            root = st.session_state.get(f"types_xml_root_{user_id}")
-            df_full = st.session_state.get(key_df)
-
-            if tree is None or root is None or df_full is None:
-                st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
-            else:
-                # 1) Gerar XML em memória
-                new_xml_bytes = apply_df_to_types_xml(tree, root, df_full)
-
-                # 2) Salvar em disco persistente do Titan Cloud
-                safe_name = f"{user_id[:5]}_types_{mapa_dest.lower()}.xml"
-                local_types_path = os.path.join(UPLOAD_DIR, safe_name)
-                try:
-                    with open(local_types_path, "wb") as f:
-                        f.write(new_xml_bytes)
-
-                    # 3) Enviar via FTP para o servidor, no caminho correto
-                    ok, msg = enviar_types_via_ftp(user_id, local_types_path, mapa_dest)
-
-                    if ok:
+    
+                    # 2) Salvar em disco persistente do Titan Cloud
+                    safe_name = f"{user_id[:5]}_types_{mapa_dest.lower()}.xml"
+                    local_types_path = os.path.join(UPLOAD_DIR, safe_name)
+                    try:
+                        with open(local_types_path, "wb") as f:
+                            f.write(new_xml_bytes)
+    
+                        # 3) Enviar via FTP para o servidor, no caminho correto
+                        ok, msg = enviar_types_via_ftp(user_id, local_types_path, mapa_dest)
+    
+                        if ok:
+                            registrar_log(
+                                user_id,
+                                f"types.xml atualizado e enviado via FTP para {mapa_dest}.",
+                                "sucesso",
+                            )
+                            st.success("types.xml enviado e aplicado via FTP com sucesso!")
+                        else:
+                            registrar_log(
+                                user_id,
+                                f"Falha ao enviar types.xml via FTP ({msg})",
+                                "erro",
+                            )
+                            st.error(f"Erro ao enviar via FTP: {msg}")
+                    except Exception as e:
                         registrar_log(
                             user_id,
-                            f"types.xml atualizado e enviado via FTP para {mapa_dest}.",
-                            "sucesso",
-                        )
-                        st.success("types.xml enviado e aplicado via FTP com sucesso!")
-                    else:
-                        registrar_log(
-                            user_id,
-                            f"Falha ao enviar types.xml via FTP ({msg})",
+                            f"Erro ao salvar/enviar types.xml ({str(e)})",
                             "erro",
                         )
-                        st.error(f"Erro ao enviar via FTP: {msg}")
-                except Exception as e:
-                    registrar_log(
-                        user_id,
-                        f"Erro ao salvar/enviar types.xml ({str(e)})",
-                        "erro",
-                    )
-                    st.error(f"Erro ao salvar/enviar types.xml: {e}")
-
-        st.divider()
-        st.markdown("#### ℹ️ Dicas rápidas")
-        st.write(
-            "- Nominal define a **quantidade alvo** de cada item no mapa; "
-            "valores muito altos criam excesso de loot, muito baixos deixam o servidor vazio."
-        )  # [web:61][web:65]
-        st.write(
-            "- Lifetime é o tempo em segundos antes do item ser limpo; "
-            "itens de base costumam ter lifetime mais alto que loot comum."
-        )  # [web:65]
-
+                        st.error(f"Erro ao salvar/enviar types.xml: {e}")
+    
+            st.divider()
+            st.markdown("#### ℹ️ Dicas rápidas")
+            st.write(
+                "- Nominal define a **quantidade alvo** de cada item no mapa; "
+                "valores muito altos criam excesso de loot, muito baixos deixam o servidor vazio."
+            )  # [web:61][web:65]
+            st.write(
+                "- Lifetime é o tempo em segundos antes do item ser limpo; "
+                "itens de base costumam ter lifetime mais alto que loot comum."
+            )  # [web:65]
+    
 with tab5:
     if not plano_permite(plano_atual, "editor_globals"):
         bloquear_funcionalidade(plano_atual, "🌍 Editor de Ambiente (globals.xml)")
     else:
         st.subheader("🌍 Ambiente / globals.xml")
-    st.info("Você pode enviar o globals.xml manualmente ou carregar direto do servidor via FTP.")
-
-    mapa_globals = st.selectbox(
-        "Mapa do globals.xml",
-        ["Chernarus", "Livonia"],
-        key=f"mapa_globals_ftp_{user_id}"
-    )
-
-    colg1, colg2 = st.columns([1, 1])
-
-    with colg1:
-        if st.button(
-            "📥 Carregar globals.xml do servidor via FTP",
-            use_container_width=True,
-            key=f"btn_load_globals_ftp_{user_id}"
-        ):
-            ok, xml_bytes, msg = baixarglobalsviaftp(user_id, mapa_globals)
-
-            if ok:
-                try:
-                    tree, root, vars_dict = parse_globals_xml(xml_bytes)
-                    st.session_state[f"globals_tree_{user_id}"] = tree
-                    st.session_state[f"globals_root_{user_id}"] = root
-                    st.session_state[f"globals_vars_{user_id}"] = vars_dict
-                    st.success(f"globals.xml carregado do servidor com sucesso! ({len(vars_dict)} variáveis)")
-                except Exception as e:
-                    st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
-            else:
-                st.error(f"Erro ao baixar globals.xml via FTP: {msg}")
-
-    with colg2:
-        up_globals = st.file_uploader(
-            "Enviar globals.xml",
-            type=["xml"],
-            key=f"up_globalsxml_{user_id}"
-        )
-
-    if up_globals is not None:
-        try:
-            xml_bytes = up_globals.read()
-            tree, root, vars_dict = parse_globals_xml(xml_bytes)
-
-            st.session_state[f"globals_tree_{user_id}"] = tree
-            st.session_state[f"globals_root_{user_id}"] = root
-            st.session_state[f"globals_vars_{user_id}"] = vars_dict
-
-            st.success(f"Arquivo carregado: {up_globals.name} ({len(vars_dict)} variáveis)")
-        except Exception as e:
-            st.error(f"Erro ao ler globals.xml: {e}")
-
-    # daqui para baixo continua o restante da lógica da tab5
-
-    key_gvars = f"globals_vars_{user_id}"
-    if key_gvars in st.session_state:
-        g_vars = st.session_state[key_gvars]
-
-        st.markdown("### 🧩 Parâmetros principais")
-
-        def get_val(name, default):
-            info = g_vars.get(name, None)
-            if info is None:
-                return default
-            return info.get("value", default)
-
-        col1, col2 = st.columns(2)
-        with col1:
-            animal_max = st.slider("AnimalMaxCount (máx. animais no mapa)", 0, 1000, int(get_val("AnimalMaxCount", 200)), 10)
-            zombie_max = st.slider("ZombieMaxCount (máx. zumbis no mapa)", 0, 5000, int(get_val("ZombieMaxCount", 1000)), 50)
-            cleanup_dead = st.slider("CleanupLifetimeDeadPlayer (limpeza corpo jogador, seg.)", 300, 21600, int(get_val("CleanupLifetimeDeadPlayer", 3600)), 300)
-        with col2:
-            idle_mode = st.slider("IdleModeCountdown (seg. até idle em servidor vazio)", 0, 86400, int(get_val("IdleModeCountdown", 60)), 60)
-            time_login = st.slider("TimeLogin (tempo de login, seg.)", 5, 120, int(get_val("TimeLogin", 15)), 1)
-            time_logout = st.slider("TimeLogout (tempo de logout, seg.)", 5, 120, int(get_val("TimeLogout", 15)), 1)
-
-        st.markdown("### 🧹 Limpeza e ambiente")
-        col3, col4 = st.columns(2)
-        with col3:
-            cleanup_animal = st.slider("CleanupLifetimeDeadAnimal (corpo animal, seg.)", 60, 7200, int(get_val("CleanupLifetimeDeadAnimal", 1200)), 60)
-            cleanup_infected = st.slider("CleanupLifetimeDeadInfected (corpo zumbi, seg.)", 60, 3600, int(get_val("CleanupLifetimeDeadInfected", 330)), 30)
-            cleanup_default = st.slider("CleanupLifetimeDefault (limpeza padrão, seg.)", 10, 300, int(get_val("CleanupLifetimeDefault", 45)), 5)
-            cleanup_ruined = st.slider("CleanupLifetimeRuined (item destruído, seg.)", 60, 3600, int(get_val("CleanupLifetimeRuined", 330)), 30)
-        with col4:
-            cleanup_avoidance = st.slider("CleanupAvoidance (distância evitar limpeza, m)", 0, 500, int(get_val("CleanupAvoidance", 100)), 10)
-            cleanup_limit = st.slider("CleanupLifetimeLimit (limite limpeza)", 10, 200, int(get_val("CleanupLifetimeLimit", 50)), 5)
-            food_decay = st.slider("FoodDecay (deterioração de comida: 0=off, 1=on)", 0, 1, int(get_val("FoodDecay", 1)), 1)
-            world_wet = st.slider("WorldWetTempUpdate (atualização temperatura/molhado: 0=off, 1=on)", 0, 1, int(get_val("WorldWetTempUpdate", 1)), 1)
-
-        st.markdown("### 🎯 Spawn e loot")
-        col5, col6 = st.columns(2)
-        with col5:
-            initial_spawn = st.slider("InitialSpawn (% spawn inicial de loot)", 0, 100, int(get_val("InitialSpawn", 100)), 5)
-            spawn_initial = st.slider("SpawnInitial (tempo inicial spawn CE, seg.)", 0, 3600, int(get_val("SpawnInitial", 1200)), 60)
-            respawn_attempt = st.slider("RespawnAttempt (tentativas de respawn CE)", 1, 20, int(get_val("RespawnAttempt", 2)), 1)
-            respawn_limit = st.slider("RespawnLimit (limite de respawn CE)", 1, 100, int(get_val("RespawnLimit", 20)), 1)
-            respawn_types = st.slider("RespawnTypes (tipos de respawn CE)", 1, 50, int(get_val("RespawnTypes", 12)), 1)
-        with col6:
-            restart_spawn = st.slider("RestartSpawn (respawn no restart: 0=off, 1=on)", 0, 1, int(get_val("RestartSpawn", 0)), 1)
-            loot_proxy = st.slider("LootProxyPlacement (loot em proxies: 0=off, 1=on)", 0, 1, int(get_val("LootProxyPlacement", 1)), 1)
-            loot_spawn_avoidance = st.slider("LootSpawnAvoidance (distância evitar loot, m)", 0, 500, int(get_val("LootSpawnAvoidance", 100)), 10)
-            loot_dmg_min = st.slider("LootDamageMin (dano mín. loot ao spawnar)", 0.0, 1.0, float(get_val("LootDamageMin", 0.0)), 0.01)
-            loot_dmg_max = st.slider("LootDamageMax (dano máx. loot ao spawnar)", 0.0, 1.0, float(get_val("LootDamageMax", 0.82)), 0.01)
-
-        st.markdown("### ⏱️ Tempo e penalidades")
-        col7, col8 = st.columns(2)
-        with col7:
-            time_hopping = st.slider("TimeHopping (penalidade server hop, seg.)", 0, 600, int(get_val("TimeHopping", 60)), 10)
-            time_penalty = st.slider("TimePenalty (tempo de penalidade geral, seg.)", 0, 300, int(get_val("TimePenalty", 20)), 5)
-            zone_spawn_dist = st.slider("ZoneSpawnDist (distância zona de spawn, m)", 0, 1000, int(get_val("ZoneSpawnDist", 300)), 10)
-        with col8:
-            flag_refresh_freq = st.slider("FlagRefreshFrequency (frequência refresh bandeira, seg.)", 3600, 864000, int(get_val("FlagRefreshFrequency", 432000)), 3600)
-            flag_refresh_max = st.slider("FlagRefreshMaxDuration (duração máx. bandeira, seg.)", 3600, 8640000, int(get_val("FlagRefreshMaxDuration", 3456000)), 3600)
-            idle_startup = st.slider("IdleModeStartup (iniciar em idle: 0=off, 1=on)", 0, 1, int(get_val("IdleModeStartup", 1)), 1)
-
-        st.markdown("### 📝 Resumo do ambiente")
-
-        idle_min = idle_mode // 60
-        cleanup_player_min = cleanup_dead // 60
-        cleanup_animal_min = cleanup_animal // 60
-        cleanup_infected_min = cleanup_infected // 60
-        cleanup_ruined_min = cleanup_ruined // 60
-        flag_refresh_dias = round(flag_refresh_freq / 86400, 1)
-        flag_refresh_max_dias = round(flag_refresh_max / 86400, 1)
-
-        st.write(f"- Máx. **{zombie_max}** zumbis e **{animal_max}** animais no mapa.")
-        st.write(f"- Corpos de jogadores somem em ~**{cleanup_player_min} min** | animais em ~**{cleanup_animal_min} min** | zumbis em ~**{cleanup_infected_min} min** | itens destruídos em ~**{cleanup_ruined_min} min**.")
-        st.write(f"- Servidor entra em idle após **{idle_min} min** sem jogadores. Iniciar em idle: **{'Sim' if idle_startup else 'Não'}**.")
-        st.write(f"- Tempo de login: **{time_login} s** | logout: **{time_logout} s** | penalidade: **{time_penalty} s** | server hop: **{time_hopping} s**.")
-        st.write(f"- Loot spawna com dano entre **{loot_dmg_min:.2f}** e **{loot_dmg_max:.2f}** | Loot em proxies: **{'Sim' if loot_proxy else 'Não'}** | Avoidance: **{loot_spawn_avoidance} m**.")
-        st.write(f"- Spawn inicial de loot: **{initial_spawn}%** | Tempo CE inicial: **{spawn_initial} s** | Respawn: **{respawn_attempt}** tentativas, limite **{respawn_limit}**, tipos **{respawn_types}**.")
-        st.write(f"- Deterioração de comida: **{'Ativada' if food_decay else 'Desativada'}** | Temperatura/molhado: **{'Ativado' if world_wet else 'Desativado'}**.")
-        st.write(f"- Bandeira de território: refresh a cada **{flag_refresh_dias} dias**, duração máx. **{flag_refresh_max_dias} dias**.")
-        st.write(f"- Zona de spawn: **{zone_spawn_dist} m** | Avoidance de limpeza: **{cleanup_avoidance} m** | Limite de limpeza: **{cleanup_limit}**.")
-
-        st.markdown("### 💾 Salvar alterações no globals.xml")
-
-        if st.button("Aplicar alterações na sessão (globals.xml)", use_container_width=True):
-            # Atualiza o dicionário g_vars em memória
-            def set_val(name, value):
-                if name not in g_vars:
-                    g_vars[name] = {"type": "0", "value": value, "elem": None}
-                else:
-                    g_vars[name]["value"] = value
-
-            set_val("AnimalMaxCount", animal_max)
-            set_val("ZombieMaxCount", zombie_max)
-            set_val("CleanupLifetimeDeadPlayer", cleanup_dead)
-            set_val("IdleModeCountdown", idle_mode)
-            set_val("TimeLogin", time_login)
-            set_val("TimeLogout", time_logout)
-            set_val("CleanupLifetimeDeadAnimal", cleanup_animal)
-            set_val("CleanupLifetimeDeadInfected", cleanup_infected)
-            set_val("CleanupLifetimeDefault", cleanup_default)
-            set_val("CleanupLifetimeRuined", cleanup_ruined)
-            set_val("CleanupAvoidance", cleanup_avoidance)
-            set_val("CleanupLifetimeLimit", cleanup_limit)
-            set_val("FoodDecay", food_decay)
-            set_val("WorldWetTempUpdate", world_wet)
-            set_val("InitialSpawn", initial_spawn)
-            set_val("SpawnInitial", spawn_initial)
-            set_val("RespawnAttempt", respawn_attempt)
-            set_val("RespawnLimit", respawn_limit)
-            set_val("RespawnTypes", respawn_types)
-            set_val("RestartSpawn", restart_spawn)
-            set_val("LootProxyPlacement", loot_proxy)
-            set_val("LootSpawnAvoidance", loot_spawn_avoidance)
-            set_val("LootDamageMin", loot_dmg_min)
-            set_val("LootDamageMax", loot_dmg_max)
-            set_val("TimeHopping", time_hopping)
-            set_val("TimePenalty", time_penalty)
-            set_val("ZoneSpawnDist", zone_spawn_dist)
-            set_val("FlagRefreshFrequency", flag_refresh_freq)
-            set_val("FlagRefreshMaxDuration", flag_refresh_max)
-            set_val("IdleModeStartup", idle_startup)
-
-            st.session_state[key_gvars] = g_vars
-            st.success("Alterações aplicadas internamente ao globals.xml (sessão).")
-
-        if st.button("⬇️ Baixar globals.xml ajustado", use_container_width=True):
-            g_tree = st.session_state.get(f"globals_tree_{user_id}")
-            g_root = st.session_state.get(f"globals_root_{user_id}")
-            g_vars_full = st.session_state.get(key_gvars)
-
-            if g_tree is None or g_root is None or g_vars_full is None:
-                st.error("Dados do globals.xml não encontrados na sessão. Reenvie o arquivo.")
-            else:
-                new_globals_bytes = apply_globals_changes(g_tree, g_root, g_vars_full)
-                st.download_button(
-                    label="Baixar globals.xml",
-                    data=new_globals_bytes,
-                    file_name="globals_editado.xml",
-                    mime="application/xml",
-                    use_container_width=True,
-                )
-                st.success("globals.xml atualizado gerado com sucesso!")
-
-        st.markdown("### 🚀 Salvar e aplicar no servidor DayZ")
-
+        st.info("Você pode enviar o globals.xml manualmente ou carregar direto do servidor via FTP.")
+    
         mapa_globals = st.selectbox(
-            "Mapa de destino (onde o globals.xml será aplicado)",
+            "Mapa do globals.xml",
             ["Chernarus", "Livonia"],
-            key="globals_mapa_dest",
+            key=f"mapa_globals_ftp_{user_id}"
         )
-
-        if st.button("Salvar no Titan Cloud e enviar via FTP (globals)", use_container_width=True):
-            g_tree = st.session_state.get(f"globals_tree_{user_id}")
-            g_root = st.session_state.get(f"globals_root_{user_id}")
-            g_vars_full = st.session_state.get(key_gvars)
-
-            if g_tree is None or g_root is None or g_vars_full is None:
-                st.error("Dados do globals.xml não encontrados na sessão. Reenvie o arquivo.")
-            else:
-                # 1) Gerar XML em memória com as alterações
-                new_globals_bytes = apply_globals_changes(g_tree, g_root, g_vars_full)
-
-                # 2) Salvar em disco persistente do Titan Cloud
-                safe_name_g = f"{user_id[:5]}_globals_{mapa_globals.lower()}.xml"
-                local_globals_path = os.path.join(UPLOAD_DIR, safe_name_g)
-
-                try:
-                    with open(local_globals_path, "wb") as f:
-                        f.write(new_globals_bytes)
-
-                    # 3) Enviar via FTP para o servidor, no caminho correto
-                    ok_g, msg_g = enviar_globals_via_ftp(user_id, local_globals_path, mapa_globals)
-
-                    if ok_g:
-                        registrar_log(
-                            user_id,
-                            f"globals.xml atualizado e enviado via FTP para {mapa_globals}.",
-                            "sucesso",
-                        )
-                        st.success("globals.xml enviado e aplicado via FTP com sucesso!")
+    
+        colg1, colg2 = st.columns([1, 1])
+    
+        with colg1:
+            if st.button(
+                "📥 Carregar globals.xml do servidor via FTP",
+                use_container_width=True,
+                key=f"btn_load_globals_ftp_{user_id}"
+            ):
+                ok, xml_bytes, msg = baixarglobalsviaftp(user_id, mapa_globals)
+    
+                if ok:
+                    try:
+                        tree, root, vars_dict = parse_globals_xml(xml_bytes)
+                        st.session_state[f"globals_tree_{user_id}"] = tree
+                        st.session_state[f"globals_root_{user_id}"] = root
+                        st.session_state[f"globals_vars_{user_id}"] = vars_dict
+                        st.success(f"globals.xml carregado do servidor com sucesso! ({len(vars_dict)} variáveis)")
+                    except Exception as e:
+                        st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
+                else:
+                    st.error(f"Erro ao baixar globals.xml via FTP: {msg}")
+    
+        with colg2:
+            up_globals = st.file_uploader(
+                "Enviar globals.xml",
+                type=["xml"],
+                key=f"up_globalsxml_{user_id}"
+            )
+    
+        if up_globals is not None:
+            try:
+                xml_bytes = up_globals.read()
+                tree, root, vars_dict = parse_globals_xml(xml_bytes)
+    
+                st.session_state[f"globals_tree_{user_id}"] = tree
+                st.session_state[f"globals_root_{user_id}"] = root
+                st.session_state[f"globals_vars_{user_id}"] = vars_dict
+    
+                st.success(f"Arquivo carregado: {up_globals.name} ({len(vars_dict)} variáveis)")
+            except Exception as e:
+                st.error(f"Erro ao ler globals.xml: {e}")
+    
+        # daqui para baixo continua o restante da lógica da tab5
+    
+        key_gvars = f"globals_vars_{user_id}"
+        if key_gvars in st.session_state:
+            g_vars = st.session_state[key_gvars]
+    
+            st.markdown("### 🧩 Parâmetros principais")
+    
+            def get_val(name, default):
+                info = g_vars.get(name, None)
+                if info is None:
+                    return default
+                return info.get("value", default)
+    
+            col1, col2 = st.columns(2)
+            with col1:
+                animal_max = st.slider("AnimalMaxCount (máx. animais no mapa)", 0, 1000, int(get_val("AnimalMaxCount", 200)), 10)
+                zombie_max = st.slider("ZombieMaxCount (máx. zumbis no mapa)", 0, 5000, int(get_val("ZombieMaxCount", 1000)), 50)
+                cleanup_dead = st.slider("CleanupLifetimeDeadPlayer (limpeza corpo jogador, seg.)", 300, 21600, int(get_val("CleanupLifetimeDeadPlayer", 3600)), 300)
+            with col2:
+                idle_mode = st.slider("IdleModeCountdown (seg. até idle em servidor vazio)", 0, 86400, int(get_val("IdleModeCountdown", 60)), 60)
+                time_login = st.slider("TimeLogin (tempo de login, seg.)", 5, 120, int(get_val("TimeLogin", 15)), 1)
+                time_logout = st.slider("TimeLogout (tempo de logout, seg.)", 5, 120, int(get_val("TimeLogout", 15)), 1)
+    
+            st.markdown("### 🧹 Limpeza e ambiente")
+            col3, col4 = st.columns(2)
+            with col3:
+                cleanup_animal = st.slider("CleanupLifetimeDeadAnimal (corpo animal, seg.)", 60, 7200, int(get_val("CleanupLifetimeDeadAnimal", 1200)), 60)
+                cleanup_infected = st.slider("CleanupLifetimeDeadInfected (corpo zumbi, seg.)", 60, 3600, int(get_val("CleanupLifetimeDeadInfected", 330)), 30)
+                cleanup_default = st.slider("CleanupLifetimeDefault (limpeza padrão, seg.)", 10, 300, int(get_val("CleanupLifetimeDefault", 45)), 5)
+                cleanup_ruined = st.slider("CleanupLifetimeRuined (item destruído, seg.)", 60, 3600, int(get_val("CleanupLifetimeRuined", 330)), 30)
+            with col4:
+                cleanup_avoidance = st.slider("CleanupAvoidance (distância evitar limpeza, m)", 0, 500, int(get_val("CleanupAvoidance", 100)), 10)
+                cleanup_limit = st.slider("CleanupLifetimeLimit (limite limpeza)", 10, 200, int(get_val("CleanupLifetimeLimit", 50)), 5)
+                food_decay = st.slider("FoodDecay (deterioração de comida: 0=off, 1=on)", 0, 1, int(get_val("FoodDecay", 1)), 1)
+                world_wet = st.slider("WorldWetTempUpdate (atualização temperatura/molhado: 0=off, 1=on)", 0, 1, int(get_val("WorldWetTempUpdate", 1)), 1)
+    
+            st.markdown("### 🎯 Spawn e loot")
+            col5, col6 = st.columns(2)
+            with col5:
+                initial_spawn = st.slider("InitialSpawn (% spawn inicial de loot)", 0, 100, int(get_val("InitialSpawn", 100)), 5)
+                spawn_initial = st.slider("SpawnInitial (tempo inicial spawn CE, seg.)", 0, 3600, int(get_val("SpawnInitial", 1200)), 60)
+                respawn_attempt = st.slider("RespawnAttempt (tentativas de respawn CE)", 1, 20, int(get_val("RespawnAttempt", 2)), 1)
+                respawn_limit = st.slider("RespawnLimit (limite de respawn CE)", 1, 100, int(get_val("RespawnLimit", 20)), 1)
+                respawn_types = st.slider("RespawnTypes (tipos de respawn CE)", 1, 50, int(get_val("RespawnTypes", 12)), 1)
+            with col6:
+                restart_spawn = st.slider("RestartSpawn (respawn no restart: 0=off, 1=on)", 0, 1, int(get_val("RestartSpawn", 0)), 1)
+                loot_proxy = st.slider("LootProxyPlacement (loot em proxies: 0=off, 1=on)", 0, 1, int(get_val("LootProxyPlacement", 1)), 1)
+                loot_spawn_avoidance = st.slider("LootSpawnAvoidance (distância evitar loot, m)", 0, 500, int(get_val("LootSpawnAvoidance", 100)), 10)
+                loot_dmg_min = st.slider("LootDamageMin (dano mín. loot ao spawnar)", 0.0, 1.0, float(get_val("LootDamageMin", 0.0)), 0.01)
+                loot_dmg_max = st.slider("LootDamageMax (dano máx. loot ao spawnar)", 0.0, 1.0, float(get_val("LootDamageMax", 0.82)), 0.01)
+    
+            st.markdown("### ⏱️ Tempo e penalidades")
+            col7, col8 = st.columns(2)
+            with col7:
+                time_hopping = st.slider("TimeHopping (penalidade server hop, seg.)", 0, 600, int(get_val("TimeHopping", 60)), 10)
+                time_penalty = st.slider("TimePenalty (tempo de penalidade geral, seg.)", 0, 300, int(get_val("TimePenalty", 20)), 5)
+                zone_spawn_dist = st.slider("ZoneSpawnDist (distância zona de spawn, m)", 0, 1000, int(get_val("ZoneSpawnDist", 300)), 10)
+            with col8:
+                flag_refresh_freq = st.slider("FlagRefreshFrequency (frequência refresh bandeira, seg.)", 3600, 864000, int(get_val("FlagRefreshFrequency", 432000)), 3600)
+                flag_refresh_max = st.slider("FlagRefreshMaxDuration (duração máx. bandeira, seg.)", 3600, 8640000, int(get_val("FlagRefreshMaxDuration", 3456000)), 3600)
+                idle_startup = st.slider("IdleModeStartup (iniciar em idle: 0=off, 1=on)", 0, 1, int(get_val("IdleModeStartup", 1)), 1)
+    
+            st.markdown("### 📝 Resumo do ambiente")
+    
+            idle_min = idle_mode // 60
+            cleanup_player_min = cleanup_dead // 60
+            cleanup_animal_min = cleanup_animal // 60
+            cleanup_infected_min = cleanup_infected // 60
+            cleanup_ruined_min = cleanup_ruined // 60
+            flag_refresh_dias = round(flag_refresh_freq / 86400, 1)
+            flag_refresh_max_dias = round(flag_refresh_max / 86400, 1)
+    
+            st.write(f"- Máx. **{zombie_max}** zumbis e **{animal_max}** animais no mapa.")
+            st.write(f"- Corpos de jogadores somem em ~**{cleanup_player_min} min** | animais em ~**{cleanup_animal_min} min** | zumbis em ~**{cleanup_infected_min} min** | itens destruídos em ~**{cleanup_ruined_min} min**.")
+            st.write(f"- Servidor entra em idle após **{idle_min} min** sem jogadores. Iniciar em idle: **{'Sim' if idle_startup else 'Não'}**.")
+            st.write(f"- Tempo de login: **{time_login} s** | logout: **{time_logout} s** | penalidade: **{time_penalty} s** | server hop: **{time_hopping} s**.")
+            st.write(f"- Loot spawna com dano entre **{loot_dmg_min:.2f}** e **{loot_dmg_max:.2f}** | Loot em proxies: **{'Sim' if loot_proxy else 'Não'}** | Avoidance: **{loot_spawn_avoidance} m**.")
+            st.write(f"- Spawn inicial de loot: **{initial_spawn}%** | Tempo CE inicial: **{spawn_initial} s** | Respawn: **{respawn_attempt}** tentativas, limite **{respawn_limit}**, tipos **{respawn_types}**.")
+            st.write(f"- Deterioração de comida: **{'Ativada' if food_decay else 'Desativada'}** | Temperatura/molhado: **{'Ativado' if world_wet else 'Desativado'}**.")
+            st.write(f"- Bandeira de território: refresh a cada **{flag_refresh_dias} dias**, duração máx. **{flag_refresh_max_dias} dias**.")
+            st.write(f"- Zona de spawn: **{zone_spawn_dist} m** | Avoidance de limpeza: **{cleanup_avoidance} m** | Limite de limpeza: **{cleanup_limit}**.")
+    
+            st.markdown("### 💾 Salvar alterações no globals.xml")
+    
+            if st.button("Aplicar alterações na sessão (globals.xml)", use_container_width=True):
+                # Atualiza o dicionário g_vars em memória
+                def set_val(name, value):
+                    if name not in g_vars:
+                        g_vars[name] = {"type": "0", "value": value, "elem": None}
                     else:
+                        g_vars[name]["value"] = value
+    
+                set_val("AnimalMaxCount", animal_max)
+                set_val("ZombieMaxCount", zombie_max)
+                set_val("CleanupLifetimeDeadPlayer", cleanup_dead)
+                set_val("IdleModeCountdown", idle_mode)
+                set_val("TimeLogin", time_login)
+                set_val("TimeLogout", time_logout)
+                set_val("CleanupLifetimeDeadAnimal", cleanup_animal)
+                set_val("CleanupLifetimeDeadInfected", cleanup_infected)
+                set_val("CleanupLifetimeDefault", cleanup_default)
+                set_val("CleanupLifetimeRuined", cleanup_ruined)
+                set_val("CleanupAvoidance", cleanup_avoidance)
+                set_val("CleanupLifetimeLimit", cleanup_limit)
+                set_val("FoodDecay", food_decay)
+                set_val("WorldWetTempUpdate", world_wet)
+                set_val("InitialSpawn", initial_spawn)
+                set_val("SpawnInitial", spawn_initial)
+                set_val("RespawnAttempt", respawn_attempt)
+                set_val("RespawnLimit", respawn_limit)
+                set_val("RespawnTypes", respawn_types)
+                set_val("RestartSpawn", restart_spawn)
+                set_val("LootProxyPlacement", loot_proxy)
+                set_val("LootSpawnAvoidance", loot_spawn_avoidance)
+                set_val("LootDamageMin", loot_dmg_min)
+                set_val("LootDamageMax", loot_dmg_max)
+                set_val("TimeHopping", time_hopping)
+                set_val("TimePenalty", time_penalty)
+                set_val("ZoneSpawnDist", zone_spawn_dist)
+                set_val("FlagRefreshFrequency", flag_refresh_freq)
+                set_val("FlagRefreshMaxDuration", flag_refresh_max)
+                set_val("IdleModeStartup", idle_startup)
+    
+                st.session_state[key_gvars] = g_vars
+                st.success("Alterações aplicadas internamente ao globals.xml (sessão).")
+    
+            if st.button("⬇️ Baixar globals.xml ajustado", use_container_width=True):
+                g_tree = st.session_state.get(f"globals_tree_{user_id}")
+                g_root = st.session_state.get(f"globals_root_{user_id}")
+                g_vars_full = st.session_state.get(key_gvars)
+    
+                if g_tree is None or g_root is None or g_vars_full is None:
+                    st.error("Dados do globals.xml não encontrados na sessão. Reenvie o arquivo.")
+                else:
+                    new_globals_bytes = apply_globals_changes(g_tree, g_root, g_vars_full)
+                    st.download_button(
+                        label="Baixar globals.xml",
+                        data=new_globals_bytes,
+                        file_name="globals_editado.xml",
+                        mime="application/xml",
+                        use_container_width=True,
+                    )
+                    st.success("globals.xml atualizado gerado com sucesso!")
+    
+            st.markdown("### 🚀 Salvar e aplicar no servidor DayZ")
+    
+            mapa_globals = st.selectbox(
+                "Mapa de destino (onde o globals.xml será aplicado)",
+                ["Chernarus", "Livonia"],
+                key="globals_mapa_dest",
+            )
+    
+            if st.button("Salvar no Titan Cloud e enviar via FTP (globals)", use_container_width=True):
+                g_tree = st.session_state.get(f"globals_tree_{user_id}")
+                g_root = st.session_state.get(f"globals_root_{user_id}")
+                g_vars_full = st.session_state.get(key_gvars)
+    
+                if g_tree is None or g_root is None or g_vars_full is None:
+                    st.error("Dados do globals.xml não encontrados na sessão. Reenvie o arquivo.")
+                else:
+                    # 1) Gerar XML em memória com as alterações
+                    new_globals_bytes = apply_globals_changes(g_tree, g_root, g_vars_full)
+    
+                    # 2) Salvar em disco persistente do Titan Cloud
+                    safe_name_g = f"{user_id[:5]}_globals_{mapa_globals.lower()}.xml"
+                    local_globals_path = os.path.join(UPLOAD_DIR, safe_name_g)
+    
+                    try:
+                        with open(local_globals_path, "wb") as f:
+                            f.write(new_globals_bytes)
+    
+                        # 3) Enviar via FTP para o servidor, no caminho correto
+                        ok_g, msg_g = enviar_globals_via_ftp(user_id, local_globals_path, mapa_globals)
+    
+                        if ok_g:
+                            registrar_log(
+                                user_id,
+                                f"globals.xml atualizado e enviado via FTP para {mapa_globals}.",
+                                "sucesso",
+                            )
+                            st.success("globals.xml enviado e aplicado via FTP com sucesso!")
+                        else:
+                            registrar_log(
+                                user_id,
+                                f"Falha ao enviar globals.xml via FTP ({msg_g})",
+                                "erro",
+                            )
+                            st.error(f"Erro ao enviar via FTP: {msg_g}")
+                    except Exception as e:
                         registrar_log(
                             user_id,
-                            f"Falha ao enviar globals.xml via FTP ({msg_g})",
+                            f"Erro ao salvar/enviar globals.xml ({str(e)})",
                             "erro",
                         )
-                        st.error(f"Erro ao enviar via FTP: {msg_g}")
-                except Exception as e:
-                    registrar_log(
-                        user_id,
-                        f"Erro ao salvar/enviar globals.xml ({str(e)})",
-                        "erro",
-                    )
-                    st.error(f"Erro ao salvar/enviar globals.xml: {e}")
-                    
+                        st.error(f"Erro ao salvar/enviar globals.xml: {e}")
+                        
 with tabcfggameplay:
     if not plano_permite(plano_atual, "editor_cfggameplay"):
         bloquear_funcionalidade(plano_atual, "⚙️ Editor de Gameplay (cfggameplay.json)")
     else:
         st.subheader("⚙️ Gameplay / cfggameplay.json")
         # ... resto dentro do else
-    st.info("Você pode enviar o cfggameplay.json manualmente ou carregar direto do servidor via FTP.")
-
-    # chave única de sessão para este usuário
-    cfg_session_key = f"cfggameplay_data_{user_id}"
-
-    mapa_cfggameplay = st.selectbox(
-        "Mapa do cfggameplay.json",
-        ["Chernarus", "Livonia"],
-        key=f"mapa_cfggameplay_ftp_{user_id}"
-    )
-
-    colcg1, colcg2 = st.columns([1, 1])
-
-    # 1) Carregar do servidor via FTP
-    with colcg1:
-        if st.button(
-            "📥 Carregar cfggameplay.json do servidor via FTP",
-            use_container_width=True,
-            key=f"btn_load_cfggameplay_ftp_{user_id}"
-        ):
-            ok, json_bytes, msg = baixarcfggameplayviaftp(user_id, mapa_cfggameplay)
-
-            if ok:
-                try:
-                    cfg_data = json.loads(json_bytes.decode("utf-8"))
-                    st.session_state[cfg_session_key] = cfg_data
-                    st.success("cfggameplay.json carregado do servidor com sucesso!")
-                except Exception as e:
-                    st.error(f"Arquivo baixado, mas houve erro ao interpretar o JSON: {e}")
-            else:
-                st.error(f"Erro ao baixar cfggameplay.json via FTP: {msg}")
-
-    # 2) Upload manual do arquivo
-    with colcg2:
-        up_cfggameplay = st.file_uploader(
-            "Enviar cfggameplay.json",
-            type=["json"],
-            key=f"up_cfggameplay_{user_id}"
+        st.info("Você pode enviar o cfggameplay.json manualmente ou carregar direto do servidor via FTP.")
+    
+        # chave única de sessão para este usuário
+        cfg_session_key = f"cfggameplay_data_{user_id}"
+    
+        mapa_cfggameplay = st.selectbox(
+            "Mapa do cfggameplay.json",
+            ["Chernarus", "Livonia"],
+            key=f"mapa_cfggameplay_ftp_{user_id}"
         )
-
-    if up_cfggameplay is not None:
-        try:
-            json_bytes = up_cfggameplay.read()
-            cfg_data = json.loads(json_bytes.decode("utf-8"))
-            st.session_state[cfg_session_key] = cfg_data
-            st.success("cfggameplay.json carregado com sucesso!")
-        except Exception as e:
-            st.error(f"Erro ao ler cfggameplay.json: {e}")
-
-    # daqui para baixo continua o restante da lógica da aba
-
-    # 2) Se já temos cfg em sessão, mostra a interface
-    if cfg_session_key in st.session_state:
-        cfg = st.session_state[cfg_session_key]
-
-        # Garante estruturas principais
-        general = cfg.get("GeneralData", {})
-        player = cfg.get("PlayerData", {})
-        stamina = player.get("StaminaData", {})
-        shock = player.get("ShockHandlingData", {})
-        movement = player.get("MovementData", {})
-        worlds = cfg.get("WorldsData", {})
-        map_data = cfg.get("MapData", {})
-        ui_data = cfg.get("UIData", {})
-        vehicle_data = cfg.get("VehicleData", {})
-
-        # -------------------------------
-        # Geral
-        # -------------------------------
-        st.markdown("### ⚙️ Geral")
-
-        col_g1, col_g2 = st.columns(2)
-        with col_g1:
-            disable_base_damage = st.checkbox(
-                "Desativar dano em bases (disableBaseDamage)",
-                value=general.get("disableBaseDamage", False),
-            )
-            disable_container_damage = st.checkbox(
-                "Desativar dano em containers (disableContainerDamage)",
-                value=general.get("disableContainerDamage", False),
-            )
-        with col_g2:
-            disable_respawn_dialog = st.checkbox(
-                "Desativar tela de respawn (disableRespawnDialog)",
-                value=general.get("disableRespawnDialog", False),
-            )
-            disable_respawn_unconscious = st.checkbox(
-                "Bloquear respawn inconsciente (disableRespawnInUnconsciousness)",
-                value=general.get("disableRespawnInUnconsciousness", False),
-            )
-
-        # -------------------------------
-        # Stamina
-        # -------------------------------
-        st.markdown("### 💪 Jogador - Stamina")
-
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            stamina_max = st.number_input(
-                "Stamina máxima (staminaMax)",
-                min_value=10.0,
-                max_value=50000.0,
-                step=5.0,
-                value=float(stamina.get("staminaMax", 100.0)),
-            )
-            stamina_min_cap = st.number_input(
-                "Stamina mínima (staminaMinCap)",
-                min_value=0.0,
-                max_value=50.0,
-                step=1.0,
-                value=float(stamina.get("staminaMinCap", 5.0)),
-            )
-            stamina_weight_threshold = st.number_input(
-                "Peso limite stamina (staminaWeightLimitThreshold)",
-                min_value=0.0,
-                max_value=20000.0,
-                step=100.0,
-                value=float(stamina.get("staminaWeightLimitThreshold", 6000.0)),
-            )
-        with col_s2:
-            stamina_penalty = st.number_input("Penalidade kg → % (staminaKgToStaminaPercentPenalty)", min_value=0.0, max_value=10.0, step=0.05, value=float(stamina.get("staminaKgToStaminaPercentPenalty", 1.75)))
-            sprint_sta_mod_erc = st.number_input("Sprint em pé (sprintStaminaModifierErc)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("sprintStaminaModifierErc", 1.0)))
-            sprint_sta_mod_cro = st.number_input("Sprint abaixado (sprintStaminaModifierCro)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("sprintStaminaModifierCro", 1.0)))
-
-        col_s3, col_s4 = st.columns(2)
-        with col_s3:
-            sprint_swim_mod = st.number_input("Sprint nadando (sprintSwimmingStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("sprintSwimmingStaminaModifier", 1.0)))
-            sprint_ladder_mod = st.number_input("Sprint em escada (sprintLadderStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("sprintLadderStaminaModifier", 1.0)))
-            melee_sta_mod = st.number_input("Stamina corpo a corpo (meleeStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("meleeStaminaModifier", 1.0)))
-        with col_s4:
-            obstacle_sta_mod = st.number_input("Stamina obstáculos (obstacleTraversalStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("obstacleTraversalStaminaModifier", 1.0)))
-            hold_breath_mod = st.number_input("Segurar respiração (holdBreathStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("holdBreathStaminaModifier", 1.0)))
-        
-        disable_personal_light = st.checkbox("Desativar luz pessoal (disablePersonalLight)", value=player.get("disablePersonalLight", False))
-
-        # -------------------------------
-        # Shock / Movimento
-        # -------------------------------
-        st.markdown("### 🧠 Jogador - Shock e Movimento")
-
-        col_sh1, col_sh2 = st.columns(2)
-        with col_sh1:
-            shock_refill_con = st.number_input(
-                "Refill choque consciente (shockRefillSpeedConscious)",
-                min_value=0.1,
-                max_value=50.0,
-                step=0.5,
-                value=float(shock.get("shockRefillSpeedConscious", 5.0)),
-            )
-            shock_refill_uncon = st.number_input(
-                "Refill choque inconsciente (shockRefillSpeedUnconscious)",
-                min_value=0.1,
-                max_value=50.0,
-                step=0.5,
-                value=float(shock.get("shockRefillSpeedUnconscious", 1.0)),
-            )
-        with col_sh2:
-            allow_refill_mod = st.checkbox(
-                "Permitir modificador de refill (allowRefillSpeedModifier)",
-                value=shock.get("allowRefillSpeedModifier", True),
-            )
-
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            time_to_sprint = st.number_input("Tempo para sprint (timeToSprint)", min_value=0.0, max_value=5.0, step=0.05, value=float(movement.get("timeToSprint", 0.45)))
-            time_to_strafe_jog = st.number_input("Tempo para strafe correndo (timeToStrafeJog)", min_value=0.0, max_value=5.0, step=0.05, value=float(movement.get("timeToStrafeJog", 0.1)))
-            time_to_strafe_sprint = st.number_input("Tempo para strafe sprint (timeToStrafeSprint)", min_value=0.0, max_value=5.0, step=0.05, value=float(movement.get("timeToStrafeSprint", 0.3)))
-        with col_m2:
-            rot_speed_jog = st.number_input("Rotação correndo (rotationSpeedJog)", min_value=0.0, max_value=2.0, step=0.05, value=float(movement.get("rotationSpeedJog", 0.3)))
-            rot_speed_sprint = st.number_input("Rotação sprint (rotationSpeedSprint)", min_value=0.0, max_value=2.0, step=0.05, value=float(movement.get("rotationSpeedSprint", 0.15)))
-            allow_sta_inertia = st.checkbox("Stamina afeta inércia (allowStaminaAffectInertia)", value=movement.get("allowStaminaAffectInertia", True))
-
-        # -------------------------------
-        # Drowning
-        # -------------------------------
-        st.markdown("### 🌊 Afogamento")
-        drowning = player.get("DrowningData", {})
-        col_d1, col_d2, col_d3 = st.columns(3)
-        with col_d1:
-            drown_stamina = st.number_input("Depleção stamina (staminaDepletionSpeed)", min_value=0.0, max_value=100.0, step=1.0, value=float(drowning.get("staminaDepletionSpeed", 10.0)))
-        with col_d2:
-            drown_health = st.number_input("Depleção vida (healthDepletionSpeed)", min_value=0.0, max_value=100.0, step=1.0, value=float(drowning.get("healthDepletionSpeed", 10.0)))
-        with col_d3:
-            drown_shock = st.number_input("Depleção choque (shockDepletionSpeed)", min_value=0.0, max_value=100.0, step=1.0, value=float(drowning.get("shockDepletionSpeed", 10.0)))
-
-        # -------------------------------
-        # Weapon Obstruction
-        # -------------------------------
-        st.markdown("### 🔫 Obstrução de Armas")
-        weapon_obs = player.get("WeaponObstructionData", {})
-        col_w1, col_w2 = st.columns(2)
-        with col_w1:
-            weapon_static_mode = st.selectbox("Modo estático (staticMode)", options=[0, 1], index=int(weapon_obs.get("staticMode", 1)), help="0 = desativado, 1 = ativado")
-        with col_w2:
-            weapon_dynamic_mode = st.selectbox("Modo dinâmico (dynamicMode)", options=[0, 1], index=int(weapon_obs.get("dynamicMode", 1)), help="0 = desativado, 1 = ativado")
-
-        # -------------------------------
-        # Base Building
-        # -------------------------------
-        st.markdown("### 🏗️ Construção de Bases")
-        base = cfg.get("BaseBuildingData", {})
-        hologram = base.get("HologramData", {})
-        construction = base.get("ConstructionData", {})
-
-        st.markdown("**Hologram (verificações ao posicionar)**")
-        col_h1, col_h2 = st.columns(2)
-        with col_h1:
-            dis_bbox = st.checkbox("Desativar colisão BBox (disableIsCollidingBBoxCheck)", value=hologram.get("disableIsCollidingBBoxCheck", False))
-            dis_player = st.checkbox("Desativar colisão jogador (disableIsCollidingPlayerCheck)", value=hologram.get("disableIsCollidingPlayerCheck", False))
-            dis_roof = st.checkbox("Desativar verificação teto (disableIsClippingRoofCheck)", value=hologram.get("disableIsClippingRoofCheck", False))
-            dis_base_viable = st.checkbox("Desativar base viável (disableIsBaseViableCheck)", value=hologram.get("disableIsBaseViableCheck", False))
-            dis_gplot = st.checkbox("Desativar colisão GPlot (disableIsCollidingGPlotCheck)", value=hologram.get("disableIsCollidingGPlotCheck", False))
-            dis_angle = st.checkbox("Desativar verificação ângulo (disableIsCollidingAngleCheck)", value=hologram.get("disableIsCollidingAngleCheck", False))
-        with col_h2:
-            dis_placement = st.checkbox("Desativar permissão de colocação (disableIsPlacementPermittedCheck)", value=hologram.get("disableIsPlacementPermittedCheck", False))
-            dis_height = st.checkbox("Desativar verificação altura (disableHeightPlacementCheck)", value=hologram.get("disableHeightPlacementCheck", False))
-            dis_underwater = st.checkbox("Desativar verificação subaquática (disableIsUnderwaterCheck)", value=hologram.get("disableIsUnderwaterCheck", False))
-            dis_terrain = st.checkbox("Desativar verificação terreno (disableIsInTerrainCheck)", value=hologram.get("disableIsInTerrainCheck", False))
-            dis_cold = st.checkbox("Desativar verificação área fria (disableColdAreaBuildingCheck)", value=hologram.get("disableColdAreaBuildingCheck", False))
-
-        st.markdown("**Construção**")
-        col_c1, col_c2, col_c3 = st.columns(3)
-        with col_c1:
-            dis_roof_check = st.checkbox("Desativar check teto (disablePerformRoofCheck)", value=construction.get("disablePerformRoofCheck", False))
-        with col_c2:
-            dis_colliding_check = st.checkbox("Desativar check colisão (disableIsCollidingCheck)", value=construction.get("disableIsCollidingCheck", False))
-        with col_c3:
-            dis_distance_check = st.checkbox("Desativar check distância (disableDistanceCheck)", value=construction.get("disableDistanceCheck", False))
-
-        # -------------------------------
-        # Mundo / Clima
-        # -------------------------------
-        st.markdown("### 🌍 Mundo / Clima")
-
-        lighting_config = st.selectbox(
-            "Preset de iluminação (lightingConfig)",
-            options=[0, 1, 2],
-            index=[0, 1, 2].index(int(worlds.get("lightingConfig", 0))),
-            help="Controla presets de iluminação do servidor.",
-        )
-
-        st.info(
-            "As listas environmentMinTemps e environmentMaxTemps definem temperaturas por mês. "
-            "Manteremos edição avançada para uma próxima versão."
-        )
-
-        # -------------------------------
-        # Mapa / UI
-        # -------------------------------
-        st.markdown("### 🗺️ Mapa e Interface")
-
-        col_map1, col_map2 = st.columns(2)
-        with col_map1:
-            display_player_pos = st.checkbox(
-                "Mostrar posição do jogador no mapa (displayPlayerPosition)",
-                value=map_data.get("displayPlayerPosition", False),
-            )
-            display_nav_info = st.checkbox(
-                "Mostrar infos de navegação (displayNavInfo)",
-                value=map_data.get("displayNavInfo", True),
-            )
-        with col_map2:
-            use_3d_map = st.checkbox("Usar mapa 3D (use3DMap)", value=ui_data.get("use3DMap", False))
-            ignore_map_ownership = st.checkbox("Ignorar posse do mapa (ignoreMapOwnership)", value=map_data.get("ignoreMapOwnership", False))
-            ignore_nav_ownership = st.checkbox("Ignorar posse de nav items (ignoreNavItemsOwnership)", value=map_data.get("ignoreNavItemsOwnership", False))
-
-        st.markdown("**Indicação de Hit**")
-        hit = ui_data.get("HitIndicationData", {})
-        col_hi1, col_hi2 = st.columns(2)
-        with col_hi1:
-            hit_dir_override = st.checkbox("Override direção hit (hitDirectionOverrideEnabled)", value=hit.get("hitDirectionOverrideEnabled", False))
-            hit_dir_behaviour = st.selectbox("Comportamento direção hit (hitDirectionBehaviour)", options=[0, 1, 2], index=min(int(hit.get("hitDirectionBehaviour", 1)), 2))
-            hit_dir_style = st.selectbox("Estilo indicador hit (hitDirectionStyle)", options=[0, 1, 2], index=min(int(hit.get("hitDirectionStyle", 0)), 2))
-            hit_post_process = st.checkbox("Post process indicação hit (hitIndicationPostProcessEnabled)", value=hit.get("hitIndicationPostProcessEnabled", True))
-        with col_hi2:
-            hit_max_duration = st.number_input("Duração máx. indicador (hitDirectionMaxDuration, seg.)", min_value=0.1, max_value=10.0, step=0.1, value=float(hit.get("hitDirectionMaxDuration", 2.0)))
-            hit_breakpoint = st.number_input("Breakpoint relativo (hitDirectionBreakPointRelative)", min_value=0.0, max_value=1.0, step=0.05, value=float(hit.get("hitDirectionBreakPointRelative", 0.2)))
-            hit_scatter = st.number_input("Dispersão indicador (hitDirectionScatter)", min_value=0.0, max_value=90.0, step=1.0, value=float(hit.get("hitDirectionScatter", 10.0)))
-            hit_color = st.text_input("Cor indicador hex (hitDirectionIndicatorColorStr)", value=hit.get("hitDirectionIndicatorColorStr", "0xffbb0a1e"))
-
-        # -------------------------------
-        # Veículos
-        # -------------------------------
-        st.markdown("### 🚗 Veículos")
-
-        boat_decay_multiplier = st.number_input(
-            "Multiplicador de decay de barcos (boatDecayMultiplier)",
-            min_value=0.0,
-            max_value=10.0,
-            step=0.1,
-            value=float(vehicle_data.get("boatDecayMultiplier", 1)),
-        )
-
-        st.markdown("### 💾 Gerar cfggameplay.json ajustado")
-
-        col_save1, col_save2 = st.columns(2)
-
-        # 3) Aplicar alterações na sessão (atualiza cfg em memória)
-        with col_save1:
+    
+        colcg1, colcg2 = st.columns([1, 1])
+    
+        # 1) Carregar do servidor via FTP
+        with colcg1:
             if st.button(
-                "Aplicar alterações na sessão (cfggameplay)",
+                "📥 Carregar cfggameplay.json do servidor via FTP",
+                use_container_width=True,
+                key=f"btn_load_cfggameplay_ftp_{user_id}"
+            ):
+                ok, json_bytes, msg = baixarcfggameplayviaftp(user_id, mapa_cfggameplay)
+    
+                if ok:
+                    try:
+                        cfg_data = json.loads(json_bytes.decode("utf-8"))
+                        st.session_state[cfg_session_key] = cfg_data
+                        st.success("cfggameplay.json carregado do servidor com sucesso!")
+                    except Exception as e:
+                        st.error(f"Arquivo baixado, mas houve erro ao interpretar o JSON: {e}")
+                else:
+                    st.error(f"Erro ao baixar cfggameplay.json via FTP: {msg}")
+    
+        # 2) Upload manual do arquivo
+        with colcg2:
+            up_cfggameplay = st.file_uploader(
+                "Enviar cfggameplay.json",
+                type=["json"],
+                key=f"up_cfggameplay_{user_id}"
+            )
+    
+        if up_cfggameplay is not None:
+            try:
+                json_bytes = up_cfggameplay.read()
+                cfg_data = json.loads(json_bytes.decode("utf-8"))
+                st.session_state[cfg_session_key] = cfg_data
+                st.success("cfggameplay.json carregado com sucesso!")
+            except Exception as e:
+                st.error(f"Erro ao ler cfggameplay.json: {e}")
+    
+        # daqui para baixo continua o restante da lógica da aba
+    
+        # 2) Se já temos cfg em sessão, mostra a interface
+        if cfg_session_key in st.session_state:
+            cfg = st.session_state[cfg_session_key]
+    
+            # Garante estruturas principais
+            general = cfg.get("GeneralData", {})
+            player = cfg.get("PlayerData", {})
+            stamina = player.get("StaminaData", {})
+            shock = player.get("ShockHandlingData", {})
+            movement = player.get("MovementData", {})
+            worlds = cfg.get("WorldsData", {})
+            map_data = cfg.get("MapData", {})
+            ui_data = cfg.get("UIData", {})
+            vehicle_data = cfg.get("VehicleData", {})
+    
+            # -------------------------------
+            # Geral
+            # -------------------------------
+            st.markdown("### ⚙️ Geral")
+    
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                disable_base_damage = st.checkbox(
+                    "Desativar dano em bases (disableBaseDamage)",
+                    value=general.get("disableBaseDamage", False),
+                )
+                disable_container_damage = st.checkbox(
+                    "Desativar dano em containers (disableContainerDamage)",
+                    value=general.get("disableContainerDamage", False),
+                )
+            with col_g2:
+                disable_respawn_dialog = st.checkbox(
+                    "Desativar tela de respawn (disableRespawnDialog)",
+                    value=general.get("disableRespawnDialog", False),
+                )
+                disable_respawn_unconscious = st.checkbox(
+                    "Bloquear respawn inconsciente (disableRespawnInUnconsciousness)",
+                    value=general.get("disableRespawnInUnconsciousness", False),
+                )
+    
+            # -------------------------------
+            # Stamina
+            # -------------------------------
+            st.markdown("### 💪 Jogador - Stamina")
+    
+            col_s1, col_s2 = st.columns(2)
+            with col_s1:
+                stamina_max = st.number_input(
+                    "Stamina máxima (staminaMax)",
+                    min_value=10.0,
+                    max_value=50000.0,
+                    step=5.0,
+                    value=float(stamina.get("staminaMax", 100.0)),
+                )
+                stamina_min_cap = st.number_input(
+                    "Stamina mínima (staminaMinCap)",
+                    min_value=0.0,
+                    max_value=50.0,
+                    step=1.0,
+                    value=float(stamina.get("staminaMinCap", 5.0)),
+                )
+                stamina_weight_threshold = st.number_input(
+                    "Peso limite stamina (staminaWeightLimitThreshold)",
+                    min_value=0.0,
+                    max_value=20000.0,
+                    step=100.0,
+                    value=float(stamina.get("staminaWeightLimitThreshold", 6000.0)),
+                )
+            with col_s2:
+                stamina_penalty = st.number_input("Penalidade kg → % (staminaKgToStaminaPercentPenalty)", min_value=0.0, max_value=10.0, step=0.05, value=float(stamina.get("staminaKgToStaminaPercentPenalty", 1.75)))
+                sprint_sta_mod_erc = st.number_input("Sprint em pé (sprintStaminaModifierErc)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("sprintStaminaModifierErc", 1.0)))
+                sprint_sta_mod_cro = st.number_input("Sprint abaixado (sprintStaminaModifierCro)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("sprintStaminaModifierCro", 1.0)))
+    
+            col_s3, col_s4 = st.columns(2)
+            with col_s3:
+                sprint_swim_mod = st.number_input("Sprint nadando (sprintSwimmingStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("sprintSwimmingStaminaModifier", 1.0)))
+                sprint_ladder_mod = st.number_input("Sprint em escada (sprintLadderStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("sprintLadderStaminaModifier", 1.0)))
+                melee_sta_mod = st.number_input("Stamina corpo a corpo (meleeStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("meleeStaminaModifier", 1.0)))
+            with col_s4:
+                obstacle_sta_mod = st.number_input("Stamina obstáculos (obstacleTraversalStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("obstacleTraversalStaminaModifier", 1.0)))
+                hold_breath_mod = st.number_input("Segurar respiração (holdBreathStaminaModifier)", min_value=0.1, max_value=5.0, step=0.1, value=float(stamina.get("holdBreathStaminaModifier", 1.0)))
+            
+            disable_personal_light = st.checkbox("Desativar luz pessoal (disablePersonalLight)", value=player.get("disablePersonalLight", False))
+    
+            # -------------------------------
+            # Shock / Movimento
+            # -------------------------------
+            st.markdown("### 🧠 Jogador - Shock e Movimento")
+    
+            col_sh1, col_sh2 = st.columns(2)
+            with col_sh1:
+                shock_refill_con = st.number_input(
+                    "Refill choque consciente (shockRefillSpeedConscious)",
+                    min_value=0.1,
+                    max_value=50.0,
+                    step=0.5,
+                    value=float(shock.get("shockRefillSpeedConscious", 5.0)),
+                )
+                shock_refill_uncon = st.number_input(
+                    "Refill choque inconsciente (shockRefillSpeedUnconscious)",
+                    min_value=0.1,
+                    max_value=50.0,
+                    step=0.5,
+                    value=float(shock.get("shockRefillSpeedUnconscious", 1.0)),
+                )
+            with col_sh2:
+                allow_refill_mod = st.checkbox(
+                    "Permitir modificador de refill (allowRefillSpeedModifier)",
+                    value=shock.get("allowRefillSpeedModifier", True),
+                )
+    
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                time_to_sprint = st.number_input("Tempo para sprint (timeToSprint)", min_value=0.0, max_value=5.0, step=0.05, value=float(movement.get("timeToSprint", 0.45)))
+                time_to_strafe_jog = st.number_input("Tempo para strafe correndo (timeToStrafeJog)", min_value=0.0, max_value=5.0, step=0.05, value=float(movement.get("timeToStrafeJog", 0.1)))
+                time_to_strafe_sprint = st.number_input("Tempo para strafe sprint (timeToStrafeSprint)", min_value=0.0, max_value=5.0, step=0.05, value=float(movement.get("timeToStrafeSprint", 0.3)))
+            with col_m2:
+                rot_speed_jog = st.number_input("Rotação correndo (rotationSpeedJog)", min_value=0.0, max_value=2.0, step=0.05, value=float(movement.get("rotationSpeedJog", 0.3)))
+                rot_speed_sprint = st.number_input("Rotação sprint (rotationSpeedSprint)", min_value=0.0, max_value=2.0, step=0.05, value=float(movement.get("rotationSpeedSprint", 0.15)))
+                allow_sta_inertia = st.checkbox("Stamina afeta inércia (allowStaminaAffectInertia)", value=movement.get("allowStaminaAffectInertia", True))
+    
+            # -------------------------------
+            # Drowning
+            # -------------------------------
+            st.markdown("### 🌊 Afogamento")
+            drowning = player.get("DrowningData", {})
+            col_d1, col_d2, col_d3 = st.columns(3)
+            with col_d1:
+                drown_stamina = st.number_input("Depleção stamina (staminaDepletionSpeed)", min_value=0.0, max_value=100.0, step=1.0, value=float(drowning.get("staminaDepletionSpeed", 10.0)))
+            with col_d2:
+                drown_health = st.number_input("Depleção vida (healthDepletionSpeed)", min_value=0.0, max_value=100.0, step=1.0, value=float(drowning.get("healthDepletionSpeed", 10.0)))
+            with col_d3:
+                drown_shock = st.number_input("Depleção choque (shockDepletionSpeed)", min_value=0.0, max_value=100.0, step=1.0, value=float(drowning.get("shockDepletionSpeed", 10.0)))
+    
+            # -------------------------------
+            # Weapon Obstruction
+            # -------------------------------
+            st.markdown("### 🔫 Obstrução de Armas")
+            weapon_obs = player.get("WeaponObstructionData", {})
+            col_w1, col_w2 = st.columns(2)
+            with col_w1:
+                weapon_static_mode = st.selectbox("Modo estático (staticMode)", options=[0, 1], index=int(weapon_obs.get("staticMode", 1)), help="0 = desativado, 1 = ativado")
+            with col_w2:
+                weapon_dynamic_mode = st.selectbox("Modo dinâmico (dynamicMode)", options=[0, 1], index=int(weapon_obs.get("dynamicMode", 1)), help="0 = desativado, 1 = ativado")
+    
+            # -------------------------------
+            # Base Building
+            # -------------------------------
+            st.markdown("### 🏗️ Construção de Bases")
+            base = cfg.get("BaseBuildingData", {})
+            hologram = base.get("HologramData", {})
+            construction = base.get("ConstructionData", {})
+    
+            st.markdown("**Hologram (verificações ao posicionar)**")
+            col_h1, col_h2 = st.columns(2)
+            with col_h1:
+                dis_bbox = st.checkbox("Desativar colisão BBox (disableIsCollidingBBoxCheck)", value=hologram.get("disableIsCollidingBBoxCheck", False))
+                dis_player = st.checkbox("Desativar colisão jogador (disableIsCollidingPlayerCheck)", value=hologram.get("disableIsCollidingPlayerCheck", False))
+                dis_roof = st.checkbox("Desativar verificação teto (disableIsClippingRoofCheck)", value=hologram.get("disableIsClippingRoofCheck", False))
+                dis_base_viable = st.checkbox("Desativar base viável (disableIsBaseViableCheck)", value=hologram.get("disableIsBaseViableCheck", False))
+                dis_gplot = st.checkbox("Desativar colisão GPlot (disableIsCollidingGPlotCheck)", value=hologram.get("disableIsCollidingGPlotCheck", False))
+                dis_angle = st.checkbox("Desativar verificação ângulo (disableIsCollidingAngleCheck)", value=hologram.get("disableIsCollidingAngleCheck", False))
+            with col_h2:
+                dis_placement = st.checkbox("Desativar permissão de colocação (disableIsPlacementPermittedCheck)", value=hologram.get("disableIsPlacementPermittedCheck", False))
+                dis_height = st.checkbox("Desativar verificação altura (disableHeightPlacementCheck)", value=hologram.get("disableHeightPlacementCheck", False))
+                dis_underwater = st.checkbox("Desativar verificação subaquática (disableIsUnderwaterCheck)", value=hologram.get("disableIsUnderwaterCheck", False))
+                dis_terrain = st.checkbox("Desativar verificação terreno (disableIsInTerrainCheck)", value=hologram.get("disableIsInTerrainCheck", False))
+                dis_cold = st.checkbox("Desativar verificação área fria (disableColdAreaBuildingCheck)", value=hologram.get("disableColdAreaBuildingCheck", False))
+    
+            st.markdown("**Construção**")
+            col_c1, col_c2, col_c3 = st.columns(3)
+            with col_c1:
+                dis_roof_check = st.checkbox("Desativar check teto (disablePerformRoofCheck)", value=construction.get("disablePerformRoofCheck", False))
+            with col_c2:
+                dis_colliding_check = st.checkbox("Desativar check colisão (disableIsCollidingCheck)", value=construction.get("disableIsCollidingCheck", False))
+            with col_c3:
+                dis_distance_check = st.checkbox("Desativar check distância (disableDistanceCheck)", value=construction.get("disableDistanceCheck", False))
+    
+            # -------------------------------
+            # Mundo / Clima
+            # -------------------------------
+            st.markdown("### 🌍 Mundo / Clima")
+    
+            lighting_config = st.selectbox(
+                "Preset de iluminação (lightingConfig)",
+                options=[0, 1, 2],
+                index=[0, 1, 2].index(int(worlds.get("lightingConfig", 0))),
+                help="Controla presets de iluminação do servidor.",
+            )
+    
+            st.info(
+                "As listas environmentMinTemps e environmentMaxTemps definem temperaturas por mês. "
+                "Manteremos edição avançada para uma próxima versão."
+            )
+    
+            # -------------------------------
+            # Mapa / UI
+            # -------------------------------
+            st.markdown("### 🗺️ Mapa e Interface")
+    
+            col_map1, col_map2 = st.columns(2)
+            with col_map1:
+                display_player_pos = st.checkbox(
+                    "Mostrar posição do jogador no mapa (displayPlayerPosition)",
+                    value=map_data.get("displayPlayerPosition", False),
+                )
+                display_nav_info = st.checkbox(
+                    "Mostrar infos de navegação (displayNavInfo)",
+                    value=map_data.get("displayNavInfo", True),
+                )
+            with col_map2:
+                use_3d_map = st.checkbox("Usar mapa 3D (use3DMap)", value=ui_data.get("use3DMap", False))
+                ignore_map_ownership = st.checkbox("Ignorar posse do mapa (ignoreMapOwnership)", value=map_data.get("ignoreMapOwnership", False))
+                ignore_nav_ownership = st.checkbox("Ignorar posse de nav items (ignoreNavItemsOwnership)", value=map_data.get("ignoreNavItemsOwnership", False))
+    
+            st.markdown("**Indicação de Hit**")
+            hit = ui_data.get("HitIndicationData", {})
+            col_hi1, col_hi2 = st.columns(2)
+            with col_hi1:
+                hit_dir_override = st.checkbox("Override direção hit (hitDirectionOverrideEnabled)", value=hit.get("hitDirectionOverrideEnabled", False))
+                hit_dir_behaviour = st.selectbox("Comportamento direção hit (hitDirectionBehaviour)", options=[0, 1, 2], index=min(int(hit.get("hitDirectionBehaviour", 1)), 2))
+                hit_dir_style = st.selectbox("Estilo indicador hit (hitDirectionStyle)", options=[0, 1, 2], index=min(int(hit.get("hitDirectionStyle", 0)), 2))
+                hit_post_process = st.checkbox("Post process indicação hit (hitIndicationPostProcessEnabled)", value=hit.get("hitIndicationPostProcessEnabled", True))
+            with col_hi2:
+                hit_max_duration = st.number_input("Duração máx. indicador (hitDirectionMaxDuration, seg.)", min_value=0.1, max_value=10.0, step=0.1, value=float(hit.get("hitDirectionMaxDuration", 2.0)))
+                hit_breakpoint = st.number_input("Breakpoint relativo (hitDirectionBreakPointRelative)", min_value=0.0, max_value=1.0, step=0.05, value=float(hit.get("hitDirectionBreakPointRelative", 0.2)))
+                hit_scatter = st.number_input("Dispersão indicador (hitDirectionScatter)", min_value=0.0, max_value=90.0, step=1.0, value=float(hit.get("hitDirectionScatter", 10.0)))
+                hit_color = st.text_input("Cor indicador hex (hitDirectionIndicatorColorStr)", value=hit.get("hitDirectionIndicatorColorStr", "0xffbb0a1e"))
+    
+            # -------------------------------
+            # Veículos
+            # -------------------------------
+            st.markdown("### 🚗 Veículos")
+    
+            boat_decay_multiplier = st.number_input(
+                "Multiplicador de decay de barcos (boatDecayMultiplier)",
+                min_value=0.0,
+                max_value=10.0,
+                step=0.1,
+                value=float(vehicle_data.get("boatDecayMultiplier", 1)),
+            )
+    
+            st.markdown("### 💾 Gerar cfggameplay.json ajustado")
+    
+            col_save1, col_save2 = st.columns(2)
+    
+            # 3) Aplicar alterações na sessão (atualiza cfg em memória)
+            with col_save1:
+                if st.button(
+                    "Aplicar alterações na sessão (cfggameplay)",
+                    use_container_width=True,
+                ):
+                    # General
+                    cfg["GeneralData"] = {
+                        **general,
+                        "disableBaseDamage": disable_base_damage,
+                        "disableContainerDamage": disable_container_damage,
+                        "disableRespawnDialog": disable_respawn_dialog,
+                        "disableRespawnInUnconsciousness": disable_respawn_unconscious,
+                    }
+    
+                    # Stamina
+                    stamina.update({
+                        "staminaMax": stamina_max,
+                        "staminaMinCap": stamina_min_cap,
+                        "staminaWeightLimitThreshold": stamina_weight_threshold,
+                        "staminaKgToStaminaPercentPenalty": stamina_penalty,
+                        "sprintStaminaModifierErc": sprint_sta_mod_erc,
+                        "sprintStaminaModifierCro": sprint_sta_mod_cro,
+                        "sprintSwimmingStaminaModifier": sprint_swim_mod,
+                        "sprintLadderStaminaModifier": sprint_ladder_mod,
+                        "meleeStaminaModifier": melee_sta_mod,
+                        "obstacleTraversalStaminaModifier": obstacle_sta_mod,
+                        "holdBreathStaminaModifier": hold_breath_mod,
+                    })
+                    player["StaminaData"] = stamina
+    
+                    # Shock
+                    shock.update({
+                        "shockRefillSpeedConscious": shock_refill_con,
+                        "shockRefillSpeedUnconscious": shock_refill_uncon,
+                        "allowRefillSpeedModifier": allow_refill_mod,
+                    })
+                    player["ShockHandlingData"] = shock
+    
+                    # Movement
+                    movement.update({
+                        "timeToSprint": time_to_sprint,
+                        "timeToStrafeJog": time_to_strafe_jog,
+                        "timeToStrafeSprint": time_to_strafe_sprint,
+                        "rotationSpeedJog": rot_speed_jog,
+                        "rotationSpeedSprint": rot_speed_sprint,
+                        "allowStaminaAffectInertia": allow_sta_inertia,
+                    })
+                    player["MovementData"] = movement
+    
+                    # Drowning
+                    player["DrowningData"] = {
+                        "staminaDepletionSpeed": drown_stamina,
+                        "healthDepletionSpeed": drown_health,
+                        "shockDepletionSpeed": drown_shock,
+                    }
+    
+                    # Weapon Obstruction
+                    player["WeaponObstructionData"] = {
+                        "staticMode": weapon_static_mode,
+                        "dynamicMode": weapon_dynamic_mode,
+                    }
+    
+                    player["disablePersonalLight"] = disable_personal_light
+                    cfg["PlayerData"] = player
+    
+                    # Base Building
+                    cfg["BaseBuildingData"] = {
+                        "HologramData": {
+                            "disableIsCollidingBBoxCheck": dis_bbox,
+                            "disableIsCollidingPlayerCheck": dis_player,
+                            "disableIsClippingRoofCheck": dis_roof,
+                            "disableIsBaseViableCheck": dis_base_viable,
+                            "disableIsCollidingGPlotCheck": dis_gplot,
+                            "disableIsCollidingAngleCheck": dis_angle,
+                            "disableIsPlacementPermittedCheck": dis_placement,
+                            "disableHeightPlacementCheck": dis_height,
+                            "disableIsUnderwaterCheck": dis_underwater,
+                            "disableIsInTerrainCheck": dis_terrain,
+                            "disableColdAreaBuildingCheck": dis_cold,
+                            "disallowedTypesInUnderground": hologram.get("disallowedTypesInUnderground", ["FenceKit","TerritoryFlagKit","WatchtowerKit"]),
+                        },
+                        "ConstructionData": {
+                            "disablePerformRoofCheck": dis_roof_check,
+                            "disableIsCollidingCheck": dis_colliding_check,
+                            "disableDistanceCheck": dis_distance_check,
+                        }
+                    }
+    
+                    # Mapa
+                    map_data["displayPlayerPosition"] = display_player_pos
+                    map_data["displayNavInfo"] = display_nav_info
+                    map_data["ignoreMapOwnership"] = ignore_map_ownership
+                    map_data["ignoreNavItemsOwnership"] = ignore_nav_ownership
+                    cfg["MapData"] = map_data
+    
+                    # UI + HitIndication
+                    ui_data["use3DMap"] = use_3d_map
+                    ui_data["HitIndicationData"] = {
+                        "hitDirectionOverrideEnabled": hit_dir_override,
+                        "hitDirectionBehaviour": hit_dir_behaviour,
+                        "hitDirectionStyle": hit_dir_style,
+                        "hitDirectionIndicatorColorStr": hit_color,
+                        "hitDirectionMaxDuration": hit_max_duration,
+                        "hitDirectionBreakPointRelative": hit_breakpoint,
+                        "hitDirectionScatter": hit_scatter,
+                        "hitIndicationPostProcessEnabled": hit_post_process,
+                    }
+                    cfg["UIData"] = ui_data
+    
+                    # Mundo
+                    worlds["lightingConfig"] = lighting_config
+                    cfg["WorldsData"] = worlds
+    
+                    # Mapa / UI
+                    map_data["displayPlayerPosition"] = display_player_pos
+                    map_data["displayNavInfo"] = display_nav_info
+                    cfg["MapData"] = map_data
+    
+                    ui_data["use3DMap"] = use_3d_map
+                    cfg["UIData"] = ui_data
+    
+                    # Veículos
+                    vehicle_data["boatDecayMultiplier"] = boat_decay_multiplier
+                    cfg["VehicleData"] = vehicle_data
+    
+                    st.session_state[cfg_session_key] = cfg
+                    st.success("Alterações aplicadas internamente ao cfggameplay.json.")
+    
+            # 4) Download do arquivo ajustado
+            with col_save2:
+                if st.button("⬇️ Baixar cfggameplay.json ajustado", use_container_width=True):
+                    try:
+                        cfg_bytes = json.dumps(
+                            st.session_state[cfg_session_key],
+                            ensure_ascii=False,
+                            indent=4,
+                        ).encode("utf-8")
+    
+                        st.download_button(
+                            label="Baixar cfggameplay.json",
+                            data=cfg_bytes,
+                            file_name="cfggameplay_editado.json",
+                            mime="application/json",
+                            use_container_width=True,
+                        )
+                    except Exception as e:
+                        st.error(f"Erro ao gerar cfggameplay.json: {e}")
+    
+            # (Opcional) 5) Salvar em disco + enviar via FTP
+            st.markdown("### 🚀 Salvar no Titan Cloud e enviar via FTP (opcional)")
+    
+            mapa_cfggameplay = st.selectbox(
+                "Mapa de destino (onde o cfggameplay.json será aplicado)",
+                ["Chernarus", "Livonia"],
+                key="cfggameplay_mapa_dest",
+            )
+    
+            if st.button(
+                "Salvar no Titan Cloud e enviar via FTP (cfggameplay)",
                 use_container_width=True,
             ):
-                # General
-                cfg["GeneralData"] = {
-                    **general,
-                    "disableBaseDamage": disable_base_damage,
-                    "disableContainerDamage": disable_container_damage,
-                    "disableRespawnDialog": disable_respawn_dialog,
-                    "disableRespawnInUnconsciousness": disable_respawn_unconscious,
-                }
-
-                # Stamina
-                stamina.update({
-                    "staminaMax": stamina_max,
-                    "staminaMinCap": stamina_min_cap,
-                    "staminaWeightLimitThreshold": stamina_weight_threshold,
-                    "staminaKgToStaminaPercentPenalty": stamina_penalty,
-                    "sprintStaminaModifierErc": sprint_sta_mod_erc,
-                    "sprintStaminaModifierCro": sprint_sta_mod_cro,
-                    "sprintSwimmingStaminaModifier": sprint_swim_mod,
-                    "sprintLadderStaminaModifier": sprint_ladder_mod,
-                    "meleeStaminaModifier": melee_sta_mod,
-                    "obstacleTraversalStaminaModifier": obstacle_sta_mod,
-                    "holdBreathStaminaModifier": hold_breath_mod,
-                })
-                player["StaminaData"] = stamina
-
-                # Shock
-                shock.update({
-                    "shockRefillSpeedConscious": shock_refill_con,
-                    "shockRefillSpeedUnconscious": shock_refill_uncon,
-                    "allowRefillSpeedModifier": allow_refill_mod,
-                })
-                player["ShockHandlingData"] = shock
-
-                # Movement
-                movement.update({
-                    "timeToSprint": time_to_sprint,
-                    "timeToStrafeJog": time_to_strafe_jog,
-                    "timeToStrafeSprint": time_to_strafe_sprint,
-                    "rotationSpeedJog": rot_speed_jog,
-                    "rotationSpeedSprint": rot_speed_sprint,
-                    "allowStaminaAffectInertia": allow_sta_inertia,
-                })
-                player["MovementData"] = movement
-
-                # Drowning
-                player["DrowningData"] = {
-                    "staminaDepletionSpeed": drown_stamina,
-                    "healthDepletionSpeed": drown_health,
-                    "shockDepletionSpeed": drown_shock,
-                }
-
-                # Weapon Obstruction
-                player["WeaponObstructionData"] = {
-                    "staticMode": weapon_static_mode,
-                    "dynamicMode": weapon_dynamic_mode,
-                }
-
-                player["disablePersonalLight"] = disable_personal_light
-                cfg["PlayerData"] = player
-
-                # Base Building
-                cfg["BaseBuildingData"] = {
-                    "HologramData": {
-                        "disableIsCollidingBBoxCheck": dis_bbox,
-                        "disableIsCollidingPlayerCheck": dis_player,
-                        "disableIsClippingRoofCheck": dis_roof,
-                        "disableIsBaseViableCheck": dis_base_viable,
-                        "disableIsCollidingGPlotCheck": dis_gplot,
-                        "disableIsCollidingAngleCheck": dis_angle,
-                        "disableIsPlacementPermittedCheck": dis_placement,
-                        "disableHeightPlacementCheck": dis_height,
-                        "disableIsUnderwaterCheck": dis_underwater,
-                        "disableIsInTerrainCheck": dis_terrain,
-                        "disableColdAreaBuildingCheck": dis_cold,
-                        "disallowedTypesInUnderground": hologram.get("disallowedTypesInUnderground", ["FenceKit","TerritoryFlagKit","WatchtowerKit"]),
-                    },
-                    "ConstructionData": {
-                        "disablePerformRoofCheck": dis_roof_check,
-                        "disableIsCollidingCheck": dis_colliding_check,
-                        "disableDistanceCheck": dis_distance_check,
-                    }
-                }
-
-                # Mapa
-                map_data["displayPlayerPosition"] = display_player_pos
-                map_data["displayNavInfo"] = display_nav_info
-                map_data["ignoreMapOwnership"] = ignore_map_ownership
-                map_data["ignoreNavItemsOwnership"] = ignore_nav_ownership
-                cfg["MapData"] = map_data
-
-                # UI + HitIndication
-                ui_data["use3DMap"] = use_3d_map
-                ui_data["HitIndicationData"] = {
-                    "hitDirectionOverrideEnabled": hit_dir_override,
-                    "hitDirectionBehaviour": hit_dir_behaviour,
-                    "hitDirectionStyle": hit_dir_style,
-                    "hitDirectionIndicatorColorStr": hit_color,
-                    "hitDirectionMaxDuration": hit_max_duration,
-                    "hitDirectionBreakPointRelative": hit_breakpoint,
-                    "hitDirectionScatter": hit_scatter,
-                    "hitIndicationPostProcessEnabled": hit_post_process,
-                }
-                cfg["UIData"] = ui_data
-
-                # Mundo
-                worlds["lightingConfig"] = lighting_config
-                cfg["WorldsData"] = worlds
-
-                # Mapa / UI
-                map_data["displayPlayerPosition"] = display_player_pos
-                map_data["displayNavInfo"] = display_nav_info
-                cfg["MapData"] = map_data
-
-                ui_data["use3DMap"] = use_3d_map
-                cfg["UIData"] = ui_data
-
-                # Veículos
-                vehicle_data["boatDecayMultiplier"] = boat_decay_multiplier
-                cfg["VehicleData"] = vehicle_data
-
-                st.session_state[cfg_session_key] = cfg
-                st.success("Alterações aplicadas internamente ao cfggameplay.json.")
-
-        # 4) Download do arquivo ajustado
-        with col_save2:
-            if st.button("⬇️ Baixar cfggameplay.json ajustado", use_container_width=True):
                 try:
                     cfg_bytes = json.dumps(
                         st.session_state[cfg_session_key],
                         ensure_ascii=False,
                         indent=4,
                     ).encode("utf-8")
-
-                    st.download_button(
-                        label="Baixar cfggameplay.json",
-                        data=cfg_bytes,
-                        file_name="cfggameplay_editado.json",
-                        mime="application/json",
-                        use_container_width=True,
-                    )
                 except Exception as e:
-                    st.error(f"Erro ao gerar cfggameplay.json: {e}")
-
-        # (Opcional) 5) Salvar em disco + enviar via FTP
-        st.markdown("### 🚀 Salvar no Titan Cloud e enviar via FTP (opcional)")
-
-        mapa_cfggameplay = st.selectbox(
-            "Mapa de destino (onde o cfggameplay.json será aplicado)",
-            ["Chernarus", "Livonia"],
-            key="cfggameplay_mapa_dest",
-        )
-
-        if st.button(
-            "Salvar no Titan Cloud e enviar via FTP (cfggameplay)",
-            use_container_width=True,
-        ):
-            try:
-                cfg_bytes = json.dumps(
-                    st.session_state[cfg_session_key],
-                    ensure_ascii=False,
-                    indent=4,
-                ).encode("utf-8")
-            except Exception as e:
-                st.error(f"Erro ao serializar cfggameplay.json: {e}")
-                st.stop()
-
-            safe_name_cfg = f"{user_id[:5]}_cfggameplay_{mapa_cfggameplay.lower()}.json"
-            local_cfggameplay_path = os.path.join(UPLOAD_DIR, safe_name_cfg)
-
-            try:
-                with open(local_cfggameplay_path, "wb") as f:
-                    f.write(cfg_bytes)
-            except Exception as e:
-                registrar_log(
+                    st.error(f"Erro ao serializar cfggameplay.json: {e}")
+                    st.stop()
+    
+                safe_name_cfg = f"{user_id[:5]}_cfggameplay_{mapa_cfggameplay.lower()}.json"
+                local_cfggameplay_path = os.path.join(UPLOAD_DIR, safe_name_cfg)
+    
+                try:
+                    with open(local_cfggameplay_path, "wb") as f:
+                        f.write(cfg_bytes)
+                except Exception as e:
+                    registrar_log(
+                        user_id,
+                        f"Erro ao salvar cfggameplay.json localmente ({str(e)})",
+                        "erro",
+                    )
+                    st.error(f"Erro ao salvar cfggameplay.json localmente: {e}")
+                    st.stop()
+    
+                # Você implementa essa função seguindo o padrão types/globals:
+                ok_cfg, msg_cfg = enviar_cfggameplay_via_ftp(
                     user_id,
-                    f"Erro ao salvar cfggameplay.json localmente ({str(e)})",
-                    "erro",
+                    local_cfggameplay_path,
+                    mapa_cfggameplay,
                 )
-                st.error(f"Erro ao salvar cfggameplay.json localmente: {e}")
-                st.stop()
-
-            # Você implementa essa função seguindo o padrão types/globals:
-            ok_cfg, msg_cfg = enviar_cfggameplay_via_ftp(
-                user_id,
-                local_cfggameplay_path,
-                mapa_cfggameplay,
-            )
-
-            if ok_cfg:
-                registrar_log(
-                    user_id,
-                    f"cfggameplay.json atualizado e enviado via FTP para {mapa_cfggameplay}.",
-                    "sucesso",
-                )
-                st.success("cfggameplay.json enviado e aplicado via FTP com sucesso!")
-            else:
-                registrar_log(
-                    user_id,
-                    f"Falha ao enviar cfggameplay.json via FTP ({msg_cfg})",
-                    "erro",
-                )
-                st.error(f"Erro ao enviar cfggameplay via FTP: {msg_cfg}")
-    else:
-        st.info("Envie o cfggameplay.json do seu servidor para começar a editar.")
-
+    
+                if ok_cfg:
+                    registrar_log(
+                        user_id,
+                        f"cfggameplay.json atualizado e enviado via FTP para {mapa_cfggameplay}.",
+                        "sucesso",
+                    )
+                    st.success("cfggameplay.json enviado e aplicado via FTP com sucesso!")
+                else:
+                    registrar_log(
+                        user_id,
+                        f"Falha ao enviar cfggameplay.json via FTP ({msg_cfg})",
+                        "erro",
+                    )
+                    st.error(f"Erro ao enviar cfggameplay via FTP: {msg_cfg}")
+        else:
+            st.info("Envie o cfggameplay.json do seu servidor para começar a editar.")
+    
 with tabevents:
     if not plano_permite(plano_atual, "editor_events"):
         bloquear_funcionalidade(plano_atual, "📅 Editor de Eventos (events.xml)")
     else:
         st.subheader("🎪 Eventos / events.xml")
-    st.info("Você pode enviar o events.xml manualmente ou carregar direto do servidor via FTP.")
-
-    # chaves únicas da sessão para este usuário
-    key_tree = f"events_tree_{user_id}"
-    key_root = f"events_root_{user_id}"
-    key_df = f"events_df_{user_id}"
-
-    mapa_events = st.selectbox(
-        "Mapa do events.xml",
-        ["Chernarus", "Livonia"],
-        key=f"mapa_events_ftp_{user_id}"
-    )
-
-    cole1, cole2 = st.columns([1, 1])
-
-    with cole1:
-        if st.button(
-            "📥 Carregar events.xml do servidor via FTP",
-            use_container_width=True,
-            key=f"btn_load_events_ftp_{user_id}"
-        ):
-            ok, xml_bytes, msg = baixareventsviaftp(user_id, mapa_events)
-
-            if ok:
-                try:
-                    tree, root, df_events = parse_events_xml(xml_bytes)
-
-                    st.session_state[key_tree] = tree
-                    st.session_state[key_root] = root
-                    st.session_state[key_df] = df_events
-
-                    st.success(f"events.xml carregado do servidor com sucesso! ({len(df_events)} eventos)")
-                except Exception as e:
-                    st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
-            else:
-                st.error(f"Erro ao baixar events.xml via FTP: {msg}")
-
-    with cole2:
-        up_events = st.file_uploader(
-            "Enviar events.xml",
-            type=["xml"],
-            key=f"up_eventsxml_{user_id}"
+        st.info("Você pode enviar o events.xml manualmente ou carregar direto do servidor via FTP.")
+    
+        # chaves únicas da sessão para este usuário
+        key_tree = f"events_tree_{user_id}"
+        key_root = f"events_root_{user_id}"
+        key_df = f"events_df_{user_id}"
+    
+        mapa_events = st.selectbox(
+            "Mapa do events.xml",
+            ["Chernarus", "Livonia"],
+            key=f"mapa_events_ftp_{user_id}"
         )
-
-    if up_events is not None:
-        try:
-            xml_bytes = up_events.read()
-            tree, root, df_events = parse_events_xml(xml_bytes)
-
-            st.session_state[key_tree] = tree
-            st.session_state[key_root] = root
-            st.session_state[key_df] = df_events
-
-            st.success(f"Arquivo carregado: {up_events.name} ({len(df_events)} eventos)")
-        except Exception as e:
-            st.error(f"Erro ao ler events.xml: {e}")
-
-    mapaevents = st.selectbox(
-        "Mapa de destino onde o events.xml será aplicado",
-        ["Chernarus", "Livonia"],
-        key=f"mapaevents_{user_id}"
-    )
-
-    if key_df in st.session_state:
-        df_events = st.session_state[key_df].copy()
-
-        if "active" in df_events.columns:
-            df_events["active"] = df_events["active"].astype(bool)
-
-        st.markdown("### 🔍 Filtros rápidos")
-
-        colf1, colf2 = st.columns([2, 1])
-
-        with colf1:
-            busca_evento = st.text_input(
-                "Buscar evento por nome",
-                "",
-                key=f"busca_events_{user_id}"
+    
+        cole1, cole2 = st.columns([1, 1])
+    
+        with cole1:
+            if st.button(
+                "📥 Carregar events.xml do servidor via FTP",
+                use_container_width=True,
+                key=f"btn_load_events_ftp_{user_id}"
+            ):
+                ok, xml_bytes, msg = baixareventsviaftp(user_id, mapa_events)
+    
+                if ok:
+                    try:
+                        tree, root, df_events = parse_events_xml(xml_bytes)
+    
+                        st.session_state[key_tree] = tree
+                        st.session_state[key_root] = root
+                        st.session_state[key_df] = df_events
+    
+                        st.success(f"events.xml carregado do servidor com sucesso! ({len(df_events)} eventos)")
+                    except Exception as e:
+                        st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
+                else:
+                    st.error(f"Erro ao baixar events.xml via FTP: {msg}")
+    
+        with cole2:
+            up_events = st.file_uploader(
+                "Enviar events.xml",
+                type=["xml"],
+                key=f"up_eventsxml_{user_id}"
             )
-
-        with colf2:
-            somente_ativos = st.checkbox(
-                "Mostrar apenas ativos",
-                key=f"ativos_events_{user_id}"
-            )
-
-        df_view = df_events.copy()
-
-        if busca_evento.strip():
-            df_view = df_view[
-                df_view["name"].astype(str).str.contains(busca_evento.strip(), case=False, na=False)
-            ]
-
-        if somente_ativos and "active" in df_view.columns:
-            df_view = df_view[df_view["active"]]
-
-        st.markdown("### ✏️ Ajuste de parâmetros")
-
-        edited_df = st.data_editor(
-            df_view,
-            num_rows="fixed",
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "name": st.column_config.TextColumn(
-                    "Evento",
-                    help="Nome interno do evento no events.xml."
-                ),
-                "nominal": st.column_config.NumberColumn(
-                    "Nominal",
-                    min_value=0,
-                    step=1
-                ),
-                "min": st.column_config.NumberColumn(
-                    "Min",
-                    min_value=0,
-                    step=1
-                ),
-                "max": st.column_config.NumberColumn(
-                    "Max",
-                    min_value=0,
-                    step=1
-                ),
-                "lifetime": st.column_config.NumberColumn(
-                    "Lifetime",
-                    min_value=0,
-                    step=1
-                ),
-                "restock": st.column_config.NumberColumn(
-                    "Restock",
-                    min_value=0,
-                    step=1
-                ),
-                "saferadius": st.column_config.NumberColumn(
-                    "SafeRadius",
-                    min_value=0,
-                    step=1
-                ),
-                "distanceradius": st.column_config.NumberColumn(
-                    "DistanceRadius",
-                    min_value=0,
-                    step=1
-                ),
-                "cleanupradius": st.column_config.NumberColumn(
-                    "CleanupRadius",
-                    min_value=0,
-                    step=1
-                ),
-                "active": st.column_config.CheckboxColumn(
-                    "Ativo",
-                    help="Define se o evento está ativo no XML."
-                ),
-            },
-            disabled=["name"],
-            key=f"editor_events_{user_id}"
+    
+        if up_events is not None:
+            try:
+                xml_bytes = up_events.read()
+                tree, root, df_events = parse_events_xml(xml_bytes)
+    
+                st.session_state[key_tree] = tree
+                st.session_state[key_root] = root
+                st.session_state[key_df] = df_events
+    
+                st.success(f"Arquivo carregado: {up_events.name} ({len(df_events)} eventos)")
+            except Exception as e:
+                st.error(f"Erro ao ler events.xml: {e}")
+    
+        mapaevents = st.selectbox(
+            "Mapa de destino onde o events.xml será aplicado",
+            ["Chernarus", "Livonia"],
+            key=f"mapaevents_{user_id}"
         )
-
-        st.markdown("### 💾 Gerar, baixar e aplicar")
-
-        colb1, colb2, colb3 = st.columns(3)
-
-        with colb1:
-            if st.button(
-                "Aplicar alterações na sessão",
+    
+        if key_df in st.session_state:
+            df_events = st.session_state[key_df].copy()
+    
+            if "active" in df_events.columns:
+                df_events["active"] = df_events["active"].astype(bool)
+    
+            st.markdown("### 🔍 Filtros rápidos")
+    
+            colf1, colf2 = st.columns([2, 1])
+    
+            with colf1:
+                busca_evento = st.text_input(
+                    "Buscar evento por nome",
+                    "",
+                    key=f"busca_events_{user_id}"
+                )
+    
+            with colf2:
+                somente_ativos = st.checkbox(
+                    "Mostrar apenas ativos",
+                    key=f"ativos_events_{user_id}"
+                )
+    
+            df_view = df_events.copy()
+    
+            if busca_evento.strip():
+                df_view = df_view[
+                    df_view["name"].astype(str).str.contains(busca_evento.strip(), case=False, na=False)
+                ]
+    
+            if somente_ativos and "active" in df_view.columns:
+                df_view = df_view[df_view["active"]]
+    
+            st.markdown("### ✏️ Ajuste de parâmetros")
+    
+            edited_df = st.data_editor(
+                df_view,
+                num_rows="fixed",
+                hide_index=True,
                 use_container_width=True,
-                key=f"btn_apply_events_{user_id}"
-            ):
-                df_merged = df_events.copy().set_index("name")
-                edited_indexed = edited_df.copy().set_index("name")
-
-                for idx in edited_indexed.index:
-                    if idx in df_merged.index:
-                        for col in [
-                            "nominal",
-                            "min",
-                            "max",
-                            "lifetime",
-                            "restock",
-                            "saferadius",
-                            "distanceradius",
-                            "cleanupradius",
-                            "active",
-                        ]:
-                            if col in edited_indexed.columns and col in df_merged.columns:
-                                df_merged.loc[idx, col] = edited_indexed.loc[idx, col]
-
-                st.session_state[key_df] = df_merged.reset_index()
-                st.success("Alterações aplicadas internamente ao events.xml (sessão).")
-
-        with colb2:
-            tree = st.session_state.get(key_tree)
-            root = st.session_state.get(key_root)
-            df_full = st.session_state.get(key_df)
-
-            if tree is not None and root is not None and df_full is not None:
-                try:
-                    new_xml_bytes = apply_df_to_events_xml(tree, root, df_full)
-
-                    st.download_button(
-                        label="⬇️ Baixar events.xml ajustado",
-                        data=new_xml_bytes,
-                        file_name="events_editado.xml",
-                        mime="application/xml",
-                        use_container_width=True,
-                        key=f"download_events_editado_{user_id}"
-                    )
-                except Exception as e:
-                    st.error(f"Erro ao gerar events.xml ajustado: {e}")
-
-        with colb3:
-            if st.button(
-                "Salvar no Titan Cloud e enviar via FTP",
-                use_container_width=True,
-                key=f"btn_events_save_{user_id}"
-            ):
+                column_config={
+                    "name": st.column_config.TextColumn(
+                        "Evento",
+                        help="Nome interno do evento no events.xml."
+                    ),
+                    "nominal": st.column_config.NumberColumn(
+                        "Nominal",
+                        min_value=0,
+                        step=1
+                    ),
+                    "min": st.column_config.NumberColumn(
+                        "Min",
+                        min_value=0,
+                        step=1
+                    ),
+                    "max": st.column_config.NumberColumn(
+                        "Max",
+                        min_value=0,
+                        step=1
+                    ),
+                    "lifetime": st.column_config.NumberColumn(
+                        "Lifetime",
+                        min_value=0,
+                        step=1
+                    ),
+                    "restock": st.column_config.NumberColumn(
+                        "Restock",
+                        min_value=0,
+                        step=1
+                    ),
+                    "saferadius": st.column_config.NumberColumn(
+                        "SafeRadius",
+                        min_value=0,
+                        step=1
+                    ),
+                    "distanceradius": st.column_config.NumberColumn(
+                        "DistanceRadius",
+                        min_value=0,
+                        step=1
+                    ),
+                    "cleanupradius": st.column_config.NumberColumn(
+                        "CleanupRadius",
+                        min_value=0,
+                        step=1
+                    ),
+                    "active": st.column_config.CheckboxColumn(
+                        "Ativo",
+                        help="Define se o evento está ativo no XML."
+                    ),
+                },
+                disabled=["name"],
+                key=f"editor_events_{user_id}"
+            )
+    
+            st.markdown("### 💾 Gerar, baixar e aplicar")
+    
+            colb1, colb2, colb3 = st.columns(3)
+    
+            with colb1:
+                if st.button(
+                    "Aplicar alterações na sessão",
+                    use_container_width=True,
+                    key=f"btn_apply_events_{user_id}"
+                ):
+                    df_merged = df_events.copy().set_index("name")
+                    edited_indexed = edited_df.copy().set_index("name")
+    
+                    for idx in edited_indexed.index:
+                        if idx in df_merged.index:
+                            for col in [
+                                "nominal",
+                                "min",
+                                "max",
+                                "lifetime",
+                                "restock",
+                                "saferadius",
+                                "distanceradius",
+                                "cleanupradius",
+                                "active",
+                            ]:
+                                if col in edited_indexed.columns and col in df_merged.columns:
+                                    df_merged.loc[idx, col] = edited_indexed.loc[idx, col]
+    
+                    st.session_state[key_df] = df_merged.reset_index()
+                    st.success("Alterações aplicadas internamente ao events.xml (sessão).")
+    
+            with colb2:
                 tree = st.session_state.get(key_tree)
                 root = st.session_state.get(key_root)
                 df_full = st.session_state.get(key_df)
-
-                if tree is None or root is None or df_full is None:
-                    st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
-                else:
+    
+                if tree is not None and root is not None and df_full is not None:
                     try:
                         new_xml_bytes = apply_df_to_events_xml(tree, root, df_full)
-
-                        safe_name = f"{user_id[:5]}_events_{mapaevents.lower()}.xml"
-                        localpath = os.path.join(UPLOAD_DIR, safe_name)
-
-                        with open(localpath, "wb") as f:
-                            f.write(new_xml_bytes)
-
-                        ok, msg = enviareventsviaftp(user_id, localpath, mapaevents)
-
-                        if ok:
+    
+                        st.download_button(
+                            label="⬇️ Baixar events.xml ajustado",
+                            data=new_xml_bytes,
+                            file_name="events_editado.xml",
+                            mime="application/xml",
+                            use_container_width=True,
+                            key=f"download_events_editado_{user_id}"
+                        )
+                    except Exception as e:
+                        st.error(f"Erro ao gerar events.xml ajustado: {e}")
+    
+            with colb3:
+                if st.button(
+                    "Salvar no Titan Cloud e enviar via FTP",
+                    use_container_width=True,
+                    key=f"btn_events_save_{user_id}"
+                ):
+                    tree = st.session_state.get(key_tree)
+                    root = st.session_state.get(key_root)
+                    df_full = st.session_state.get(key_df)
+    
+                    if tree is None or root is None or df_full is None:
+                        st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
+                    else:
+                        try:
+                            new_xml_bytes = apply_df_to_events_xml(tree, root, df_full)
+    
+                            safe_name = f"{user_id[:5]}_events_{mapaevents.lower()}.xml"
+                            localpath = os.path.join(UPLOAD_DIR, safe_name)
+    
+                            with open(localpath, "wb") as f:
+                                f.write(new_xml_bytes)
+    
+                            ok, msg = enviareventsviaftp(user_id, localpath, mapaevents)
+    
+                            if ok:
+                                registrar_log(
+                                    user_id,
+                                    f"events.xml atualizado e enviado via FTP para {mapaevents}.",
+                                    "sucesso"
+                                )
+                                st.success("events.xml enviado e aplicado via FTP com sucesso!")
+                            else:
+                                registrar_log(
+                                    user_id,
+                                    f"Falha ao enviar events.xml via FTP: {msg}",
+                                    "erro"
+                                )
+                                st.error(f"Erro ao enviar events.xml via FTP: {msg}")
+    
+                        except Exception as e:
                             registrar_log(
                                 user_id,
-                                f"events.xml atualizado e enviado via FTP para {mapaevents}.",
-                                "sucesso"
-                            )
-                            st.success("events.xml enviado e aplicado via FTP com sucesso!")
-                        else:
-                            registrar_log(
-                                user_id,
-                                f"Falha ao enviar events.xml via FTP: {msg}",
+                                f"Erro ao salvar/enviar events.xml: {str(e)}",
                                 "erro"
                             )
-                            st.error(f"Erro ao enviar events.xml via FTP: {msg}")
-
-                    except Exception as e:
-                        registrar_log(
-                            user_id,
-                            f"Erro ao salvar/enviar events.xml: {str(e)}",
-                            "erro"
-                        )
-                        st.error(f"Erro ao salvar/enviar events.xml: {e}")
-
-        st.divider()
-        st.markdown("### ℹ️ Observações rápidas")
-        st.write("- Use primeiro o botão Aplicar alterações na sessão antes de baixar ou enviar.")
-        st.write("- O download e o FTP sempre usam o DataFrame salvo na sessão.")
-    else:
-        st.info("Envie o events.xml do seu servidor para começar a editar.")
-
-
+                            st.error(f"Erro ao salvar/enviar events.xml: {e}")
+    
+            st.divider()
+            st.markdown("### ℹ️ Observações rápidas")
+            st.write("- Use primeiro o botão Aplicar alterações na sessão antes de baixar ou enviar.")
+            st.write("- O download e o FTP sempre usam o DataFrame salvo na sessão.")
+        else:
+            st.info("Envie o events.xml do seu servidor para começar a editar.")
+    
+    
 with tabmessages:
     if not plano_permite(plano_atual, "editor_messages"):
         bloquear_funcionalidade(plano_atual, "💬 Editor de Mensagens (messages.xml)")
     else:
         st.subheader("💬 Mensagens / messages.xml")
-    st.info("Você pode enviar o messages.xml manualmente ou carregar direto do servidor via FTP.")
-
-    # chaves únicas da sessão para este usuário
-    key_tree = f"messages_tree_{user_id}"
-    key_root = f"messages_root_{user_id}"
-    key_df = f"messages_df_{user_id}"
-
-    mapa_messages = st.selectbox(
-        "Mapa do messages.xml",
-        ["Chernarus", "Livonia"],
-        key=f"mapa_messages_ftp_{user_id}"
-    )
-
-    colm1, colm2 = st.columns([1, 1])
-
-    with colm1:
-        if st.button(
-            "📥 Carregar messages.xml do servidor via FTP",
-            use_container_width=True,
-            key=f"btn_load_messages_ftp_{user_id}"
-        ):
-            ok, xml_bytes, msg = baixarmessagesviaftp(user_id, mapa_messages)
-
-            if ok:
-                try:
-                    tree, root, df_messages = parse_messages_xml(xml_bytes)
-
-                    st.session_state[key_tree] = tree
-                    st.session_state[key_root] = root
-                    st.session_state[key_df] = df_messages
-
-                    st.success(f"messages.xml carregado do servidor com sucesso! ({len(df_messages)} mensagens)")
-                except Exception as e:
-                    st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
-            else:
-                st.error(f"Erro ao baixar messages.xml via FTP: {msg}")
-
-    with colm2:
-        up_messages = st.file_uploader(
-            "Enviar messages.xml",
-            type=["xml"],
-            key=f"up_messagesxml_{user_id}"
+        st.info("Você pode enviar o messages.xml manualmente ou carregar direto do servidor via FTP.")
+    
+        # chaves únicas da sessão para este usuário
+        key_tree = f"messages_tree_{user_id}"
+        key_root = f"messages_root_{user_id}"
+        key_df = f"messages_df_{user_id}"
+    
+        mapa_messages = st.selectbox(
+            "Mapa do messages.xml",
+            ["Chernarus", "Livonia"],
+            key=f"mapa_messages_ftp_{user_id}"
         )
-
-    if up_messages is not None:
-        try:
-            xml_bytes = up_messages.read()
-            tree, root, df_messages = parse_messages_xml(xml_bytes)
-
-            st.session_state[key_tree] = tree
-            st.session_state[key_root] = root
-            st.session_state[key_df] = df_messages
-
-            st.success(f"Arquivo carregado: {up_messages.name} ({len(df_messages)} mensagens)")
-        except Exception as e:
-            st.error(f"Erro ao ler messages.xml: {e}")
-
-    mapamessages = st.selectbox(
-        "Mapa de destino onde o messages.xml será aplicado",
-        ["Chernarus", "Livonia"],
-        key=f"mapamessages_{user_id}"
-    )
-
-    if key_df in st.session_state:
-        df_messages = st.session_state[key_df].copy()
-
-        if "text" not in df_messages.columns:
-            df_messages["text"] = ""
-
-        if "time" not in df_messages.columns:
-            df_messages["time"] = 0
-
-        if "ordem" not in df_messages.columns:
-            df_messages["ordem"] = range(1, len(df_messages) + 1)
-
-        if "_elem" not in df_messages.columns:
-            df_messages["_elem"] = None
-
-        st.markdown("### 🔍 Mensagens atualmente aplicadas")
-
-        busca_msg = st.text_input(
-            "Buscar por texto da mensagem",
-            "",
-            key=f"busca_messages_{user_id}"
-        )
-
-        with st.expander("🔎 Diagnóstico do messages.xml carregado", expanded=False):
-            st.write(f"Total de mensagens detectadas: {len(df_messages)}")
-            if not df_messages.empty:
-                cols_diag = [c for c in ["ordem", "time", "text"] if c in df_messages.columns]
-                st.dataframe(
-                    df_messages[cols_diag].copy(),
-                    use_container_width=True
-                )
-
-        st.markdown("### ➕ Inclusão rápida")
-
-        col_new1, col_new2 = st.columns([3, 1])
-
-        with col_new1:
-            nova_msg_texto = st.text_input(
-                "Texto da nova mensagem",
-                key=f"nova_msg_texto_{user_id}",
-                placeholder="Ex: Reinício do servidor em 10 minutos."
+    
+        colm1, colm2 = st.columns([1, 1])
+    
+        with colm1:
+            if st.button(
+                "📥 Carregar messages.xml do servidor via FTP",
+                use_container_width=True,
+                key=f"btn_load_messages_ftp_{user_id}"
+            ):
+                ok, xml_bytes, msg = baixarmessagesviaftp(user_id, mapa_messages)
+    
+                if ok:
+                    try:
+                        tree, root, df_messages = parse_messages_xml(xml_bytes)
+    
+                        st.session_state[key_tree] = tree
+                        st.session_state[key_root] = root
+                        st.session_state[key_df] = df_messages
+    
+                        st.success(f"messages.xml carregado do servidor com sucesso! ({len(df_messages)} mensagens)")
+                    except Exception as e:
+                        st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
+                else:
+                    st.error(f"Erro ao baixar messages.xml via FTP: {msg}")
+    
+        with colm2:
+            up_messages = st.file_uploader(
+                "Enviar messages.xml",
+                type=["xml"],
+                key=f"up_messagesxml_{user_id}"
             )
-
-        with col_new2:
-            nova_msg_tempo = st.number_input(
-                "Tempo",
-                min_value=0,
-                step=1,
-                value=30,
-                key=f"nova_msg_tempo_{user_id}"
-            )
-
-        if st.button("Adicionar nova mensagem à sessão", use_container_width=True, key=f"btn_add_message_{user_id}"):
-            if not nova_msg_texto.strip():
-                st.warning("Digite o texto da nova mensagem antes de adicionar.")
-            else:
-                nova_ordem = int(df_messages["ordem"].max()) + 1 if not df_messages.empty else 1
-
-                nova_linha = {
-                    "ordem": nova_ordem,
-                    "id": "",
-                    "name": "",
-                    "time": int(nova_msg_tempo),
-                    "priority": 0,
-                    "color": "",
-                    "icon": "",
-                    "text": nova_msg_texto.strip(),
-                    "_elem": None,
-                }
-
-                df_messages = pd.concat([df_messages, pd.DataFrame([nova_linha])], ignore_index=True)
+    
+        if up_messages is not None:
+            try:
+                xml_bytes = up_messages.read()
+                tree, root, df_messages = parse_messages_xml(xml_bytes)
+    
+                st.session_state[key_tree] = tree
+                st.session_state[key_root] = root
                 st.session_state[key_df] = df_messages
-                st.success("Nova mensagem adicionada à sessão. Agora você pode revisar, baixar ou enviar.")
-
-        df_view = df_messages.copy()
-
-        if busca_msg.strip():
-            df_view = df_view[
-                df_view["text"].astype(str).str.contains(busca_msg.strip(), case=False, na=False)
-            ]
-
-        st.markdown("### ✏️ Ajuste de mensagens")
-
-        cols_editor = [c for c in ["ordem", "time", "text"] if c in df_view.columns]
-
-        edited_df = st.data_editor(
-            df_view[cols_editor],
-            num_rows="dynamic",
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "ordem": st.column_config.NumberColumn("Ordem", disabled=True),
-                "time": st.column_config.NumberColumn("Tempo", min_value=0, step=1),
-                "text": st.column_config.TextColumn("Mensagem", width="large"),
-            },
-            disabled=["ordem"],
-            key=f"editor_messages_{user_id}"
+    
+                st.success(f"Arquivo carregado: {up_messages.name} ({len(df_messages)} mensagens)")
+            except Exception as e:
+                st.error(f"Erro ao ler messages.xml: {e}")
+    
+        mapamessages = st.selectbox(
+            "Mapa de destino onde o messages.xml será aplicado",
+            ["Chernarus", "Livonia"],
+            key=f"mapamessages_{user_id}"
         )
-
-        st.markdown("### 💾 Gerar, baixar e aplicar")
-
-        colmsg1, colmsg2, colmsg3 = st.columns(3)
-
-        with colmsg1:
-            if st.button(
-                "Aplicar alterações na sessão",
-                use_container_width=True,
-                key=f"btn_apply_messages_{user_id}"
-            ):
-                df_full = df_messages.copy().set_index("ordem")
-                df_edit = edited_df.copy().set_index("ordem")
-
-                for idx in df_edit.index:
-                    if idx in df_full.index:
-                        for col in ["time", "text"]:
-                            if col in df_edit.columns and col in df_full.columns:
-                                df_full.loc[idx, col] = df_edit.loc[idx, col]
-
-                novos_indices = [idx for idx in df_edit.index if idx not in df_full.index]
-                if novos_indices:
-                    novas_linhas = df_edit.loc[novos_indices].reset_index()
-                    novas_linhas["id"] = ""
-                    novas_linhas["name"] = ""
-                    novas_linhas["priority"] = 0
-                    novas_linhas["color"] = ""
-                    novas_linhas["icon"] = ""
-                    novas_linhas["_elem"] = None
-                    df_full = pd.concat([df_full.reset_index(), novas_linhas], ignore_index=True).set_index("ordem")
-
-                st.session_state[key_df] = df_full.reset_index().sort_values("ordem").reset_index(drop=True)
-                st.success("Alterações aplicadas internamente ao messages.xml (sessão).")
-
-        with colmsg2:
-            tree = st.session_state.get(key_tree)
-            root = st.session_state.get(key_root)
-            df_full = st.session_state.get(key_df)
-
-            if tree is not None and root is not None and df_full is not None:
-                try:
-                    new_xml_bytes = apply_df_to_messages_xml(tree, root, df_full)
-
-                    st.download_button(
-                        label="⬇️ Baixar messages.xml ajustado",
-                        data=new_xml_bytes,
-                        file_name="messages_editado.xml",
-                        mime="application/xml",
-                        use_container_width=True,
-                        key=f"download_messages_editado_{user_id}"
+    
+        if key_df in st.session_state:
+            df_messages = st.session_state[key_df].copy()
+    
+            if "text" not in df_messages.columns:
+                df_messages["text"] = ""
+    
+            if "time" not in df_messages.columns:
+                df_messages["time"] = 0
+    
+            if "ordem" not in df_messages.columns:
+                df_messages["ordem"] = range(1, len(df_messages) + 1)
+    
+            if "_elem" not in df_messages.columns:
+                df_messages["_elem"] = None
+    
+            st.markdown("### 🔍 Mensagens atualmente aplicadas")
+    
+            busca_msg = st.text_input(
+                "Buscar por texto da mensagem",
+                "",
+                key=f"busca_messages_{user_id}"
+            )
+    
+            with st.expander("🔎 Diagnóstico do messages.xml carregado", expanded=False):
+                st.write(f"Total de mensagens detectadas: {len(df_messages)}")
+                if not df_messages.empty:
+                    cols_diag = [c for c in ["ordem", "time", "text"] if c in df_messages.columns]
+                    st.dataframe(
+                        df_messages[cols_diag].copy(),
+                        use_container_width=True
                     )
-                except Exception as e:
-                    st.error(f"Erro ao gerar messages.xml ajustado: {e}")
-
-        with colmsg3:
-            if st.button(
-                "Salvar no Titan Cloud e enviar via FTP",
+    
+            st.markdown("### ➕ Inclusão rápida")
+    
+            col_new1, col_new2 = st.columns([3, 1])
+    
+            with col_new1:
+                nova_msg_texto = st.text_input(
+                    "Texto da nova mensagem",
+                    key=f"nova_msg_texto_{user_id}",
+                    placeholder="Ex: Reinício do servidor em 10 minutos."
+                )
+    
+            with col_new2:
+                nova_msg_tempo = st.number_input(
+                    "Tempo",
+                    min_value=0,
+                    step=1,
+                    value=30,
+                    key=f"nova_msg_tempo_{user_id}"
+                )
+    
+            if st.button("Adicionar nova mensagem à sessão", use_container_width=True, key=f"btn_add_message_{user_id}"):
+                if not nova_msg_texto.strip():
+                    st.warning("Digite o texto da nova mensagem antes de adicionar.")
+                else:
+                    nova_ordem = int(df_messages["ordem"].max()) + 1 if not df_messages.empty else 1
+    
+                    nova_linha = {
+                        "ordem": nova_ordem,
+                        "id": "",
+                        "name": "",
+                        "time": int(nova_msg_tempo),
+                        "priority": 0,
+                        "color": "",
+                        "icon": "",
+                        "text": nova_msg_texto.strip(),
+                        "_elem": None,
+                    }
+    
+                    df_messages = pd.concat([df_messages, pd.DataFrame([nova_linha])], ignore_index=True)
+                    st.session_state[key_df] = df_messages
+                    st.success("Nova mensagem adicionada à sessão. Agora você pode revisar, baixar ou enviar.")
+    
+            df_view = df_messages.copy()
+    
+            if busca_msg.strip():
+                df_view = df_view[
+                    df_view["text"].astype(str).str.contains(busca_msg.strip(), case=False, na=False)
+                ]
+    
+            st.markdown("### ✏️ Ajuste de mensagens")
+    
+            cols_editor = [c for c in ["ordem", "time", "text"] if c in df_view.columns]
+    
+            edited_df = st.data_editor(
+                df_view[cols_editor],
+                num_rows="dynamic",
+                hide_index=True,
                 use_container_width=True,
-                key=f"btn_messages_save_{user_id}"
-            ):
+                column_config={
+                    "ordem": st.column_config.NumberColumn("Ordem", disabled=True),
+                    "time": st.column_config.NumberColumn("Tempo", min_value=0, step=1),
+                    "text": st.column_config.TextColumn("Mensagem", width="large"),
+                },
+                disabled=["ordem"],
+                key=f"editor_messages_{user_id}"
+            )
+    
+            st.markdown("### 💾 Gerar, baixar e aplicar")
+    
+            colmsg1, colmsg2, colmsg3 = st.columns(3)
+    
+            with colmsg1:
+                if st.button(
+                    "Aplicar alterações na sessão",
+                    use_container_width=True,
+                    key=f"btn_apply_messages_{user_id}"
+                ):
+                    df_full = df_messages.copy().set_index("ordem")
+                    df_edit = edited_df.copy().set_index("ordem")
+    
+                    for idx in df_edit.index:
+                        if idx in df_full.index:
+                            for col in ["time", "text"]:
+                                if col in df_edit.columns and col in df_full.columns:
+                                    df_full.loc[idx, col] = df_edit.loc[idx, col]
+    
+                    novos_indices = [idx for idx in df_edit.index if idx not in df_full.index]
+                    if novos_indices:
+                        novas_linhas = df_edit.loc[novos_indices].reset_index()
+                        novas_linhas["id"] = ""
+                        novas_linhas["name"] = ""
+                        novas_linhas["priority"] = 0
+                        novas_linhas["color"] = ""
+                        novas_linhas["icon"] = ""
+                        novas_linhas["_elem"] = None
+                        df_full = pd.concat([df_full.reset_index(), novas_linhas], ignore_index=True).set_index("ordem")
+    
+                    st.session_state[key_df] = df_full.reset_index().sort_values("ordem").reset_index(drop=True)
+                    st.success("Alterações aplicadas internamente ao messages.xml (sessão).")
+    
+            with colmsg2:
                 tree = st.session_state.get(key_tree)
                 root = st.session_state.get(key_root)
                 df_full = st.session_state.get(key_df)
-
-                if tree is None or root is None or df_full is None:
-                    st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
-                else:
+    
+                if tree is not None and root is not None and df_full is not None:
                     try:
                         new_xml_bytes = apply_df_to_messages_xml(tree, root, df_full)
-
-                        safename = f"{user_id[:5]}_messages_{mapamessages.lower()}.xml"
-                        localpath = os.path.join(UPLOAD_DIR, safename)
-
-                        with open(localpath, "wb") as f:
-                            f.write(new_xml_bytes)
-
-                        ok, msg = enviarmessagesviaftp(user_id, localpath, mapamessages)
-
-                        if ok:
+    
+                        st.download_button(
+                            label="⬇️ Baixar messages.xml ajustado",
+                            data=new_xml_bytes,
+                            file_name="messages_editado.xml",
+                            mime="application/xml",
+                            use_container_width=True,
+                            key=f"download_messages_editado_{user_id}"
+                        )
+                    except Exception as e:
+                        st.error(f"Erro ao gerar messages.xml ajustado: {e}")
+    
+            with colmsg3:
+                if st.button(
+                    "Salvar no Titan Cloud e enviar via FTP",
+                    use_container_width=True,
+                    key=f"btn_messages_save_{user_id}"
+                ):
+                    tree = st.session_state.get(key_tree)
+                    root = st.session_state.get(key_root)
+                    df_full = st.session_state.get(key_df)
+    
+                    if tree is None or root is None or df_full is None:
+                        st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
+                    else:
+                        try:
+                            new_xml_bytes = apply_df_to_messages_xml(tree, root, df_full)
+    
+                            safename = f"{user_id[:5]}_messages_{mapamessages.lower()}.xml"
+                            localpath = os.path.join(UPLOAD_DIR, safename)
+    
+                            with open(localpath, "wb") as f:
+                                f.write(new_xml_bytes)
+    
+                            ok, msg = enviarmessagesviaftp(user_id, localpath, mapamessages)
+    
+                            if ok:
+                                registrar_log(
+                                    user_id,
+                                    f"messages.xml atualizado e enviado via FTP para {mapamessages}.",
+                                    "sucesso"
+                                )
+                                st.success("messages.xml enviado e aplicado via FTP com sucesso!")
+                            else:
+                                registrar_log(
+                                    user_id,
+                                    f"Falha ao enviar messages.xml via FTP: {msg}",
+                                    "erro"
+                                )
+                                st.error(f"Erro ao enviar messages.xml via FTP: {msg}")
+    
+                        except Exception as e:
                             registrar_log(
                                 user_id,
-                                f"messages.xml atualizado e enviado via FTP para {mapamessages}.",
-                                "sucesso"
-                            )
-                            st.success("messages.xml enviado e aplicado via FTP com sucesso!")
-                        else:
-                            registrar_log(
-                                user_id,
-                                f"Falha ao enviar messages.xml via FTP: {msg}",
+                                f"Erro ao salvar/enviar messages.xml: {str(e)}",
                                 "erro"
                             )
-                            st.error(f"Erro ao enviar messages.xml via FTP: {msg}")
-
-                    except Exception as e:
-                        registrar_log(
-                            user_id,
-                            f"Erro ao salvar/enviar messages.xml: {str(e)}",
-                            "erro"
-                        )
-                        st.error(f"Erro ao salvar/enviar messages.xml: {e}")
-
-        st.divider()
-        st.markdown("### ℹ️ Observações rápidas")
-        st.write("- A interface mostra apenas os campos realmente úteis para o seu messages.xml atual.")
-        st.write("- Você pode adicionar novas mensagens direto pela área de inclusão rápida.")
-        st.write("- Use primeiro o botão Aplicar alterações na sessão antes de baixar ou enviar.")
-        st.write("- O download e o FTP sempre usam o DataFrame salvo na sessão.")
-        st.write("- O bloco de diagnóstico ajuda a validar se o parser leu corretamente o schema do seu XML.")
-    else:
-        st.info("Envie o messages.xml do seu servidor para começar a visualizar, editar e incluir novas mensagens.")
-
-
+                            st.error(f"Erro ao salvar/enviar messages.xml: {e}")
+    
+            st.divider()
+            st.markdown("### ℹ️ Observações rápidas")
+            st.write("- A interface mostra apenas os campos realmente úteis para o seu messages.xml atual.")
+            st.write("- Você pode adicionar novas mensagens direto pela área de inclusão rápida.")
+            st.write("- Use primeiro o botão Aplicar alterações na sessão antes de baixar ou enviar.")
+            st.write("- O download e o FTP sempre usam o DataFrame salvo na sessão.")
+            st.write("- O bloco de diagnóstico ajuda a validar se o parser leu corretamente o schema do seu XML.")
+        else:
+            st.info("Envie o messages.xml do seu servidor para começar a visualizar, editar e incluir novas mensagens.")
+    
+    
 with tabcfgeventspawns:
     if not plano_permite(plano_atual, "editor_cfgeventspawns"):
         bloquear_funcionalidade(plano_atual, "📍 Editor de Spawns (cfgeventspawns.xml)")
     else:
         st.subheader("📍 Spawns / cfgeventspawns.xml")
-    st.info("Você pode enviar o cfgeventspawns.xml manualmente ou carregar direto do servidor via FTP.")
-
-    # chaves únicas da sessão para este usuário
-    key_tree = f"cfgeventspawns_tree_{user_id}"
-    key_root = f"cfgeventspawns_root_{user_id}"
-    key_map = f"cfgeventspawns_map_{user_id}"
-
-    mapa_spawns = st.selectbox(
-        "Mapa do cfgeventspawns.xml",
-        ["Chernarus", "Livonia"],
-        key=f"mapa_cfgeventspawns_ftp_{user_id}"
-    )
-
-    cols1, cols2 = st.columns([1, 1])
-
-    with cols1:
-        if st.button(
-            "📥 Carregar cfgeventspawns.xml do servidor via FTP",
-            use_container_width=True,
-            key=f"btn_load_cfgeventspawns_ftp_{user_id}"
-        ):
-            ok, xml_bytes, msg = baixarcfgeventspawnsviaftp(user_id, mapa_spawns)
-
-            if ok:
-                try:
-                    tree, root, eventos_map = parse_cfgeventspawns_xml(xml_bytes)
-
-                    st.session_state[key_tree] = tree
-                    st.session_state[key_root] = root
-                    st.session_state[key_map] = eventos_map
-
-                    st.success(f"cfgeventspawns.xml carregado do servidor com sucesso! ({len(eventos_map)} eventos)")
-                except Exception as e:
-                    st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
-            else:
-                st.error(f"Erro ao baixar cfgeventspawns.xml via FTP: {msg}")
-
-    with cols2:
-        up_cfgeventspawns = st.file_uploader(
-            "Enviar cfgeventspawns.xml",
-            type=["xml"],
-            key=f"up_cfgeventspawnsxml_{user_id}"
+        st.info("Você pode enviar o cfgeventspawns.xml manualmente ou carregar direto do servidor via FTP.")
+    
+        # chaves únicas da sessão para este usuário
+        key_tree = f"cfgeventspawns_tree_{user_id}"
+        key_root = f"cfgeventspawns_root_{user_id}"
+        key_map = f"cfgeventspawns_map_{user_id}"
+    
+        mapa_spawns = st.selectbox(
+            "Mapa do cfgeventspawns.xml",
+            ["Chernarus", "Livonia"],
+            key=f"mapa_cfgeventspawns_ftp_{user_id}"
         )
-
-    if up_cfgeventspawns is not None:
-        try:
-            xml_bytes = up_cfgeventspawns.read()
-            tree, root, eventos_map = parse_cfgeventspawns_xml(xml_bytes)
-
-            st.session_state[key_tree] = tree
-            st.session_state[key_root] = root
-            st.session_state[key_map] = eventos_map
-
-            st.success(f"Arquivo carregado: {up_cfgeventspawns.name} ({len(eventos_map)} eventos)")
-        except Exception as e:
-            st.error(f"Erro ao ler cfgeventspawns.xml: {e}")
-
-    if key_map in st.session_state:
-        eventos_map = st.session_state[key_map]
-        nomes_eventos = sorted(eventos_map.keys())
-
-        if not nomes_eventos:
-            st.warning("Nenhum evento encontrado no cfgeventspawns.xml.")
-            st.stop()
-
-        colsel1, colsel2 = st.columns([2, 1])
-
-        with colsel1:
-            evento_sel = st.selectbox(
-                "Selecione o evento para editar",
-                options=nomes_eventos,
-                key=f"cfgeventspawns_evento_sel_{user_id}"
-            )
-
-        with colsel2:
-            mapa_dest = st.selectbox(
-                "Mapa de destino",
-                ["Chernarus", "Livonia"],
-                key=f"cfgeventspawns_mapa_{user_id}"
-            )
-
-        df_evento = eventos_map[evento_sel].copy()
-
-        st.markdown("### Posições do evento")
-        st.caption("Edite coordenadas X/Z, ângulo A e altura Y quando existir. Você também pode adicionar novas linhas.")
-
-        edited_df = st.data_editor(
-            df_evento,
-            num_rows="dynamic",
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "x": st.column_config.NumberColumn("X", step=0.1),
-                "z": st.column_config.NumberColumn("Z", step=0.1),
-                "a": st.column_config.NumberColumn("Ângulo A", step=0.1),
-                "y": st.column_config.NumberColumn("Altura Y", step=0.1),
-            },
-            key=f"editor_cfgeventspawns_{user_id}_{evento_sel}"
-        )
-
-        c1, c2, c3 = st.columns(3)
-
-        with c1:
+    
+        cols1, cols2 = st.columns([1, 1])
+    
+        with cols1:
             if st.button(
-                "Aplicar alterações na sessão",
+                "📥 Carregar cfgeventspawns.xml do servidor via FTP",
                 use_container_width=True,
-                key=f"btn_apply_cfgeventspawns_{user_id}"
+                key=f"btn_load_cfgeventspawns_ftp_{user_id}"
             ):
-                eventos_map[evento_sel] = edited_df
+                ok, xml_bytes, msg = baixarcfgeventspawnsviaftp(user_id, mapa_spawns)
+    
+                if ok:
+                    try:
+                        tree, root, eventos_map = parse_cfgeventspawns_xml(xml_bytes)
+    
+                        st.session_state[key_tree] = tree
+                        st.session_state[key_root] = root
+                        st.session_state[key_map] = eventos_map
+    
+                        st.success(f"cfgeventspawns.xml carregado do servidor com sucesso! ({len(eventos_map)} eventos)")
+                    except Exception as e:
+                        st.error(f"Arquivo baixado, mas houve erro ao interpretar o XML: {e}")
+                else:
+                    st.error(f"Erro ao baixar cfgeventspawns.xml via FTP: {msg}")
+    
+        with cols2:
+            up_cfgeventspawns = st.file_uploader(
+                "Enviar cfgeventspawns.xml",
+                type=["xml"],
+                key=f"up_cfgeventspawnsxml_{user_id}"
+            )
+    
+        if up_cfgeventspawns is not None:
+            try:
+                xml_bytes = up_cfgeventspawns.read()
+                tree, root, eventos_map = parse_cfgeventspawns_xml(xml_bytes)
+    
+                st.session_state[key_tree] = tree
+                st.session_state[key_root] = root
                 st.session_state[key_map] = eventos_map
-                st.success(f"Alterações aplicadas ao evento '{evento_sel}' na sessão.")
-
-        with c2:
-            if st.button(
-                "Baixar cfgeventspawns.xml ajustado",
+    
+                st.success(f"Arquivo carregado: {up_cfgeventspawns.name} ({len(eventos_map)} eventos)")
+            except Exception as e:
+                st.error(f"Erro ao ler cfgeventspawns.xml: {e}")
+    
+        if key_map in st.session_state:
+            eventos_map = st.session_state[key_map]
+            nomes_eventos = sorted(eventos_map.keys())
+    
+            if not nomes_eventos:
+                st.warning("Nenhum evento encontrado no cfgeventspawns.xml.")
+                st.stop()
+    
+            colsel1, colsel2 = st.columns([2, 1])
+    
+            with colsel1:
+                evento_sel = st.selectbox(
+                    "Selecione o evento para editar",
+                    options=nomes_eventos,
+                    key=f"cfgeventspawns_evento_sel_{user_id}"
+                )
+    
+            with colsel2:
+                mapa_dest = st.selectbox(
+                    "Mapa de destino",
+                    ["Chernarus", "Livonia"],
+                    key=f"cfgeventspawns_mapa_{user_id}"
+                )
+    
+            df_evento = eventos_map[evento_sel].copy()
+    
+            st.markdown("### Posições do evento")
+            st.caption("Edite coordenadas X/Z, ângulo A e altura Y quando existir. Você também pode adicionar novas linhas.")
+    
+            edited_df = st.data_editor(
+                df_evento,
+                num_rows="dynamic",
+                hide_index=True,
                 use_container_width=True,
-                key=f"btn_download_cfgeventspawns_{user_id}"
-            ):
-                try:
-                    tree = st.session_state.get(key_tree)
-                    root = st.session_state.get(key_root)
-                    eventos_map = st.session_state.get(key_map)
-
-                    if tree is None or root is None or eventos_map is None:
-                        st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
-                    else:
-                        eventos_map[evento_sel] = edited_df
-                        newxmlbytes = aplicar_eventos_map_no_cfgeventspawns(tree, root, eventos_map)
-
-                        st.download_button(
-                            label="Clique para baixar",
-                            data=newxmlbytes,
-                            file_name="cfgeventspawns_editado.xml",
-                            mime="application/xml",
-                            use_container_width=True
-                        )
-                except Exception as e:
-                    st.error(f"Erro ao gerar cfgeventspawns.xml: {e}")
-
-        with c3:
-            if st.button(
-                "Salvar no Titan Cloud e enviar via FTP",
-                use_container_width=True,
-                key=f"btn_ftp_cfgeventspawns_{user_id}"
-            ):
-                try:
-                    tree = st.session_state.get(key_tree)
-                    root = st.session_state.get(key_root)
-                    eventos_map = st.session_state.get(key_map)
-
-                    if tree is None or root is None or eventos_map is None:
-                        st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
-                    else:
-                        eventos_map[evento_sel] = edited_df
-                        newxmlbytes = aplicar_eventos_map_no_cfgeventspawns(tree, root, eventos_map)
-
-                        safe_name = f"{user_id}_cfgeventspawns_{mapa_dest.lower()}.xml"
-                        localpath = os.path.join(UPLOAD_DIR, safe_name)
-
-                        with open(localpath, "wb") as f:
-                            f.write(newxmlbytes)
-
-                        ok, msg = enviar_cfgeventspawns_via_ftp(user_id, localpath, mapa_dest)
-
-                        if ok:
-                            registrar_log(user_id, f"cfgeventspawns.xml atualizado e enviado via FTP para {mapa_dest}.", "sucesso")
-                            st.success("cfgeventspawns.xml enviado e aplicado via FTP com sucesso!")
+                column_config={
+                    "x": st.column_config.NumberColumn("X", step=0.1),
+                    "z": st.column_config.NumberColumn("Z", step=0.1),
+                    "a": st.column_config.NumberColumn("Ângulo A", step=0.1),
+                    "y": st.column_config.NumberColumn("Altura Y", step=0.1),
+                },
+                key=f"editor_cfgeventspawns_{user_id}_{evento_sel}"
+            )
+    
+            c1, c2, c3 = st.columns(3)
+    
+            with c1:
+                if st.button(
+                    "Aplicar alterações na sessão",
+                    use_container_width=True,
+                    key=f"btn_apply_cfgeventspawns_{user_id}"
+                ):
+                    eventos_map[evento_sel] = edited_df
+                    st.session_state[key_map] = eventos_map
+                    st.success(f"Alterações aplicadas ao evento '{evento_sel}' na sessão.")
+    
+            with c2:
+                if st.button(
+                    "Baixar cfgeventspawns.xml ajustado",
+                    use_container_width=True,
+                    key=f"btn_download_cfgeventspawns_{user_id}"
+                ):
+                    try:
+                        tree = st.session_state.get(key_tree)
+                        root = st.session_state.get(key_root)
+                        eventos_map = st.session_state.get(key_map)
+    
+                        if tree is None or root is None or eventos_map is None:
+                            st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
                         else:
-                            registrar_log(user_id, f"Falha ao enviar cfgeventspawns.xml via FTP: {msg}", "erro")
-                            st.error(f"Erro ao enviar via FTP: {msg}")
-
-                except Exception as e:
-                    registrar_log(user_id, f"Erro ao salvar/enviar cfgeventspawns.xml: {str(e)}", "erro")
-                    st.error(f"Erro ao salvar/enviar cfgeventspawns.xml: {e}")
-
-        st.divider()
-        st.markdown("### Resumo do evento selecionado")
-        st.write(f"- Evento: {evento_sel}")
-        st.write(f"- Total de posições carregadas: {len(edited_df)}")
-
-with tab6:
-    st.subheader("🛒 Loja / Trader")
-    st.info("Configure aqui o catálogo de itens da loja do seu servidor.")
-
-    # Descobre o server_id real vinculado ao usuário logado
-    server_id_loja = st.session_state.db_users.get("keys", {}).get(
-        user_id, {}
-    ).get("server_id", user_id)
-
-    # Recarrega a base mais atual do disco
-    db_completo = load_db(DB_CLIENTS, {})
-
-    # Garante estrutura mínima do servidor
-    if server_id_loja not in db_completo:
-        db_completo[server_id_loja] = {
-            "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
-            "agendas": [],
-            "logs": [],
-            "comunicados": [],
-            "players": {},
-            "loja": {
+                            eventos_map[evento_sel] = edited_df
+                            newxmlbytes = aplicar_eventos_map_no_cfgeventspawns(tree, root, eventos_map)
+    
+                            st.download_button(
+                                label="Clique para baixar",
+                                data=newxmlbytes,
+                                file_name="cfgeventspawns_editado.xml",
+                                mime="application/xml",
+                                use_container_width=True
+                            )
+                    except Exception as e:
+                        st.error(f"Erro ao gerar cfgeventspawns.xml: {e}")
+    
+            with c3:
+                if st.button(
+                    "Salvar no Titan Cloud e enviar via FTP",
+                    use_container_width=True,
+                    key=f"btn_ftp_cfgeventspawns_{user_id}"
+                ):
+                    try:
+                        tree = st.session_state.get(key_tree)
+                        root = st.session_state.get(key_root)
+                        eventos_map = st.session_state.get(key_map)
+    
+                        if tree is None or root is None or eventos_map is None:
+                            st.error("Dados do XML não encontrados na sessão. Reenvie o arquivo.")
+                        else:
+                            eventos_map[evento_sel] = edited_df
+                            newxmlbytes = aplicar_eventos_map_no_cfgeventspawns(tree, root, eventos_map)
+    
+                            safe_name = f"{user_id}_cfgeventspawns_{mapa_dest.lower()}.xml"
+                            localpath = os.path.join(UPLOAD_DIR, safe_name)
+    
+                            with open(localpath, "wb") as f:
+                                f.write(newxmlbytes)
+    
+                            ok, msg = enviar_cfgeventspawns_via_ftp(user_id, localpath, mapa_dest)
+    
+                            if ok:
+                                registrar_log(user_id, f"cfgeventspawns.xml atualizado e enviado via FTP para {mapa_dest}.", "sucesso")
+                                st.success("cfgeventspawns.xml enviado e aplicado via FTP com sucesso!")
+                            else:
+                                registrar_log(user_id, f"Falha ao enviar cfgeventspawns.xml via FTP: {msg}", "erro")
+                                st.error(f"Erro ao enviar via FTP: {msg}")
+    
+                    except Exception as e:
+                        registrar_log(user_id, f"Erro ao salvar/enviar cfgeventspawns.xml: {str(e)}", "erro")
+                        st.error(f"Erro ao salvar/enviar cfgeventspawns.xml: {e}")
+    
+            st.divider()
+            st.markdown("### Resumo do evento selecionado")
+            st.write(f"- Evento: {evento_sel}")
+            st.write(f"- Total de posições carregadas: {len(edited_df)}")
+    
+    with tab6:
+        st.subheader("🛒 Loja / Trader")
+        st.info("Configure aqui o catálogo de itens da loja do seu servidor.")
+    
+        # Descobre o server_id real vinculado ao usuário logado
+        server_id_loja = st.session_state.db_users.get("keys", {}).get(
+            user_id, {}
+        ).get("server_id", user_id)
+    
+        # Recarrega a base mais atual do disco
+        db_completo = load_db(DB_CLIENTS, {})
+    
+        # Garante estrutura mínima do servidor
+        if server_id_loja not in db_completo:
+            db_completo[server_id_loja] = {
+                "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
+                "agendas": [],
+                "logs": [],
+                "comunicados": [],
+                "players": {},
+                "loja": {
+                    "mapa_padrao": "Chernarus",
+                    "posicao_padrao": "",
+                    "itens": [],
+                },
+            }
+    
+        client_data_loja = db_completo[server_id_loja]
+    
+        # Garante estrutura da loja
+        if "loja" not in client_data_loja:
+            client_data_loja["loja"] = {
                 "mapa_padrao": "Chernarus",
                 "posicao_padrao": "",
                 "itens": [],
+            }
+    
+        loja = client_data_loja["loja"]
+        loja.setdefault("mapa_padrao", "Chernarus")
+        loja.setdefault("posicao_padrao", "")
+        loja.setdefault("itens", [])
+    
+        st.markdown("### ⚙️ Configurações gerais da Loja")
+    
+        col_conf1, col_conf2 = st.columns(2)
+        with col_conf1:
+            loja_mapa_padrao = st.selectbox(
+                "Mapa padrão da Loja",
+                ["Chernarus", "Livonia"],
+                index=["Chernarus", "Livonia"].index(loja.get("mapa_padrao", "Chernarus")),
+                key="loja_mapa_padrao",
+            )
+        with col_conf2:
+            loja_posicao_padrao = st.text_input(
+                "Coordenadas padrão de entrega (opcional)",
+                value=loja.get("posicao_padrao", ""),
+                help=(
+                    "Opcional. Use um mapa como dayz.xam.nu ou iZurvive, clique no local desejado, "
+                    "copie as coordenadas (ex: 2432.34/4353.87) ou a descrição e cole aqui. "
+                    "O player poderá informar outra posição na página de compra."
+                ),
+                key="loja_posicao_padrao",
+            )
+    
+        st.markdown("### 📦 Itens da Loja")
+    
+        df_loja_key = f"df_loja_{server_id_loja}"
+        loja_version_key = f"df_loja_version_{server_id_loja}"
+    
+        loja_serializada = json.dumps(loja, sort_keys=True, ensure_ascii=False)
+    
+        if (
+            df_loja_key not in st.session_state
+            or loja_version_key not in st.session_state
+            or st.session_state[loja_version_key] != loja_serializada
+        ):
+            st.session_state[df_loja_key] = loja_itens_to_df(loja)
+            st.session_state[loja_version_key] = loja_serializada
+    
+        df_loja = st.session_state[df_loja_key]
+    
+        st.info(
+            "Colunas: id (ordem de exibição), nome (visível para o player), "
+            "classe (nome do item no DayZ, ex: M4A1), categoria, preço (DzCoins), quantidade por compra, ativo."
+        )
+    
+        edited_df_loja = st.data_editor(
+            df_loja,
+            num_rows="dynamic",
+            hide_index=True,
+            column_config={
+                "id": st.column_config.NumberColumn(
+                    "ID (ordem)",
+                    help="Ordem do item na lista / identificador para compras.",
+                    min_value=1,
+                    step=1,
+                ),
+                "nome": "Nome (exibido na loja)",
+                "classe": "Classe DayZ (ex: M4A1)",
+                "categoria": "Categoria (Armas, Kits, etc.)",
+                "preco": st.column_config.NumberColumn(
+                    "Preço (DzCoins)",
+                    min_value=0,
+                    step=1,
+                ),
+                "quantidade": st.column_config.NumberColumn(
+                    "Quantidade",
+                    min_value=1,
+                    step=1,
+                ),
+                "ativo": st.column_config.CheckboxColumn(
+                    "Ativo",
+                    default=True,
+                    help="Se desmarcado, o item não aparece para os jogadores.",
+                ),
             },
-        }
-
-    client_data_loja = db_completo[server_id_loja]
-
-    # Garante estrutura da loja
-    if "loja" not in client_data_loja:
-        client_data_loja["loja"] = {
-            "mapa_padrao": "Chernarus",
-            "posicao_padrao": "",
-            "itens": [],
-        }
-
-    loja = client_data_loja["loja"]
-    loja.setdefault("mapa_padrao", "Chernarus")
-    loja.setdefault("posicao_padrao", "")
-    loja.setdefault("itens", [])
-
-    st.markdown("### ⚙️ Configurações gerais da Loja")
-
-    col_conf1, col_conf2 = st.columns(2)
-    with col_conf1:
-        loja_mapa_padrao = st.selectbox(
-            "Mapa padrão da Loja",
-            ["Chernarus", "Livonia"],
-            index=["Chernarus", "Livonia"].index(loja.get("mapa_padrao", "Chernarus")),
-            key="loja_mapa_padrao",
+            key=f"editor_loja_{server_id_loja}",
         )
-    with col_conf2:
-        loja_posicao_padrao = st.text_input(
-            "Coordenadas padrão de entrega (opcional)",
-            value=loja.get("posicao_padrao", ""),
-            help=(
-                "Opcional. Use um mapa como dayz.xam.nu ou iZurvive, clique no local desejado, "
-                "copie as coordenadas (ex: 2432.34/4353.87) ou a descrição e cole aqui. "
-                "O player poderá informar outra posição na página de compra."
-            ),
-            key="loja_posicao_padrao",
-        )
-
-    st.markdown("### 📦 Itens da Loja")
-
-    df_loja_key = f"df_loja_{server_id_loja}"
-    loja_version_key = f"df_loja_version_{server_id_loja}"
-
-    loja_serializada = json.dumps(loja, sort_keys=True, ensure_ascii=False)
-
-    if (
-        df_loja_key not in st.session_state
-        or loja_version_key not in st.session_state
-        or st.session_state[loja_version_key] != loja_serializada
-    ):
-        st.session_state[df_loja_key] = loja_itens_to_df(loja)
-        st.session_state[loja_version_key] = loja_serializada
-
-    df_loja = st.session_state[df_loja_key]
-
-    st.info(
-        "Colunas: id (ordem de exibição), nome (visível para o player), "
-        "classe (nome do item no DayZ, ex: M4A1), categoria, preço (DzCoins), quantidade por compra, ativo."
-    )
-
-    edited_df_loja = st.data_editor(
-        df_loja,
-        num_rows="dynamic",
-        hide_index=True,
-        column_config={
-            "id": st.column_config.NumberColumn(
-                "ID (ordem)",
-                help="Ordem do item na lista / identificador para compras.",
-                min_value=1,
-                step=1,
-            ),
-            "nome": "Nome (exibido na loja)",
-            "classe": "Classe DayZ (ex: M4A1)",
-            "categoria": "Categoria (Armas, Kits, etc.)",
-            "preco": st.column_config.NumberColumn(
-                "Preço (DzCoins)",
-                min_value=0,
-                step=1,
-            ),
-            "quantidade": st.column_config.NumberColumn(
-                "Quantidade",
-                min_value=1,
-                step=1,
-            ),
-            "ativo": st.column_config.CheckboxColumn(
-                "Ativo",
-                default=True,
-                help="Se desmarcado, o item não aparece para os jogadores.",
-            ),
-        },
-        key=f"editor_loja_{server_id_loja}",
-    )
-
-    st.markdown("### 💾 Salvar catálogo")
-
-    col_loja1, col_loja2, col_loja3, col_loja4 = st.columns(4)
-
-    with col_loja1:
-        if st.button("Aplicar alterações na sessão (Loja)", use_container_width=True):
-            st.session_state[df_loja_key] = edited_df_loja
-            st.success("Alterações aplicadas na sessão da Loja.")
-
-    with col_loja2:
-        if st.button("Salvar Loja no Titan Cloud", key=f"btn_salvar_{user_id}", use_container_width=True):
-            db_completo = load_db(DB_CLIENTS, {})
-
-            if server_id_loja not in db_completo:
-                db_completo[server_id_loja] = {
-                    "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
-                    "agendas": [],
-                    "logs": [],
-                    "comunicados": [],
-                    "players": {},
+    
+        st.markdown("### 💾 Salvar catálogo")
+    
+        col_loja1, col_loja2, col_loja3, col_loja4 = st.columns(4)
+    
+        with col_loja1:
+            if st.button("Aplicar alterações na sessão (Loja)", use_container_width=True):
+                st.session_state[df_loja_key] = edited_df_loja
+                st.success("Alterações aplicadas na sessão da Loja.")
+    
+        with col_loja2:
+            if st.button("Salvar Loja no Titan Cloud", key=f"btn_salvar_{user_id}", use_container_width=True):
+                db_completo = load_db(DB_CLIENTS, {})
+    
+                if server_id_loja not in db_completo:
+                    db_completo[server_id_loja] = {
+                        "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
+                        "agendas": [],
+                        "logs": [],
+                        "comunicados": [],
+                        "players": {},
+                    }
+    
+                if "loja" not in db_completo[server_id_loja]:
+                    db_completo[server_id_loja]["loja"] = {}
+    
+                itens_atualizados = df_to_loja_itens(edited_df_loja)
+                loja_obj = {
+                    "mapa_padrao": loja_mapa_padrao,
+                    "posicao_padrao": loja_posicao_padrao,
+                    "itens": itens_atualizados,
                 }
-
-            if "loja" not in db_completo[server_id_loja]:
-                db_completo[server_id_loja]["loja"] = {}
-
-            itens_atualizados = df_to_loja_itens(edited_df_loja)
-            loja_obj = {
-                "mapa_padrao": loja_mapa_padrao,
-                "posicao_padrao": loja_posicao_padrao,
-                "itens": itens_atualizados,
-            }
-
-            db_completo[server_id_loja]["loja"] = loja_obj
-            save_db(DB_CLIENTS, db_completo)
-
-            st.session_state.db_clients = db_completo
-            st.session_state[df_loja_key] = loja_itens_to_df(loja_obj)
-            st.session_state[loja_version_key] = json.dumps(
-                loja_obj, sort_keys=True, ensure_ascii=False
-            )
-
-            st.success(f"✅ Catálogo salvo com sucesso para o Servidor {server_id_loja}!")
-            st.rerun()
-
-    with col_loja3:
-        if st.button("⬇️ Baixar Loja (JSON)", use_container_width=True):
-            itens_atualizados = df_to_loja_itens(edited_df_loja)
-            loja_preview = {
-                "servidor": user_info.get("server", "Servidor"),
-                "mapa_padrao": loja_mapa_padrao,
-                "posicao_padrao": loja_posicao_padrao,
-                "itens": itens_atualizados,
-            }
-            loja_json = json.dumps(loja_preview, indent=4, ensure_ascii=False)
-
-            st.download_button(
-                label="Baixar arquivo Loja_Titan.json",
-                data=loja_json.encode("utf-8"),
-                file_name="Loja_Titan.json",
-                mime="application/json",
-                use_container_width=True,
-            )
-            
-    with col_loja4:
-        if st.button("🔄 Recarregar Loja da Base", use_container_width=True):
-            db_recarregado = load_db(DB_CLIENTS, {})
-
-            if server_id_loja not in db_recarregado:
-                st.warning("Servidor não encontrado na base de dados.")
-            else:
-                client_data_recarregado = db_recarregado[server_id_loja]
-                loja_recarregada = client_data_recarregado.get("loja", {})
-                loja_recarregada.setdefault("mapa_padrao", "Chernarus")
-                loja_recarregada.setdefault("posicao_padrao", "")
-                loja_recarregada.setdefault("itens", [])
-
-                st.session_state[df_loja_key] = loja_itens_to_df(loja_recarregada)
+    
+                db_completo[server_id_loja]["loja"] = loja_obj
+                save_db(DB_CLIENTS, db_completo)
+    
+                st.session_state.db_clients = db_completo
+                st.session_state[df_loja_key] = loja_itens_to_df(loja_obj)
                 st.session_state[loja_version_key] = json.dumps(
-                    loja_recarregada, sort_keys=True, ensure_ascii=False
+                    loja_obj, sort_keys=True, ensure_ascii=False
                 )
-                st.session_state.db_clients = db_recarregado
-
-                st.success("✅ Loja recarregada diretamente da base.")
+    
+                st.success(f"✅ Catálogo salvo com sucesso para o Servidor {server_id_loja}!")
                 st.rerun()
-
-with tab7:
-    st.subheader("👤 Jogadores / Vínculos")
-    st.info(
-        "Gerencie aqui o vínculo entre Gamertag dos jogadores e suas informações básicas. "
-        "Esses dados serão usados pela Loja, Banco DzCoins e estatísticas."
-    )
-
-    # Busca o server_id a partir da user_key logada
-    user_key = st.session_state.get("user_key", "")
-    server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
-    if not server_id:
-        st.error(
-            "Nenhum servidor vinculado a este login.\n"
-            "Faça login com uma KeyUser válida (gerada no painel de administração)."
-        )
-        st.stop()
-
-    # Lê diretamente do arquivo para pegar vínculos feitos pelo portal
-    db_clients = load_db(DB_CLIENTS, {})
-
-    if not db_clients:
-        st.warning("Nenhum cliente/servidor cadastrado.")
-        st.stop()
-
-    if server_id not in db_clients:
-        st.error(
-            f"O servidor com ID {server_id} não foi encontrado em clients_data.\n"
-            "Verifique se o server_id existe em clients_data.json."
-        )
-        st.stop()
-
-    client_data = db_clients[server_id]
-    players = load_players_for_client(client_data)
-
-    # (Opcional) debug para ver o dict bruto de players
-    # st.write("DEBUG players raw:", players)
-
-    # Nome amigável do servidor a partir do users_db (se estiver em sessão)
-    db_users = st.session_state.get("db_users", {"keys": {}})
-    keyuser = st.session_state.get("user_key", "")
-    nome_servidor = db_users.get("keys", {}).get(keyuser, {}).get("server", "Servidor sem nome")
-
-    st.markdown("### 🧩 Servidor vinculado a este cliente")
-    st.info(
-        f"Cliente logado com a KeyUser **{keyuser or '(desconhecida)'}**, "
-        f"servidor: **{nome_servidor}** (ID interno: **{server_id}**)"
-    )
-
-    # Converte SEMPRE a partir do JSON mais recente
-    df_players = players_to_df(players)
-    df_players_key = f"df_players_{server_id}"
-    st.session_state[df_players_key] = df_players
-
-    st.markdown("### 📋 Lista de jogadores vinculados")
-    st.info(
-        "Preencha a Gamertag (obrigatória) e, se quiser, apelido e ID do Discord. "
-        "Futuramente, esses vínculos serão usados para Loja, Banco e ranking."
-    )
-
-    edited_df_players = st.data_editor(
-        df_players,
-        num_rows="dynamic",
-        hide_index=True,
-        column_config={
-            "gamertag": "Gamertag (obrigatório)",
-            "apelido": "Apelido / Nome no Discord",
-            "discord_id": "ID do Discord (opcional)",
-            "observacoes": "Observações",
-        },
-    )
-
-    st.markdown("### 💾 Salvar vínculos")
-
-    col_p1, col_p2 = st.columns(2)
-
-    with col_p1:
-        if st.button("Aplicar alterações na sessão (Jogadores)", use_container_width=True):
-            st.session_state[df_players_key] = edited_df_players
-            st.success("Alterações aplicadas na sessão de Jogadores.")
-
-    with col_p2:
-        if st.button("Salvar Jogadores no Titan Cloud", use_container_width=True):
-            players_atualizados = df_to_players(edited_df_players)
-            gamertags_ativas = set(players_atualizados.keys())
-
-            # Remove wallets e bank de jogadores que foram excluídos
-            for secao in ("wallets", "bank"):
-                if secao in client_data:
-                    removidos = [g for g in client_data[secao] if g not in gamertags_ativas]
-                    for g in removidos:
-                        del client_data[secao][g]
-
-            # Atualiza o client_data e o dicionário carregado do arquivo
-            client_data["players"] = players_atualizados
-            db_clients[server_id] = client_data
-
-            # Salva em disco
-            save_db(DB_CLIENTS, db_clients)
-
-            # Mantém o DF da sessão sincronizado com o que foi salvo
-            st.session_state[df_players_key] = edited_df_players
-
-            st.success("Vínculos de jogadores salvos com sucesso no Titan Cloud!")
-
-with tab8:
-    st.subheader("🏦 Banco & Carteira")
-
-    st.info(
-        "Gerencie aqui o saldo de DzCoins dos jogadores: carteira (com o jogador) e banco (guardado). "
-        "Use esta tela para bônus de evento, correções e ajustes manuais."
-    )
-
-    # 1) Garante que há um servidor válido na sessão
-    user_key = st.session_state.get("user_key", "")
-    server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
-    if not server_id:
-        st.error(
-            "Nenhum servidor vinculado a este login.\n"
-            "Faça login com uma KeyUser válida (gerada no painel de administração)."
-        )
-        st.stop()
-
-    # 2) Carrega dados do servidor
-    clients_data = load_db(DB_CLIENTS, {})
-    if not clients_data:
-        st.warning("Nenhum cliente/servidor cadastrado em clients_data.json.")
-        st.stop()
-
-    if server_id not in clients_data:
-        st.error(
-            f"O servidor com ID {server_id} não foi encontrado em clients_data.json.\n"
-            "Verifique se o server_id está correto."
-        )
-        st.stop()
-
-    client_data = clients_data[server_id]
-
-    # Garante estruturas básicas
-    players = client_data.get("players", {})
-    if "wallets" not in client_data:
-        client_data["wallets"] = {}
-    if "bank" not in client_data:
-        client_data["bank"] = {}
-
-    wallets = client_data["wallets"]
-    bank = client_data["bank"]
-
-    # 3) Selecionar jogador
-    st.markdown("### 👤 Selecionar jogador")
-
-    if not players:
-        st.warning("Nenhum jogador vinculado ainda. Use a aba 'Jogadores / Vínculos'.")
-        st.stop()
-
-    lista_gamertags = sorted(players.keys())
-    gamertag_sel = st.selectbox("Jogador", lista_gamertags)
-
-    # 4) Recuperar ou criar registros de carteira/banco
-    wallet_reg = wallets.get(gamertag_sel, {"balance": 0, "historico": []})
-    bank_reg = bank.get(gamertag_sel, {"balance": 0, "historico": []})
-
-    saldo_carteira = wallet_reg.get("balance", 0)
-    saldo_banco = bank_reg.get("balance", 0)
-
-    st.markdown("### 💰 Saldos atuais")
-    st.info(
-        f"Jogador **{gamertag_sel}**\n\n"
-        f"- Carteira: **{saldo_carteira} DzCoins**\n"
-        f"- Banco: **{saldo_banco} DzCoins**"
-    )
-
-    # 5) Ajustes manuais (admin do servidor)
-    st.markdown("### 🛠 Ajustes manuais (admin)")
-
-    col_aj_cart, col_aj_bank = st.columns(2)
-
-    with col_aj_cart:
-        st.markdown("#### Carteira")
-        val_aj_cart = st.number_input(
-            "Ajuste na carteira (+ crédito, - débito)",
-            key="ajuste_carteira",
-            step=100,
-            value=0,
-        )
-        motivo_cart = st.text_input(
-            "Motivo (ex.: bônus evento, correção)", key="motivo_carteira"
-        )
-        if st.button("Aplicar ajuste na carteira", use_container_width=True):
-            if val_aj_cart == 0:
-                st.error("Informe um valor diferente de zero para ajustar.")
-            else:
-                saldo_novo = saldo_carteira + val_aj_cart
-                wallet_reg["balance"] = saldo_novo
-
-                hora = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
-                if val_aj_cart > 0:
-                    msg = f"[{hora}] AJUSTE +{val_aj_cart} (CARTEIRA) - {motivo_cart or 'sem motivo'}"
+    
+        with col_loja3:
+            if st.button("⬇️ Baixar Loja (JSON)", use_container_width=True):
+                itens_atualizados = df_to_loja_itens(edited_df_loja)
+                loja_preview = {
+                    "servidor": user_info.get("server", "Servidor"),
+                    "mapa_padrao": loja_mapa_padrao,
+                    "posicao_padrao": loja_posicao_padrao,
+                    "itens": itens_atualizados,
+                }
+                loja_json = json.dumps(loja_preview, indent=4, ensure_ascii=False)
+    
+                st.download_button(
+                    label="Baixar arquivo Loja_Titan.json",
+                    data=loja_json.encode("utf-8"),
+                    file_name="Loja_Titan.json",
+                    mime="application/json",
+                    use_container_width=True,
+                )
+                
+        with col_loja4:
+            if st.button("🔄 Recarregar Loja da Base", use_container_width=True):
+                db_recarregado = load_db(DB_CLIENTS, {})
+    
+                if server_id_loja not in db_recarregado:
+                    st.warning("Servidor não encontrado na base de dados.")
                 else:
-                    msg = f"[{hora}] AJUSTE {val_aj_cart} (CARTEIRA) - {motivo_cart or 'sem motivo'}"
-
-                wallet_reg.setdefault("historico", []).append(msg)
-
-                wallets[gamertag_sel] = wallet_reg
-                client_data["wallets"] = wallets
-                clients_data[server_id] = client_data
-                save_db(DB_CLIENTS, clients_data)
-
-                st.success(f"Ajuste aplicado. Novo saldo em carteira: {saldo_novo} DzCoins.")
-
-                # Atualiza variáveis locais para refletir o novo saldo
-                saldo_carteira = saldo_novo
-                wallet_reg["balance"] = saldo_novo
-                wallets[gamertag_sel] = wallet_reg
-                client_data["wallets"] = wallets
-                clients_data[server_id] = client_data
-
-    with col_aj_bank:
-        st.markdown("#### Banco")
-        val_aj_bank = st.number_input(
-            "Ajuste no banco (+ crédito, - débito)",
-            key="ajuste_banco",
-            step=100,
-            value=0,
+                    client_data_recarregado = db_recarregado[server_id_loja]
+                    loja_recarregada = client_data_recarregado.get("loja", {})
+                    loja_recarregada.setdefault("mapa_padrao", "Chernarus")
+                    loja_recarregada.setdefault("posicao_padrao", "")
+                    loja_recarregada.setdefault("itens", [])
+    
+                    st.session_state[df_loja_key] = loja_itens_to_df(loja_recarregada)
+                    st.session_state[loja_version_key] = json.dumps(
+                        loja_recarregada, sort_keys=True, ensure_ascii=False
+                    )
+                    st.session_state.db_clients = db_recarregado
+    
+                    st.success("✅ Loja recarregada diretamente da base.")
+                    st.rerun()
+    
+    with tab7:
+        st.subheader("👤 Jogadores / Vínculos")
+        st.info(
+            "Gerencie aqui o vínculo entre Gamertag dos jogadores e suas informações básicas. "
+            "Esses dados serão usados pela Loja, Banco DzCoins e estatísticas."
         )
-        motivo_bank = st.text_input(
-            "Motivo (ex.: prêmio, correção)", key="motivo_banco"
+    
+        # Busca o server_id a partir da user_key logada
+        user_key = st.session_state.get("user_key", "")
+        server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
+        if not server_id:
+            st.error(
+                "Nenhum servidor vinculado a este login.\n"
+                "Faça login com uma KeyUser válida (gerada no painel de administração)."
+            )
+            st.stop()
+    
+        # Lê diretamente do arquivo para pegar vínculos feitos pelo portal
+        db_clients = load_db(DB_CLIENTS, {})
+    
+        if not db_clients:
+            st.warning("Nenhum cliente/servidor cadastrado.")
+            st.stop()
+    
+        if server_id not in db_clients:
+            st.error(
+                f"O servidor com ID {server_id} não foi encontrado em clients_data.\n"
+                "Verifique se o server_id existe em clients_data.json."
+            )
+            st.stop()
+    
+        client_data = db_clients[server_id]
+        players = load_players_for_client(client_data)
+    
+        # (Opcional) debug para ver o dict bruto de players
+        # st.write("DEBUG players raw:", players)
+    
+        # Nome amigável do servidor a partir do users_db (se estiver em sessão)
+        db_users = st.session_state.get("db_users", {"keys": {}})
+        keyuser = st.session_state.get("user_key", "")
+        nome_servidor = db_users.get("keys", {}).get(keyuser, {}).get("server", "Servidor sem nome")
+    
+        st.markdown("### 🧩 Servidor vinculado a este cliente")
+        st.info(
+            f"Cliente logado com a KeyUser **{keyuser or '(desconhecida)'}**, "
+            f"servidor: **{nome_servidor}** (ID interno: **{server_id}**)"
         )
-        if st.button("Aplicar ajuste no banco", use_container_width=True):
-            if val_aj_bank == 0:
-                st.error("Informe um valor diferente de zero para ajustar.")
-            else:
-                saldo_novo = saldo_banco + val_aj_bank
-                bank_reg["balance"] = saldo_novo
-
-                hora = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
-                if val_aj_bank > 0:
-                    msg = f"[{hora}] AJUSTE +{val_aj_bank} (BANCO) - {motivo_bank or 'sem motivo'}"
+    
+        # Converte SEMPRE a partir do JSON mais recente
+        df_players = players_to_df(players)
+        df_players_key = f"df_players_{server_id}"
+        st.session_state[df_players_key] = df_players
+    
+        st.markdown("### 📋 Lista de jogadores vinculados")
+        st.info(
+            "Preencha a Gamertag (obrigatória) e, se quiser, apelido e ID do Discord. "
+            "Futuramente, esses vínculos serão usados para Loja, Banco e ranking."
+        )
+    
+        edited_df_players = st.data_editor(
+            df_players,
+            num_rows="dynamic",
+            hide_index=True,
+            column_config={
+                "gamertag": "Gamertag (obrigatório)",
+                "apelido": "Apelido / Nome no Discord",
+                "discord_id": "ID do Discord (opcional)",
+                "observacoes": "Observações",
+            },
+        )
+    
+        st.markdown("### 💾 Salvar vínculos")
+    
+        col_p1, col_p2 = st.columns(2)
+    
+        with col_p1:
+            if st.button("Aplicar alterações na sessão (Jogadores)", use_container_width=True):
+                st.session_state[df_players_key] = edited_df_players
+                st.success("Alterações aplicadas na sessão de Jogadores.")
+    
+        with col_p2:
+            if st.button("Salvar Jogadores no Titan Cloud", use_container_width=True):
+                players_atualizados = df_to_players(edited_df_players)
+                gamertags_ativas = set(players_atualizados.keys())
+    
+                # Remove wallets e bank de jogadores que foram excluídos
+                for secao in ("wallets", "bank"):
+                    if secao in client_data:
+                        removidos = [g for g in client_data[secao] if g not in gamertags_ativas]
+                        for g in removidos:
+                            del client_data[secao][g]
+    
+                # Atualiza o client_data e o dicionário carregado do arquivo
+                client_data["players"] = players_atualizados
+                db_clients[server_id] = client_data
+    
+                # Salva em disco
+                save_db(DB_CLIENTS, db_clients)
+    
+                # Mantém o DF da sessão sincronizado com o que foi salvo
+                st.session_state[df_players_key] = edited_df_players
+    
+                st.success("Vínculos de jogadores salvos com sucesso no Titan Cloud!")
+    
+    with tab8:
+        st.subheader("🏦 Banco & Carteira")
+    
+        st.info(
+            "Gerencie aqui o saldo de DzCoins dos jogadores: carteira (com o jogador) e banco (guardado). "
+            "Use esta tela para bônus de evento, correções e ajustes manuais."
+        )
+    
+        # 1) Garante que há um servidor válido na sessão
+        user_key = st.session_state.get("user_key", "")
+        server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
+        if not server_id:
+            st.error(
+                "Nenhum servidor vinculado a este login.\n"
+                "Faça login com uma KeyUser válida (gerada no painel de administração)."
+            )
+            st.stop()
+    
+        # 2) Carrega dados do servidor
+        clients_data = load_db(DB_CLIENTS, {})
+        if not clients_data:
+            st.warning("Nenhum cliente/servidor cadastrado em clients_data.json.")
+            st.stop()
+    
+        if server_id not in clients_data:
+            st.error(
+                f"O servidor com ID {server_id} não foi encontrado em clients_data.json.\n"
+                "Verifique se o server_id está correto."
+            )
+            st.stop()
+    
+        client_data = clients_data[server_id]
+    
+        # Garante estruturas básicas
+        players = client_data.get("players", {})
+        if "wallets" not in client_data:
+            client_data["wallets"] = {}
+        if "bank" not in client_data:
+            client_data["bank"] = {}
+    
+        wallets = client_data["wallets"]
+        bank = client_data["bank"]
+    
+        # 3) Selecionar jogador
+        st.markdown("### 👤 Selecionar jogador")
+    
+        if not players:
+            st.warning("Nenhum jogador vinculado ainda. Use a aba 'Jogadores / Vínculos'.")
+            st.stop()
+    
+        lista_gamertags = sorted(players.keys())
+        gamertag_sel = st.selectbox("Jogador", lista_gamertags)
+    
+        # 4) Recuperar ou criar registros de carteira/banco
+        wallet_reg = wallets.get(gamertag_sel, {"balance": 0, "historico": []})
+        bank_reg = bank.get(gamertag_sel, {"balance": 0, "historico": []})
+    
+        saldo_carteira = wallet_reg.get("balance", 0)
+        saldo_banco = bank_reg.get("balance", 0)
+    
+        st.markdown("### 💰 Saldos atuais")
+        st.info(
+            f"Jogador **{gamertag_sel}**\n\n"
+            f"- Carteira: **{saldo_carteira} DzCoins**\n"
+            f"- Banco: **{saldo_banco} DzCoins**"
+        )
+    
+        # 5) Ajustes manuais (admin do servidor)
+        st.markdown("### 🛠 Ajustes manuais (admin)")
+    
+        col_aj_cart, col_aj_bank = st.columns(2)
+    
+        with col_aj_cart:
+            st.markdown("#### Carteira")
+            val_aj_cart = st.number_input(
+                "Ajuste na carteira (+ crédito, - débito)",
+                key="ajuste_carteira",
+                step=100,
+                value=0,
+            )
+            motivo_cart = st.text_input(
+                "Motivo (ex.: bônus evento, correção)", key="motivo_carteira"
+            )
+            if st.button("Aplicar ajuste na carteira", use_container_width=True):
+                if val_aj_cart == 0:
+                    st.error("Informe um valor diferente de zero para ajustar.")
                 else:
-                    msg = f"[{hora}] AJUSTE {val_aj_bank} (BANCO) - {motivo_bank or 'sem motivo'}"
-
-                bank_reg.setdefault("historico", []).append(msg)
-
+                    saldo_novo = saldo_carteira + val_aj_cart
+                    wallet_reg["balance"] = saldo_novo
+    
+                    hora = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
+                    if val_aj_cart > 0:
+                        msg = f"[{hora}] AJUSTE +{val_aj_cart} (CARTEIRA) - {motivo_cart or 'sem motivo'}"
+                    else:
+                        msg = f"[{hora}] AJUSTE {val_aj_cart} (CARTEIRA) - {motivo_cart or 'sem motivo'}"
+    
+                    wallet_reg.setdefault("historico", []).append(msg)
+    
+                    wallets[gamertag_sel] = wallet_reg
+                    client_data["wallets"] = wallets
+                    clients_data[server_id] = client_data
+                    save_db(DB_CLIENTS, clients_data)
+    
+                    st.success(f"Ajuste aplicado. Novo saldo em carteira: {saldo_novo} DzCoins.")
+    
+                    # Atualiza variáveis locais para refletir o novo saldo
+                    saldo_carteira = saldo_novo
+                    wallet_reg["balance"] = saldo_novo
+                    wallets[gamertag_sel] = wallet_reg
+                    client_data["wallets"] = wallets
+                    clients_data[server_id] = client_data
+    
+        with col_aj_bank:
+            st.markdown("#### Banco")
+            val_aj_bank = st.number_input(
+                "Ajuste no banco (+ crédito, - débito)",
+                key="ajuste_banco",
+                step=100,
+                value=0,
+            )
+            motivo_bank = st.text_input(
+                "Motivo (ex.: prêmio, correção)", key="motivo_banco"
+            )
+            if st.button("Aplicar ajuste no banco", use_container_width=True):
+                if val_aj_bank == 0:
+                    st.error("Informe um valor diferente de zero para ajustar.")
+                else:
+                    saldo_novo = saldo_banco + val_aj_bank
+                    bank_reg["balance"] = saldo_novo
+    
+                    hora = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
+                    if val_aj_bank > 0:
+                        msg = f"[{hora}] AJUSTE +{val_aj_bank} (BANCO) - {motivo_bank or 'sem motivo'}"
+                    else:
+                        msg = f"[{hora}] AJUSTE {val_aj_bank} (BANCO) - {motivo_bank or 'sem motivo'}"
+    
+                    bank_reg.setdefault("historico", []).append(msg)
+    
+                    bank[gamertag_sel] = bank_reg
+                    client_data["bank"] = bank
+                    clients_data[server_id] = client_data
+                    save_db(DB_CLIENTS, clients_data)
+    
+                    st.success(f"Ajuste aplicado. Novo saldo no banco: {saldo_novo} DzCoins.")
+    
+                    saldo_banco = saldo_novo
+                    bank_reg["balance"] = saldo_novo
+                    bank[gamertag_sel] = bank_reg
+                    client_data["bank"] = bank
+                    clients_data[server_id] = client_data
+    
+        # 6) Histórico consolidado
+        st.markdown("### 📜 Histórico de movimentações")
+    
+        col_hist_1, col_hist_2 = st.columns([3, 1])
+    
+        with col_hist_2:
+            if st.button("🧹 Limpar Histórico", key=f"limpar_historico_console_{gamertag_sel}", use_container_width=True):
+                wallet_reg["historico"] = []
+                bank_reg["historico"] = []
+    
+                wallets[gamertag_sel] = wallet_reg
                 bank[gamertag_sel] = bank_reg
+                client_data["wallets"] = wallets
                 client_data["bank"] = bank
                 clients_data[server_id] = client_data
                 save_db(DB_CLIENTS, clients_data)
-
-                st.success(f"Ajuste aplicado. Novo saldo no banco: {saldo_novo} DzCoins.")
-
-                saldo_banco = saldo_novo
-                bank_reg["balance"] = saldo_novo
-                bank[gamertag_sel] = bank_reg
-                client_data["bank"] = bank
-                clients_data[server_id] = client_data
-
-    # 6) Histórico consolidado
-    st.markdown("### 📜 Histórico de movimentações")
-
-    col_hist_1, col_hist_2 = st.columns([3, 1])
-
-    with col_hist_2:
-        if st.button("🧹 Limpar Histórico", key=f"limpar_historico_console_{gamertag_sel}", use_container_width=True):
-            wallet_reg["historico"] = []
-            bank_reg["historico"] = []
-
-            wallets[gamertag_sel] = wallet_reg
-            bank[gamertag_sel] = bank_reg
-            client_data["wallets"] = wallets
-            client_data["bank"] = bank
-            clients_data[server_id] = client_data
-            save_db(DB_CLIENTS, clients_data)
-
-            st.success("✅ Histórico visual limpo com sucesso.")
-            st.rerun()
-
-    historico_comb = []
-
-    for linha in wallet_reg.get("historico", []):
-        historico_comb.append(("CARTEIRA", linha))
-
-    for linha in bank_reg.get("historico", []):
-        historico_comb.append(("BANCO", linha))
-
-    st.caption("As movimentações mais recentes ficam visíveis neste console com rolagem.")
-
-    if not historico_comb:
-        historico_txt = "Nenhuma movimentação registrada ainda."
-    else:
-        linhas_console = []
-        for origem, linha in reversed(historico_comb[-200:]):
-            icone = "💰" if origem == "CARTEIRA" else "🏦"
-            linhas_console.append(f"{icone} [{origem}] {linha}")
-        historico_txt = "\n".join(linhas_console)
-
-    st.markdown(
-        f"""
-        <div style="
-            background:#0f1117;
-            border:1px solid #2b3240;
-            border-radius:8px;
-            padding:12px;
-            height:320px;
-            overflow-y:auto;
-            font-family:Consolas, 'Courier New', monospace;
-            font-size:12px;
-            color:#d6e2f0;
-            white-space:pre-wrap;
-            line-height:1.5;
-            margin-bottom:12px;
-        ">{historico_txt}</div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# --- ABA PLANOS ---
+    
+                st.success("✅ Histórico visual limpo com sucesso.")
+                st.rerun()
+    
+        historico_comb = []
+    
+        for linha in wallet_reg.get("historico", []):
+            historico_comb.append(("CARTEIRA", linha))
+    
+        for linha in bank_reg.get("historico", []):
+            historico_comb.append(("BANCO", linha))
+    
+        st.caption("As movimentações mais recentes ficam visíveis neste console com rolagem.")
+    
+        if not historico_comb:
+            historico_txt = "Nenhuma movimentação registrada ainda."
+        else:
+            linhas_console = []
+            for origem, linha in reversed(historico_comb[-200:]):
+                icone = "💰" if origem == "CARTEIRA" else "🏦"
+                linhas_console.append(f"{icone} [{origem}] {linha}")
+            historico_txt = "\n".join(linhas_console)
+    
+        st.markdown(
+            f"""
+            <div style="
+                background:#0f1117;
+                border:1px solid #2b3240;
+                border-radius:8px;
+                padding:12px;
+                height:320px;
+                overflow-y:auto;
+                font-family:Consolas, 'Courier New', monospace;
+                font-size:12px;
+                color:#d6e2f0;
+                white-space:pre-wrap;
+                line-height:1.5;
+                margin-bottom:12px;
+            ">{historico_txt}</div>
+            """,
+            unsafe_allow_html=True,
+        )
+    
+    # --- ABA PLANOS ---
+    # --- ABA PLANOS ---
 with tab_planos:
     st.markdown("### 💎 Planos Titan Cloud Pro")
     st.caption("Confira as funcionalidades disponíveis em cada plano.")
-
-    st.markdown(
-        f"""
-        <div style="
-            background:#0f1117;
-            border-radius:12px;
-            padding:24px;
-            margin-bottom:20px;
-        ">
+    starter_border = "2px solid #aaaaaa" if plano_atual == "Starter" else "1px solid #444"
+    starter_badge = '<div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#aaaaaa; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;">SEU PLANO</div>' if plano_atual == "Starter" else ""
+    pro_border = "2px solid #00d4ff" if plano_atual == "Pro" else "1px solid #00d4ff55"
+    pro_badge = '<div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#00d4ff; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;">SEU PLANO</div>' if plano_atual == "Pro" else '<div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#00d4ff; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;">MAIS POPULAR</div>'
+    enterprise_border = "2px solid #FFD700" if plano_atual == "Enterprise" else "1px solid #FFD70055"
+    enterprise_badge = '<div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#FFD700; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;">SEU PLANO</div>' if plano_atual == "Enterprise" else ""
+    html = """
+        <div style="background:#0f1117; border-radius:12px; padding:24px; margin-bottom:20px;">
             <div style="text-align:center; margin-bottom:24px;">
                 <div style="font-size:26px; font-weight:bold; color:#00d4ff;">
                     💎 Planos Titan Cloud Pro
@@ -4846,30 +4846,15 @@ with tab_planos:
                     Escolha o plano ideal para o seu servidor DayZ
                 </div>
             </div>
-
             <div style="display:flex; gap:16px; flex-wrap:wrap; justify-content:center;">
-
-                <!-- STARTER -->
-                <div style="
-                    flex:1; min-width:220px; max-width:300px;
-                    background:#1a1a2e;
-                    border:{"2px solid #aaaaaa" if plano_atual == "Starter" else "1px solid #444"};
-                    border-radius:10px;
-                    padding:20px;
-                    text-align:center;
-                    position:relative;
-                ">
-                    {"<div style='position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#aaaaaa; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;'>SEU PLANO</div>" if plano_atual == "Starter" else ""}
+                <div style="flex:1; min-width:220px; max-width:300px; background:#1a1a2e; border:{starter_border}; border-radius:10px; padding:20px; text-align:center; position:relative;">
+                    {starter_badge}
                     <div style="font-size:28px; margin-top:8px;">🔹</div>
-                    <div style="font-size:18px; font-weight:bold;
-                                color:#aaaaaa; margin:8px 0 4px;">Starter</div>
-                    <div style="font-size:26px; font-weight:bold;
-                                color:#ffffff; margin-bottom:4px;">R$ 14,99</div>
-                    <div style="font-size:11px; color:#666;
-                                margin-bottom:16px;">por mês</div>
+                    <div style="font-size:18px; font-weight:bold; color:#aaaaaa; margin:8px 0 4px;">Starter</div>
+                    <div style="font-size:26px; font-weight:bold; color:#ffffff; margin-bottom:4px;">R$ 14,99</div>
+                    <div style="font-size:11px; color:#666; margin-bottom:16px;">por mês</div>
                     <hr style="border-color:#333; margin-bottom:16px;">
-                    <div style="font-size:12px; color:#d6e2f0;
-                                text-align:left; line-height:2;">
+                    <div style="font-size:12px; color:#d6e2f0; text-align:left; line-height:2;">
                         ✅ 2 agendamentos ativos<br>
                         ✅ Agendamento único/diário/semanal<br>
                         ✅ Painel web básico<br>
@@ -4885,48 +4870,18 @@ with tab_planos:
                         🔒 Ranking Semanal<br>
                         🔒 Transferência DzCoins<br>
                     </div>
-                    <div style="
-                        margin-top:16px;
-                        background:#333;
-                        border-radius:6px;
-                        padding:8px;
-                        font-size:12px;
-                        color:#aaa;
-                    ">
+                    <div style="margin-top:16px; background:#333; border-radius:6px; padding:8px; font-size:12px; color:#aaa;">
                         📧 Suporte por E-mail
                     </div>
                 </div>
-
-                <!-- PRO -->
-                <div style="
-                    flex:1; min-width:220px; max-width:300px;
-                    background:#1a1a2e;
-                    border:{"2px solid #00d4ff" if plano_atual == "Pro" else "1px solid #00d4ff55"};
-                    border-radius:10px;
-                    padding:20px;
-                    text-align:center;
-                    position:relative;
-                ">
-                    <div style="
-                        position:absolute; top:-12px; left:50%;
-                        transform:translateX(-50%);
-                        background:#00d4ff;
-                        color:#000;
-                        font-size:11px;
-                        font-weight:bold;
-                        padding:3px 14px;
-                        border-radius:999px;
-                    ">{"SEU PLANO" if plano_atual == "Pro" else "MAIS POPULAR"}</div>
+                <div style="flex:1; min-width:220px; max-width:300px; background:#1a1a2e; border:{pro_border}; border-radius:10px; padding:20px; text-align:center; position:relative;">
+                    {pro_badge}
                     <div style="font-size:28px; margin-top:8px;">⭐</div>
-                    <div style="font-size:18px; font-weight:bold;
-                                color:#00d4ff; margin:8px 0 4px;">Pro</div>
-                    <div style="font-size:26px; font-weight:bold;
-                                color:#ffffff; margin-bottom:4px;">R$ 29,90</div>
-                    <div style="font-size:11px; color:#666;
-                                margin-bottom:16px;">por mês</div>
+                    <div style="font-size:18px; font-weight:bold; color:#00d4ff; margin:8px 0 4px;">Pro</div>
+                    <div style="font-size:26px; font-weight:bold; color:#ffffff; margin-bottom:4px;">R$ 29,90</div>
+                    <div style="font-size:11px; color:#666; margin-bottom:16px;">por mês</div>
                     <hr style="border-color:#333; margin-bottom:16px;">
-                    <div style="font-size:12px; color:#d6e2f0;
-                                text-align:left; line-height:2;">
+                    <div style="font-size:12px; color:#d6e2f0; text-align:left; line-height:2;">
                         ✅ 8 agendamentos ativos<br>
                         ✅ Agendamento único/diário/semanal<br>
                         ✅ Painel web completo<br>
@@ -4942,40 +4897,18 @@ with tab_planos:
                         ✅ Ranking Semanal<br>
                         ✅ Transferência DzCoins<br>
                     </div>
-                    <div style="
-                        margin-top:16px;
-                        background:#00d4ff22;
-                        border:1px solid #00d4ff44;
-                        border-radius:6px;
-                        padding:8px;
-                        font-size:12px;
-                        color:#00d4ff;
-                    ">
+                    <div style="margin-top:16px; background:#00d4ff22; border:1px solid #00d4ff44; border-radius:6px; padding:8px; font-size:12px; color:#00d4ff;">
                         📧 Suporte por E-mail
                     </div>
                 </div>
-
-                <!-- ENTERPRISE -->
-                <div style="
-                    flex:1; min-width:220px; max-width:300px;
-                    background:#1a1a2e;
-                    border:{"2px solid #FFD700" if plano_atual == "Enterprise" else "1px solid #FFD70055"};
-                    border-radius:10px;
-                    padding:20px;
-                    text-align:center;
-                    position:relative;
-                ">
-                    {"<div style='position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#FFD700; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;'>SEU PLANO</div>" if plano_atual == "Enterprise" else ""}
+                <div style="flex:1; min-width:220px; max-width:300px; background:#1a1a2e; border:{enterprise_border}; border-radius:10px; padding:20px; text-align:center; position:relative;">
+                    {enterprise_badge}
                     <div style="font-size:28px; margin-top:8px;">👑</div>
-                    <div style="font-size:18px; font-weight:bold;
-                                color:#FFD700; margin:8px 0 4px;">Enterprise</div>
-                    <div style="font-size:26px; font-weight:bold;
-                                color:#ffffff; margin-bottom:4px;">R$ 49,90</div>
-                    <div style="font-size:11px; color:#666;
-                                margin-bottom:16px;">por mês</div>
+                    <div style="font-size:18px; font-weight:bold; color:#FFD700; margin:8px 0 4px;">Enterprise</div>
+                    <div style="font-size:26px; font-weight:bold; color:#ffffff; margin-bottom:4px;">R$ 49,90</div>
+                    <div style="font-size:11px; color:#666; margin-bottom:16px;">por mês</div>
                     <hr style="border-color:#333; margin-bottom:16px;">
-                    <div style="font-size:12px; color:#d6e2f0;
-                                text-align:left; line-height:2;">
+                    <div style="font-size:12px; color:#d6e2f0; text-align:left; line-height:2;">
                         ✅ 16 agendamentos ativos<br>
                         ✅ Agendamento único/diário/semanal<br>
                         ✅ Painel web completo<br>
@@ -4991,100 +4924,18 @@ with tab_planos:
                         ✅ Ranking Semanal<br>
                         ✅ Transferência DzCoins<br>
                     </div>
-                    <div style="
-                        margin-top:16px;
-                        background:#FFD70022;
-                        border:1px solid #FFD70044;
-                        border-radius:6px;
-                        padding:8px;
-                        font-size:12px;
-                        color:#FFD700;
-                    ">
+                    <div style="margin-top:16px; background:#FFD70022; border:1px solid #FFD70044; border-radius:6px; padding:8px; font-size:12px; color:#FFD700;">
                         🎫 Suporte Ticket Prioritário
                     </div>
                 </div>
-
             </div>
-
-            <div style="
-                text-align:center;
-                font-size:11px;
-                color:#555;
-                margin-top:24px;
-            ">
+            <div style="text-align:center; font-size:11px; color:#555; margin-top:24px;">
                 DzCoins são moedas virtuais fictícias sem valor monetário real.<br>
                 Planos renovados mensalmente. Entre em contato para assinar ou fazer upgrade.
             </div>
-
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # --- Bloco de contato para upgrade ---
-    st.markdown("---")
-    col_up1, col_up2, col_up3 = st.columns(3)
-
-    with col_up1:
-        st.markdown(
-            """
-            <div style="
-                background:#1a1a2e;
-                border:1px solid #333;
-                border-radius:8px;
-                padding:14px;
-                text-align:center;
-                font-size:12px;
-                color:#aaa;
-            ">
-                <div style="font-size:20px; margin-bottom:6px;">📧</div>
-                <b style="color:#fff;">E-mail</b><br>
-                suporte@titancloud.pro
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with col_up2:
-        st.markdown(
-            """
-            <div style="
-                background:#1a1a2e;
-                border:1px solid #333;
-                border-radius:8px;
-                padding:14px;
-                text-align:center;
-                font-size:12px;
-                color:#aaa;
-            ">
-                <div style="font-size:20px; margin-bottom:6px;">💬</div>
-                <b style="color:#fff;">Discord</b><br>
-                discord.gg/titancloud
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with col_up3:
-        st.markdown(
-            """
-            <div style="
-                background:#1a1a2e;
-                border:1px solid #333;
-                border-radius:8px;
-                padding:14px;
-                text-align:center;
-                font-size:12px;
-                color:#aaa;
-            ">
-                <div style="font-size:20px; margin-bottom:6px;">📱</div>
-                <b style="color:#fff;">WhatsApp</b><br>
-                (11) 9 3349-2240
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
+    """.format(starter_border=starter_border, starter_badge=starter_badge, pro_border=pro_border, pro_badge=pro_badge, enterprise_border=enterprise_border, enterprise_badge=enterprise_badge)
+    st.markdown(html, unsafe_allow_html=True)
 # --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
 if "worker_started" not in st.session_state:
     threading.Thread(target=proworker, daemon=True).start()
