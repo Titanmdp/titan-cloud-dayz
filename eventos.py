@@ -4401,23 +4401,27 @@ with tab_raid:
         with col_r2:
             h_fim_r = st.text_input("Hora Fim (ex: 23:59)", "23:59", key=f"h_fim_raid_{user_id}")
             mapa_r = st.selectbox("Mapa do RAID", ["Chernarus", "Livonia"], key=f"mapa_raid_{user_id}")
-            # ADICIONADO: Campo de Recorrência
-            rec_r = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key=f"rec_raid_{user_id}")
+            # ADICIONADO: Campo de Recorrência para Governança do Servidor
+        rec_r = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key=f"rec_raid_{user_id}")
 
-        if st.button("🚀 Confirmar Agendamento de RAID", use_container_width=True):
+        # BOTÃO CORRIGIDO COM KEY ÚNICA
+        if st.button("🚀 Confirmar Agendamento de RAID", use_container_width=True, key=f"btn_confirm_raid_{user_id}"):
             novo_raid = {
                 "id": str(time.time()),
                 "data": data_r.strftime("%d/%m/%Y"),
                 "in": h_ini_r,
                 "out": h_fim_r,
                 "mapa": mapa_r,
-                "rec": rec_r, # Salvando a recorrência
+                "rec": rec_r, 
                 "status": "Aguardando"
             }
             client_data.setdefault("agendas_raid", []).append(novo_raid)
             save_db(DB_CLIENTS, st.session_state.db_clients)
+            
+            # Log de Auditoria para rastreabilidade[cite: 1, 7]
             registrar_log(user_id, f"RAID Agendado ({rec_r}): {data_r.strftime('%d/%m/%Y')} às {h_ini_r}", "info")
-            st.success(f"RAID {rec_r} agendado!")
+            
+            st.success(f"RAID {rec_r} agendado com sucesso!")
             st.rerun()
         
         if st.button("🚀 Confirmar Agendamento de RAID", use_container_width=True):
