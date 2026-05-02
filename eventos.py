@@ -56,8 +56,8 @@ def get_hora_brasilia():
 # --- DEFINIÇÃO DE LIMITES POR PLANO ---
 PLANOS = {
     "Starter": 2,
-    "Pro": 10,
-    "Enterprise": 999,
+    "Pro": 8,
+    "Enterprise": 16,
 }
 
 def plano_permite(plano_atual: str, funcionalidade: str) -> bool:
@@ -77,10 +77,10 @@ def plano_permite(plano_atual: str, funcionalidade: str) -> bool:
         "editor_events":         ["Pro", "Enterprise"],
         "editor_messages":       ["Pro", "Enterprise"],
         "editor_cfgeventspawns": ["Pro", "Enterprise"],
-        "ranking_semanal":       ["Pro", "Enterprise"],
-        "transferencia_jogador": ["Pro", "Enterprise"],
+        "ranking_semanal":       ["Starter", "Pro", "Enterprise"],
+        "transferencia_jogador": ["Starter", "Pro", "Enterprise"],
         "multimapa":             ["Pro", "Enterprise"],
-        "jogadores_completo":    ["Pro", "Enterprise"],
+        "jogadores_completo":    ["Starter", "Pro", "Enterprise"],
     }
     return plano_atual in PERMISSOES.get(funcionalidade, [])
 
