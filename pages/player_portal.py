@@ -987,6 +987,7 @@ def ftp_download_adm_files_weekly(ftp_cfg: dict, max_files: int = 7) -> str:
     """
     arquivos = ftp_list_adm_files(ftp_cfg)
     if not arquivos:
+        print("[TITAN DEBUG] Nenhum arquivo .ADM encontrado para processar o ranking.")[cite: 2]
         return ""
 
     # Pega os últimos max_files arquivos (mais recentes primeiro)
@@ -995,20 +996,25 @@ def ftp_download_adm_files_weekly(ftp_cfg: dict, max_files: int = 7) -> str:
 
     try:
         with FTP() as ftp:
-            ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=15)
-            ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
-            ftp.cwd(DAYZ_LOG_DIR)
+            # Aumentado timeout para 30s para evitar quedas em arquivos grandes
+            ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=30)[cite: 2]
+            ftp.login(ftp_cfg["user"], ftp_cfg["pass"])[cite: 2]
+            ftp.cwd(DAYZ_LOG_DIR)[cite: 2]
 
             for nome_arquivo in arquivos_semana:
                 buffer = io.BytesIO()
                 try:
-                    ftp.retrbinary(f"RETR {nome_arquivo}", buffer.write)
-                    texto = buffer.getvalue().decode("utf-8", errors="ignore")
-                    conteudo_total += texto + "\n"
-                except Exception:
+                    ftp.retrbinary(f"RETR {nome_arquivo}", buffer.write)[cite: 2]
+                    texto = buffer.getvalue().decode("utf-8", errors="ignore")[cite: 2]
+                    
+                    if texto.strip():
+                        conteudo_total += texto + "\n"
+                        print(f"[TITAN DEBUG] Sucesso ao baixar: {nome_arquivo}")[cite: 2]
+                except Exception as e:
+                    print(f"[TITAN DEBUG] Erro ao baixar arquivo {nome_arquivo}: {e}")[cite: 2]
                     continue
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[TITAN DEBUG] Erro fatal na conexão FTP do Ranking: {e}")[cite: 2]
 
     return conteudo_total
 
@@ -1470,12 +1476,21 @@ def render_players_online(nitrado_id: str, ftp_cfg: dict = None, nitrado_token: 
     def _players():
         dados = get_players_online(nitrado_id, nitrado_token=nitrado_token)
 
+        # AJUSTE: Fallback imediato se a API Nitrado falhar (Erro 500)
         if "erro" in dados:
+            if ftp_cfg:
+                players_adm = get_online_from_adm(ftp_cfg)
+                if players_adm:
+                    total = len(players_adm)
+                    st.markdown(f'<div style="background:#1a1a2e;border-radius:10px;padding:14px;border:1px solid #7a4b1f;margin-bottom:8px;"><div style="font-size:13px;color:#ffcc66;margin-bottom:4px;">🌐 Players Online (via Log ADM)</div><div style="font-size:28px;font-weight:bold;color:#00ff88;">{total}</div></div>', unsafe_allow_html=True)
+                    with st.expander(f"Ver jogadores ({total})", expanded=False):
+                        for nome in players_adm:
+                            st.markdown(f"◆ `{nome}`")
+                    return
             st.warning(f"⚠️ Players Online indisponível: {dados['erro']}")
             return
 
         total = dados.get("total", 0)
-        players = dados.get("players", [])
         maximo = dados.get("max", 0)
 
         # Se a API não retornou nomes, tenta pelo log ADM
