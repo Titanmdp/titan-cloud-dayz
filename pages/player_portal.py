@@ -981,40 +981,34 @@ def parse_adm_killfeed_pvp(log_text: str) -> list:
 # =========================================================
 
 def ftp_download_adm_files_weekly(ftp_cfg: dict, max_files: int = 7) -> str:
-    """
-    Baixa os últimos max_files arquivos .ADM via FTP e concatena o conteúdo.
-    Retorna string com todos os logs unidos.
-    """
     arquivos = ftp_list_adm_files(ftp_cfg)
     if not arquivos:
-        print("[TITAN DEBUG] Nenhum arquivo .ADM encontrado para processar o ranking.")[cite: 2]
+        print("[TITAN DEBUG] Nenhum arquivo .ADM encontrado para processar o ranking.")
         return ""
 
-    # Pega os últimos max_files arquivos (mais recentes primeiro)
     arquivos_semana = arquivos[:max_files]
     conteudo_total = ""
 
     try:
         with FTP() as ftp:
-            # Aumentado timeout para 30s para evitar quedas em arquivos grandes
-            ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=30)[cite: 2]
-            ftp.login(ftp_cfg["user"], ftp_cfg["pass"])[cite: 2]
-            ftp.cwd(DAYZ_LOG_DIR)[cite: 2]
+            ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=30)
+            ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
+            ftp.cwd(DAYZ_LOG_DIR)
 
             for nome_arquivo in arquivos_semana:
                 buffer = io.BytesIO()
                 try:
-                    ftp.retrbinary(f"RETR {nome_arquivo}", buffer.write)[cite: 2]
-                    texto = buffer.getvalue().decode("utf-8", errors="ignore")[cite: 2]
+                    ftp.retrbinary(f"RETR {nome_arquivo}", buffer.write)
+                    texto = buffer.getvalue().decode("utf-8", errors="ignore")
                     
                     if texto.strip():
                         conteudo_total += texto + "\n"
-                        print(f"[TITAN DEBUG] Sucesso ao baixar: {nome_arquivo}")[cite: 2]
+                        print(f"[TITAN DEBUG] Sucesso ao baixar: {nome_arquivo}")
                 except Exception as e:
-                    print(f"[TITAN DEBUG] Erro ao baixar arquivo {nome_arquivo}: {e}")[cite: 2]
+                    print(f"[TITAN DEBUG] Erro ao baixar arquivo {nome_arquivo}: {e}")
                     continue
     except Exception as e:
-        print(f"[TITAN DEBUG] Erro fatal na conexão FTP do Ranking: {e}")[cite: 2]
+        print(f"[TITAN DEBUG] Erro fatal na conexão FTP do Ranking: {e}")
 
     return conteudo_total
 
