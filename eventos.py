@@ -486,9 +486,11 @@ def proworker():
             db_all = load_db(DB_CLIENTS, {})
             mudou = False
             for cid, cinfo in db_all.items():
+                # --- 1. LÓGICA DE AGENDAS DE ARQUIVOS (EXISTENTE) ---
                 for ag in cinfo.get("agendas", []):
                     hora_entrada = str_to_time(ag.get("data"), ag.get("in"))
                     hora_saida = str_to_time(ag.get("data"), ag.get("out"))
+                    
                     if hora_entrada and now >= hora_entrada and ag.get("status") == "Aguardando":
                         if not os.path.exists(ag["localpath"]) and ag.get("filecontent"):
                             try:
@@ -497,38 +499,20 @@ def proworker():
                                     f.write(base64.b64decode(ag["filecontent"]))
                             except Exception as e:
                                 print("Erro ao recriar arquivo:", e)
+                        
                         if not os.path.exists(ag["localpath"]):
                             ag["status"] = "Erro"
                             registrar_log(cid, f"Arquivo perdido: {ag['file']}", "erro")
                             mudou = True
                         else:
-                            ok, msg = dispararftppro(
-                                cid,
-                                "UPLOAD",
-                                ag["file"],
-                                ag["localpath"],
-                                ag["path"],
-                            )
+                            ok, msg = dispararftppro(cid, "UPLOAD", ag["file"], ag["localpath"], ag["path"])
                             ag["status"] = "Ativo" if ok else "Erro"
-                            registrar_log(
-                                cid,
-                                f"UPLOAD {ag['file']} {'OK' if ok else msg}",
-                                "sucesso" if ok else "erro",
-                            )
+                            registrar_log(cid, f"UPLOAD {ag['file']} {'OK' if ok else msg}", "sucesso" if ok else "erro")
                             mudou = True
+
                     if hora_saida and now >= hora_saida and ag.get("status") == "Ativo":
-                        ok, msg = dispararftppro(
-                            cid,
-                            "DELETE",
-                            ag["file"],
-                            ag["localpath"],
-                            ag["path"],
-                        )
-                        registrar_log(
-                            cid,
-                            f"DELETE {ag['file']} {'OK' if ok else msg}",
-                            "sucesso" if ok else "erro",
-                        )
+                        ok, msg = dispararftppro(cid, "DELETE", ag["file"], ag["localpath"], ag["path"])
+                        registrar_log(cid, f"DELETE {ag['file']} {'OK' if ok else msg}", "sucesso" if ok else "erro")
                         if ag.get("rec") == "Diário":
                             ag["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
                             ag["status"] = "Aguardando"
@@ -538,6 +522,52 @@ def proworker():
                         else:
                             ag["status"] = "Finalizado"
                         mudou = True
+
+                # --- 2. NOVA LÓGICA: AGENDAS DE RAID AUTOMÁTICO ---
+                for rd in cinfo.get("agendas_raid", []):
+                    inicio_r = str_to_time(rd["data"], rd["in"])
+                    fim_r = str_to_time(rd["data"], rd["out"])
+
+                    # Ação: INICIAR RAID (Ligar o dano/disableBaseDamage = False)
+                    if rd["status"] == "Aguardando" and now >= inicio_r: # <--- AJUSTADO[cite: 5]
+                        ok, content, msg = baixarcfggameplayviaftp(cid, rd["mapa"])
+                        if ok:
+                            try:
+                                cfg_json = json.loads(content.decode("utf-8"))
+                                cfg_json["GeneralData"]["disableBaseDamage"] = False
+                                
+                                temp_file = f"raid_on_{cid}.json"
+                                with open(temp_file, "w") as f:
+                                    json.dump(cfg_json, f, indent=4)
+                                
+                                env_ok, env_msg = enviar_cfggameplay_via_ftp(cid, temp_file, rd["mapa"])
+                                if env_ok:
+                                    rd["status"] = "Ativo"
+                                    registrar_log(cid, f"🔥 RAID INICIADO em {rd['mapa']}! Dano em bases ATIVADO.", "sucesso")
+                                    mudou = True
+                            except Exception as e:
+                                print(f"Erro ao processar JSON de RAID ON: {e}")
+
+                    # Ação: ENCERRAR RAID (Desligar o dano/disableBaseDamage = True)
+                    elif rd["status"] == "Ativo" and now >= fim_r:
+                        ok, content, msg = baixarcfggameplayviaftp(cid, rd["mapa"])
+                        if ok:
+                            try:
+                                cfg_json = json.loads(content.decode("utf-8"))
+                                cfg_json["GeneralData"]["disableBaseDamage"] = True
+                                
+                                temp_file = f"raid_off_{cid}.json"
+                                with open(temp_file, "w") as f:
+                                    json.dump(cfg_json, f, indent=4)
+                                
+                                env_ok, env_msg = enviar_cfggameplay_via_ftp(cid, temp_file, rd["mapa"])
+                                if env_ok:
+                                    rd["status"] = "Finalizado"
+                                    registrar_log(cid, f"🛡️ RAID ENCERRADO em {rd['mapa']}! Dano em bases DESATIVADO.", "info")
+                                    mudou = True
+                            except Exception as e:
+                                print(f"Erro ao processar JSON de RAID OFF: {e}")
+
             if mudou:
                 save_db(DB_CLIENTS, db_all)
         except Exception as e:
@@ -552,8 +582,6 @@ def start_worker_once():
         WORKER_STARTED = True
         threading.Thread(target=proworker, daemon=True).start()
         threading.Thread(target=worker_dzcoins_automatico, daemon=True).start()
-
-# ---------- HELPERS BAIXAR FTP ----------
 
 # ---------- HELPER GENÉRICO DE DOWNLOAD VIA FTP ----------
 
@@ -2405,10 +2433,11 @@ with st.sidebar:
 
 # --- TABS PRINCIPAIS CLIENTE ---
 st.title(f"🎮 {user_info['server']}")
-tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab6, tab7, tab8, tab_planos = st.tabs([
+# Adicione "🛡️ Agenda de RAID" na lista de abas
+tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab_raid, tab6, tab7, tab8, tab_planos = st.tabs([
     "📅 Eventos Agendados", "📋 Histórico Logs", "📢 Comunicados", "🧬 Loot / types.xml",
     "🌍 Ambiente / globals.xml", "⚙️ Gameplay / cfggameplay.json", "📅 Eventos / events.xml",
-    "💬 Mensagens / messages.xml", "📍 Spawns / cfgeventspawns.xml",
+    "💬 Mensagens / messages.xml", "📍 Spawns / cfgeventspawns.xml","🛡️ Agenda de RAID",
     "🛒 Loja / Trader", "👥 Jogadores", "🏦 Banco / Carteira", "💎 Planos",
 ])
 
@@ -4349,524 +4378,565 @@ with tabcfgeventspawns:
             st.markdown("### Resumo do evento selecionado")
             st.write(f"- Evento: {evento_sel}")
             st.write(f"- Total de posições carregadas: {len(edited_df)}")
-    
-    with tab6:
-        st.subheader("🛒 Loja / Trader")
-        st.info("Configure aqui o catálogo de itens da loja do seu servidor.")
-    
-        # Descobre o server_id real vinculado ao usuário logado
-        server_id_loja = st.session_state.db_users.get("keys", {}).get(
-            user_id, {}
-        ).get("server_id", user_id)
-    
-        # Recarrega a base mais atual do disco
-        db_completo = load_db(DB_CLIENTS, {})
-    
-        # Garante estrutura mínima do servidor
-        if server_id_loja not in db_completo:
-            db_completo[server_id_loja] = {
-                "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
-                "agendas": [],
-                "logs": [],
-                "comunicados": [],
-                "players": {},
-                "loja": {
-                    "mapa_padrao": "Chernarus",
-                    "posicao_padrao": "",
-                    "itens": [],
-                },
+
+with tab_raid:
+    st.subheader("🛡️ Gestão de Horários de RAID")
+    st.info("O RAID automatizado altera o arquivo `cfggameplay.json`. No início do RAID o dano em bases é ativado, e no fim é desativado automaticamente.")[cite: 2]
+
+    # Formulário de Agendamento
+    with st.expander("➕ Agendar Nova Janela de RAID", expanded=True):
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            data_r = st.date_input("Data do RAID", min_value=get_hora_brasilia().date(), key=f"date_raid_{user_id}")
+            h_ini_r = st.text_input("Hora Início (ex: 20:00)", "20:00", key=f"h_ini_raid_{user_id}")
+        with col_r2:
+            h_fim_r = st.text_input("Hora Fim (ex: 23:59)", "23:59", key=f"h_fim_raid_{user_id}")
+            mapa_r = st.selectbox("Mapa do RAID", ["Chernarus", "Livonia"], key=f"mapa_raid_{user_id}")
+        
+        if st.button("🚀 Confirmar Agendamento de RAID", use_container_width=True):
+            novo_raid = {
+                "id": str(time.time()),
+                "data": data_r.strftime("%d/%m/%Y"),
+                "in": h_ini_r,
+                "out": h_fim_r,
+                "mapa": mapa_r,
+                "status": "Aguardando"
             }
+            client_data.setdefault("agendas_raid", []).append(novo_raid)
+            save_db(DB_CLIENTS, st.session_state.db_clients)
+            registrar_log(user_id, f"RAID Agendado: {data_r.strftime('%d/%m/%Y')} às {h_ini_r}", "info")[cite: 2]
+            st.success("RAID agendado com sucesso!")
+            st.rerun()
+
+    # Lista de RAIDs Agendados
+    st.markdown("### 📋 RAIDs Programados")
+    raids_lista = client_data.get("agendas_raid", [])
+    if not raids_lista:
+        st.info("Nenhum RAID agendado no momento.")
+    else:
+        for r in raids_lista:
+            cor_r = "🔵" if r["status"] == "Aguardando" else "🟢" if r["status"] == "Ativo" else "⚪"
+            with st.expander(f"{cor_r} RAID {r['mapa']} | {r['data']} | {r['in']} às {r['out']}"):
+                st.write(f"**Status:** {r['status']}")
+                if st.button("Excluir RAID", key=f"del_raid_{r['id']}", type="secondary"):
+                    client_data["agendas_raid"] = [i for i in client_data["agendas_raid"] if i["id"] != r["id"]]
+                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                    st.rerun()
     
-        client_data_loja = db_completo[server_id_loja]
-    
-        # Garante estrutura da loja
-        if "loja" not in client_data_loja:
-            client_data_loja["loja"] = {
+with tab6:
+    st.subheader("🛒 Loja / Trader")
+    st.info("Configure aqui o catálogo de itens da loja do seu servidor.")
+
+    # Descobre o server_id real vinculado ao usuário logado
+    server_id_loja = st.session_state.db_users.get("keys", {}).get(
+        user_id, {}
+    ).get("server_id", user_id)
+
+    # Recarrega a base mais atual do disco
+    db_completo = load_db(DB_CLIENTS, {})
+
+    # Garante estrutura mínima do servidor
+    if server_id_loja not in db_completo:
+        db_completo[server_id_loja] = {
+            "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
+            "agendas": [],
+            "logs": [],
+            "comunicados": [],
+            "players": {},
+            "loja": {
                 "mapa_padrao": "Chernarus",
                 "posicao_padrao": "",
                 "itens": [],
+            },
+        }
+
+    client_data_loja = db_completo[server_id_loja]
+
+    # Garante estrutura da loja
+    if "loja" not in client_data_loja:
+        client_data_loja["loja"] = {
+            "mapa_padrao": "Chernarus",
+            "posicao_padrao": "",
+            "itens": [],
+        }
+
+    loja = client_data_loja["loja"]
+    loja.setdefault("mapa_padrao", "Chernarus")
+    loja.setdefault("posicao_padrao", "")
+    loja.setdefault("itens", [])
+
+    st.markdown("### ⚙️ Configurações gerais da Loja")
+
+    col_conf1, col_conf2 = st.columns(2)
+    with col_conf1:
+        loja_mapa_padrao = st.selectbox(
+            "Mapa padrão da Loja",
+            ["Chernarus", "Livonia"],
+            index=["Chernarus", "Livonia"].index(loja.get("mapa_padrao", "Chernarus")),
+            key="loja_mapa_padrao",
+        )
+    with col_conf2:
+        loja_posicao_padrao = st.text_input(
+            "Coordenadas padrão de entrega (opcional)",
+            value=loja.get("posicao_padrao", ""),
+            help=(
+                "Opcional. Use um mapa como dayz.xam.nu ou iZurvive, clique no local desejado, "
+                "copie as coordenadas (ex: 2432.34/4353.87) ou a descrição e cole aqui. "
+                "O player poderá informar outra posição na página de compra."
+            ),
+            key="loja_posicao_padrao",
+        )
+
+    st.markdown("### 📦 Itens da Loja")
+
+    df_loja_key = f"df_loja_{server_id_loja}"
+    loja_version_key = f"df_loja_version_{server_id_loja}"
+
+    loja_serializada = json.dumps(loja, sort_keys=True, ensure_ascii=False)
+
+    if (
+        df_loja_key not in st.session_state
+        or loja_version_key not in st.session_state
+        or st.session_state[loja_version_key] != loja_serializada
+    ):
+        st.session_state[df_loja_key] = loja_itens_to_df(loja)
+        st.session_state[loja_version_key] = loja_serializada
+
+    df_loja = st.session_state[df_loja_key]
+
+    st.info(
+        "Colunas: id (ordem de exibição), nome (visível para o player), "
+        "classe (nome do item no DayZ, ex: M4A1), categoria, preço (DzCoins), quantidade por compra, ativo."
+    )
+
+    edited_df_loja = st.data_editor(
+        df_loja,
+        num_rows="dynamic",
+        hide_index=True,
+        column_config={
+            "id": st.column_config.NumberColumn(
+                "ID (ordem)",
+                help="Ordem do item na lista / identificador para compras.",
+                min_value=1,
+                step=1,
+            ),
+            "nome": "Nome (exibido na loja)",
+            "classe": "Classe DayZ (ex: M4A1)",
+            "categoria": "Categoria (Armas, Kits, etc.)",
+            "preco": st.column_config.NumberColumn(
+                "Preço (DzCoins)",
+                min_value=0,
+                step=1,
+            ),
+            "quantidade": st.column_config.NumberColumn(
+                "Quantidade",
+                min_value=1,
+                step=1,
+            ),
+            "ativo": st.column_config.CheckboxColumn(
+                "Ativo",
+                default=True,
+                help="Se desmarcado, o item não aparece para os jogadores.",
+            ),
+        },
+        key=f"editor_loja_{server_id_loja}",
+    )
+
+    st.markdown("### 💾 Salvar catálogo")
+
+    col_loja1, col_loja2, col_loja3, col_loja4 = st.columns(4)
+
+    with col_loja1:
+        if st.button("Aplicar alterações na sessão (Loja)", use_container_width=True):
+            st.session_state[df_loja_key] = edited_df_loja
+            st.success("Alterações aplicadas na sessão da Loja.")
+
+    with col_loja2:
+        if st.button("Salvar Loja no Titan Cloud", key=f"btn_salvar_{user_id}", use_container_width=True):
+            db_completo = load_db(DB_CLIENTS, {})
+
+            if server_id_loja not in db_completo:
+                db_completo[server_id_loja] = {
+                    "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
+                    "agendas": [],
+                    "logs": [],
+                    "comunicados": [],
+                    "players": {},
+                }
+
+            if "loja" not in db_completo[server_id_loja]:
+                db_completo[server_id_loja]["loja"] = {}
+
+            itens_atualizados = df_to_loja_itens(edited_df_loja)
+            loja_obj = {
+                "mapa_padrao": loja_mapa_padrao,
+                "posicao_padrao": loja_posicao_padrao,
+                "itens": itens_atualizados,
             }
-    
-        loja = client_data_loja["loja"]
-        loja.setdefault("mapa_padrao", "Chernarus")
-        loja.setdefault("posicao_padrao", "")
-        loja.setdefault("itens", [])
-    
-        st.markdown("### ⚙️ Configurações gerais da Loja")
-    
-        col_conf1, col_conf2 = st.columns(2)
-        with col_conf1:
-            loja_mapa_padrao = st.selectbox(
-                "Mapa padrão da Loja",
-                ["Chernarus", "Livonia"],
-                index=["Chernarus", "Livonia"].index(loja.get("mapa_padrao", "Chernarus")),
-                key="loja_mapa_padrao",
+
+            db_completo[server_id_loja]["loja"] = loja_obj
+            save_db(DB_CLIENTS, db_completo)
+
+            st.session_state.db_clients = db_completo
+            st.session_state[df_loja_key] = loja_itens_to_df(loja_obj)
+            st.session_state[loja_version_key] = json.dumps(
+                loja_obj, sort_keys=True, ensure_ascii=False
             )
-        with col_conf2:
-            loja_posicao_padrao = st.text_input(
-                "Coordenadas padrão de entrega (opcional)",
-                value=loja.get("posicao_padrao", ""),
-                help=(
-                    "Opcional. Use um mapa como dayz.xam.nu ou iZurvive, clique no local desejado, "
-                    "copie as coordenadas (ex: 2432.34/4353.87) ou a descrição e cole aqui. "
-                    "O player poderá informar outra posição na página de compra."
-                ),
-                key="loja_posicao_padrao",
+
+            st.success(f"✅ Catálogo salvo com sucesso para o Servidor {server_id_loja}!")
+            st.rerun()
+
+    with col_loja3:
+        if st.button("⬇️ Baixar Loja (JSON)", use_container_width=True):
+            itens_atualizados = df_to_loja_itens(edited_df_loja)
+            loja_preview = {
+                "servidor": user_info.get("server", "Servidor"),
+                "mapa_padrao": loja_mapa_padrao,
+                "posicao_padrao": loja_posicao_padrao,
+                "itens": itens_atualizados,
+            }
+            loja_json = json.dumps(loja_preview, indent=4, ensure_ascii=False)
+
+            st.download_button(
+                label="Baixar arquivo Loja_Titan.json",
+                data=loja_json.encode("utf-8"),
+                file_name="Loja_Titan.json",
+                mime="application/json",
+                use_container_width=True,
             )
-    
-        st.markdown("### 📦 Itens da Loja")
-    
-        df_loja_key = f"df_loja_{server_id_loja}"
-        loja_version_key = f"df_loja_version_{server_id_loja}"
-    
-        loja_serializada = json.dumps(loja, sort_keys=True, ensure_ascii=False)
-    
-        if (
-            df_loja_key not in st.session_state
-            or loja_version_key not in st.session_state
-            or st.session_state[loja_version_key] != loja_serializada
-        ):
-            st.session_state[df_loja_key] = loja_itens_to_df(loja)
-            st.session_state[loja_version_key] = loja_serializada
-    
-        df_loja = st.session_state[df_loja_key]
-    
-        st.info(
-            "Colunas: id (ordem de exibição), nome (visível para o player), "
-            "classe (nome do item no DayZ, ex: M4A1), categoria, preço (DzCoins), quantidade por compra, ativo."
-        )
-    
-        edited_df_loja = st.data_editor(
-            df_loja,
-            num_rows="dynamic",
-            hide_index=True,
-            column_config={
-                "id": st.column_config.NumberColumn(
-                    "ID (ordem)",
-                    help="Ordem do item na lista / identificador para compras.",
-                    min_value=1,
-                    step=1,
-                ),
-                "nome": "Nome (exibido na loja)",
-                "classe": "Classe DayZ (ex: M4A1)",
-                "categoria": "Categoria (Armas, Kits, etc.)",
-                "preco": st.column_config.NumberColumn(
-                    "Preço (DzCoins)",
-                    min_value=0,
-                    step=1,
-                ),
-                "quantidade": st.column_config.NumberColumn(
-                    "Quantidade",
-                    min_value=1,
-                    step=1,
-                ),
-                "ativo": st.column_config.CheckboxColumn(
-                    "Ativo",
-                    default=True,
-                    help="Se desmarcado, o item não aparece para os jogadores.",
-                ),
-            },
-            key=f"editor_loja_{server_id_loja}",
-        )
-    
-        st.markdown("### 💾 Salvar catálogo")
-    
-        col_loja1, col_loja2, col_loja3, col_loja4 = st.columns(4)
-    
-        with col_loja1:
-            if st.button("Aplicar alterações na sessão (Loja)", use_container_width=True):
-                st.session_state[df_loja_key] = edited_df_loja
-                st.success("Alterações aplicadas na sessão da Loja.")
-    
-        with col_loja2:
-            if st.button("Salvar Loja no Titan Cloud", key=f"btn_salvar_{user_id}", use_container_width=True):
-                db_completo = load_db(DB_CLIENTS, {})
-    
-                if server_id_loja not in db_completo:
-                    db_completo[server_id_loja] = {
-                        "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
-                        "agendas": [],
-                        "logs": [],
-                        "comunicados": [],
-                        "players": {},
-                    }
-    
-                if "loja" not in db_completo[server_id_loja]:
-                    db_completo[server_id_loja]["loja"] = {}
-    
-                itens_atualizados = df_to_loja_itens(edited_df_loja)
-                loja_obj = {
-                    "mapa_padrao": loja_mapa_padrao,
-                    "posicao_padrao": loja_posicao_padrao,
-                    "itens": itens_atualizados,
-                }
-    
-                db_completo[server_id_loja]["loja"] = loja_obj
-                save_db(DB_CLIENTS, db_completo)
-    
-                st.session_state.db_clients = db_completo
-                st.session_state[df_loja_key] = loja_itens_to_df(loja_obj)
+            
+    with col_loja4:
+        if st.button("🔄 Recarregar Loja da Base", use_container_width=True):
+            db_recarregado = load_db(DB_CLIENTS, {})
+
+            if server_id_loja not in db_recarregado:
+                st.warning("Servidor não encontrado na base de dados.")
+            else:
+                client_data_recarregado = db_recarregado[server_id_loja]
+                loja_recarregada = client_data_recarregado.get("loja", {})
+                loja_recarregada.setdefault("mapa_padrao", "Chernarus")
+                loja_recarregada.setdefault("posicao_padrao", "")
+                loja_recarregada.setdefault("itens", [])
+
+                st.session_state[df_loja_key] = loja_itens_to_df(loja_recarregada)
                 st.session_state[loja_version_key] = json.dumps(
-                    loja_obj, sort_keys=True, ensure_ascii=False
+                    loja_recarregada, sort_keys=True, ensure_ascii=False
                 )
-    
-                st.success(f"✅ Catálogo salvo com sucesso para o Servidor {server_id_loja}!")
+                st.session_state.db_clients = db_recarregado
+
+                st.success("✅ Loja recarregada diretamente da base.")
                 st.rerun()
-    
-        with col_loja3:
-            if st.button("⬇️ Baixar Loja (JSON)", use_container_width=True):
-                itens_atualizados = df_to_loja_itens(edited_df_loja)
-                loja_preview = {
-                    "servidor": user_info.get("server", "Servidor"),
-                    "mapa_padrao": loja_mapa_padrao,
-                    "posicao_padrao": loja_posicao_padrao,
-                    "itens": itens_atualizados,
-                }
-                loja_json = json.dumps(loja_preview, indent=4, ensure_ascii=False)
-    
-                st.download_button(
-                    label="Baixar arquivo Loja_Titan.json",
-                    data=loja_json.encode("utf-8"),
-                    file_name="Loja_Titan.json",
-                    mime="application/json",
-                    use_container_width=True,
-                )
-                
-        with col_loja4:
-            if st.button("🔄 Recarregar Loja da Base", use_container_width=True):
-                db_recarregado = load_db(DB_CLIENTS, {})
-    
-                if server_id_loja not in db_recarregado:
-                    st.warning("Servidor não encontrado na base de dados.")
+
+with tab7:
+    st.subheader("👤 Jogadores / Vínculos")
+    st.info(
+        "Gerencie aqui o vínculo entre Gamertag dos jogadores e suas informações básicas. "
+        "Esses dados serão usados pela Loja, Banco DzCoins e estatísticas."
+    )
+
+    # Busca o server_id a partir da user_key logada
+    user_key = st.session_state.get("user_key", "")
+    server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
+    if not server_id:
+        st.error(
+            "Nenhum servidor vinculado a este login.\n"
+            "Faça login com uma KeyUser válida (gerada no painel de administração)."
+        )
+        st.stop()
+
+    # Lê diretamente do arquivo para pegar vínculos feitos pelo portal
+    db_clients = load_db(DB_CLIENTS, {})
+
+    if not db_clients:
+        st.warning("Nenhum cliente/servidor cadastrado.")
+        st.stop()
+
+    if server_id not in db_clients:
+        st.error(
+            f"O servidor com ID {server_id} não foi encontrado em clients_data.\n"
+            "Verifique se o server_id existe em clients_data.json."
+        )
+        st.stop()
+
+    client_data = db_clients[server_id]
+    players = load_players_for_client(client_data)
+
+    # Nome amigável do servidor a partir do users_db (se estiver em sessão)
+    db_users = st.session_state.get("db_users", {"keys": {}})
+    keyuser = st.session_state.get("user_key", "")
+    nome_servidor = db_users.get("keys", {}).get(keyuser, {}).get("server", "Servidor sem nome")
+
+    st.markdown("### 🧩 Servidor vinculado a este cliente")
+    st.info(
+        f"Cliente logado com a KeyUser **{keyuser or '(desconhecida)'}**, "
+        f"servidor: **{nome_servidor}** (ID interno: **{server_id}**)"
+    )
+
+    # Converte SEMPRE a partir do JSON mais recente
+    df_players = players_to_df(players)
+    df_players_key = f"df_players_{server_id}"
+    st.session_state[df_players_key] = df_players
+
+    st.markdown("### 📋 Lista de jogadores vinculados")
+    st.info(
+        "Preencha a Gamertag (obrigatória) e, se quiser, apelido e ID do Discord. "
+        "Futuramente, esses vínculos serão usados para Loja, Banco e ranking."
+    )
+
+    edited_df_players = st.data_editor(
+        df_players,
+        num_rows="dynamic",
+        hide_index=True,
+        column_config={
+            "gamertag": "Gamertag (obrigatório)",
+            "apelido": "Apelido / Nome no Discord",
+            "discord_id": "ID do Discord (opcional)",
+            "observacoes": "Observações",
+        },
+    )
+
+    st.markdown("### 💾 Salvar vínculos")
+
+    col_p1, col_p2 = st.columns(2)
+
+    with col_p1:
+        if st.button("Aplicar alterações na sessão (Jogadores)", use_container_width=True):
+            st.session_state[df_players_key] = edited_df_players
+            st.success("Alterações aplicadas na sessão de Jogadores.")
+
+    with col_p2:
+        if st.button("Salvar Jogadores no Titan Cloud", use_container_width=True):
+            players_atualizados = df_to_players(edited_df_players)
+            gamertags_ativas = set(players_atualizados.keys())
+
+            # Remove wallets e bank de jogadores que foram excluídos
+            for secao in ("wallets", "bank"):
+                if secao in client_data:
+                    removidos = [g for g in client_data[secao] if g not in gamertags_ativas]
+                    for g in removidos:
+                        del client_data[secao][g]
+
+            # Atualiza o client_data e o dicionário carregado do arquivo
+            client_data["players"] = players_atualizados
+            db_clients[server_id] = client_data
+
+            # Salva em disco
+            save_db(DB_CLIENTS, db_clients)
+
+            # Mantém o DF da sessão sincronizado com o que foi salvo
+            st.session_state[df_players_key] = edited_df_players
+
+            st.success("Vínculos de jogadores salvos com sucesso no Titan Cloud!")
+
+with tab8:
+    st.subheader("🏦 Banco & Carteira")
+
+    st.info(
+        "Gerencie aqui o saldo de DzCoins dos jogadores: carteira (com o jogador) e banco (guardado). "
+        "Use esta tela para bônus de evento, correções e ajustes manuais."
+    )
+
+    # 1) Garante que há um servidor válido na sessão
+    user_key = st.session_state.get("user_key", "")
+    server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
+    if not server_id:
+        st.error(
+            "Nenhum servidor vinculado a este login.\n"
+            "Faça login com uma KeyUser válida (gerada no painel de administração)."
+        )
+        st.stop()
+
+    # 2) Carrega dados do servidor
+    clients_data = load_db(DB_CLIENTS, {})
+    if not clients_data:
+        st.warning("Nenhum cliente/servidor cadastrado em clients_data.json.")
+        st.stop()
+
+    if server_id not in clients_data:
+        st.error(
+            f"O servidor com ID {server_id} não foi encontrado em clients_data.json.\n"
+            "Verifique se o server_id está correto."
+        )
+        st.stop()
+
+    client_data = clients_data[server_id]
+
+    # Garante estruturas básicas
+    players = client_data.get("players", {})
+    if "wallets" not in client_data:
+        client_data["wallets"] = {}
+    if "bank" not in client_data:
+        client_data["bank"] = {}
+
+    wallets = client_data["wallets"]
+    bank = client_data["bank"]
+
+    # 3) Selecionar jogador
+    st.markdown("### 👤 Selecionar jogador")
+
+    if not players:
+        st.warning("Nenhum jogador vinculado ainda. Use a aba 'Jogadores / Vínculos'.")
+        st.stop()
+
+    lista_gamertags = sorted(players.keys())
+    gamertag_sel = st.selectbox("Jogador", lista_gamertags)
+
+    # 4) Recuperar ou criar registros de carteira/banco
+    wallet_reg = wallets.get(gamertag_sel, {"balance": 0, "historico": []})
+    bank_reg = bank.get(gamertag_sel, {"balance": 0, "historico": []})
+
+    saldo_carteira = wallet_reg.get("balance", 0)
+    saldo_banco = bank_reg.get("balance", 0)
+
+    st.markdown("### 💰 Saldos atuais")
+    st.info(
+        f"Jogador **{gamertag_sel}**\n\n"
+        f"- Carteira: **{saldo_carteira} DzCoins**\n"
+        f"- Banco: **{saldo_banco} DzCoins**"
+    )
+
+    # 5) Ajustes manuais (admin do servidor)
+    st.markdown("### 🛠 Ajustes manuais (admin)")
+
+    col_aj_cart, col_aj_bank = st.columns(2)
+
+    with col_aj_cart:
+        st.markdown("#### Carteira")
+        val_aj_cart = st.number_input(
+            "Ajuste na carteira (+ crédito, - débito)",
+            key="ajuste_carteira",
+            step=100,
+            value=0,
+        )
+        motivo_cart = st.text_input(
+            "Motivo (ex.: bônus evento, correção)", key="motivo_carteira"
+        )
+        if st.button("Aplicar ajuste na carteira", use_container_width=True):
+            if val_aj_cart == 0:
+                st.error("Informe um valor diferente de zero para ajustar.")
+            else:
+                saldo_novo = saldo_carteira + val_aj_cart
+                wallet_reg["balance"] = saldo_novo
+
+                hora = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
+                if val_aj_cart > 0:
+                    msg = f"[{hora}] AJUSTE +{val_aj_cart} (CARTEIRA) - {motivo_cart or 'sem motivo'}"
                 else:
-                    client_data_recarregado = db_recarregado[server_id_loja]
-                    loja_recarregada = client_data_recarregado.get("loja", {})
-                    loja_recarregada.setdefault("mapa_padrao", "Chernarus")
-                    loja_recarregada.setdefault("posicao_padrao", "")
-                    loja_recarregada.setdefault("itens", [])
-    
-                    st.session_state[df_loja_key] = loja_itens_to_df(loja_recarregada)
-                    st.session_state[loja_version_key] = json.dumps(
-                        loja_recarregada, sort_keys=True, ensure_ascii=False
-                    )
-                    st.session_state.db_clients = db_recarregado
-    
-                    st.success("✅ Loja recarregada diretamente da base.")
-                    st.rerun()
-    
-    with tab7:
-        st.subheader("👤 Jogadores / Vínculos")
-        st.info(
-            "Gerencie aqui o vínculo entre Gamertag dos jogadores e suas informações básicas. "
-            "Esses dados serão usados pela Loja, Banco DzCoins e estatísticas."
-        )
-    
-        # Busca o server_id a partir da user_key logada
-        user_key = st.session_state.get("user_key", "")
-        server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
-        if not server_id:
-            st.error(
-                "Nenhum servidor vinculado a este login.\n"
-                "Faça login com uma KeyUser válida (gerada no painel de administração)."
-            )
-            st.stop()
-    
-        # Lê diretamente do arquivo para pegar vínculos feitos pelo portal
-        db_clients = load_db(DB_CLIENTS, {})
-    
-        if not db_clients:
-            st.warning("Nenhum cliente/servidor cadastrado.")
-            st.stop()
-    
-        if server_id not in db_clients:
-            st.error(
-                f"O servidor com ID {server_id} não foi encontrado em clients_data.\n"
-                "Verifique se o server_id existe em clients_data.json."
-            )
-            st.stop()
-    
-        client_data = db_clients[server_id]
-        players = load_players_for_client(client_data)
-    
-        # (Opcional) debug para ver o dict bruto de players
-        # st.write("DEBUG players raw:", players)
-    
-        # Nome amigável do servidor a partir do users_db (se estiver em sessão)
-        db_users = st.session_state.get("db_users", {"keys": {}})
-        keyuser = st.session_state.get("user_key", "")
-        nome_servidor = db_users.get("keys", {}).get(keyuser, {}).get("server", "Servidor sem nome")
-    
-        st.markdown("### 🧩 Servidor vinculado a este cliente")
-        st.info(
-            f"Cliente logado com a KeyUser **{keyuser or '(desconhecida)'}**, "
-            f"servidor: **{nome_servidor}** (ID interno: **{server_id}**)"
-        )
-    
-        # Converte SEMPRE a partir do JSON mais recente
-        df_players = players_to_df(players)
-        df_players_key = f"df_players_{server_id}"
-        st.session_state[df_players_key] = df_players
-    
-        st.markdown("### 📋 Lista de jogadores vinculados")
-        st.info(
-            "Preencha a Gamertag (obrigatória) e, se quiser, apelido e ID do Discord. "
-            "Futuramente, esses vínculos serão usados para Loja, Banco e ranking."
-        )
-    
-        edited_df_players = st.data_editor(
-            df_players,
-            num_rows="dynamic",
-            hide_index=True,
-            column_config={
-                "gamertag": "Gamertag (obrigatório)",
-                "apelido": "Apelido / Nome no Discord",
-                "discord_id": "ID do Discord (opcional)",
-                "observacoes": "Observações",
-            },
-        )
-    
-        st.markdown("### 💾 Salvar vínculos")
-    
-        col_p1, col_p2 = st.columns(2)
-    
-        with col_p1:
-            if st.button("Aplicar alterações na sessão (Jogadores)", use_container_width=True):
-                st.session_state[df_players_key] = edited_df_players
-                st.success("Alterações aplicadas na sessão de Jogadores.")
-    
-        with col_p2:
-            if st.button("Salvar Jogadores no Titan Cloud", use_container_width=True):
-                players_atualizados = df_to_players(edited_df_players)
-                gamertags_ativas = set(players_atualizados.keys())
-    
-                # Remove wallets e bank de jogadores que foram excluídos
-                for secao in ("wallets", "bank"):
-                    if secao in client_data:
-                        removidos = [g for g in client_data[secao] if g not in gamertags_ativas]
-                        for g in removidos:
-                            del client_data[secao][g]
-    
-                # Atualiza o client_data e o dicionário carregado do arquivo
-                client_data["players"] = players_atualizados
-                db_clients[server_id] = client_data
-    
-                # Salva em disco
-                save_db(DB_CLIENTS, db_clients)
-    
-                # Mantém o DF da sessão sincronizado com o que foi salvo
-                st.session_state[df_players_key] = edited_df_players
-    
-                st.success("Vínculos de jogadores salvos com sucesso no Titan Cloud!")
-    
-    with tab8:
-        st.subheader("🏦 Banco & Carteira")
-    
-        st.info(
-            "Gerencie aqui o saldo de DzCoins dos jogadores: carteira (com o jogador) e banco (guardado). "
-            "Use esta tela para bônus de evento, correções e ajustes manuais."
-        )
-    
-        # 1) Garante que há um servidor válido na sessão
-        user_key = st.session_state.get("user_key", "")
-        server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
-        if not server_id:
-            st.error(
-                "Nenhum servidor vinculado a este login.\n"
-                "Faça login com uma KeyUser válida (gerada no painel de administração)."
-            )
-            st.stop()
-    
-        # 2) Carrega dados do servidor
-        clients_data = load_db(DB_CLIENTS, {})
-        if not clients_data:
-            st.warning("Nenhum cliente/servidor cadastrado em clients_data.json.")
-            st.stop()
-    
-        if server_id not in clients_data:
-            st.error(
-                f"O servidor com ID {server_id} não foi encontrado em clients_data.json.\n"
-                "Verifique se o server_id está correto."
-            )
-            st.stop()
-    
-        client_data = clients_data[server_id]
-    
-        # Garante estruturas básicas
-        players = client_data.get("players", {})
-        if "wallets" not in client_data:
-            client_data["wallets"] = {}
-        if "bank" not in client_data:
-            client_data["bank"] = {}
-    
-        wallets = client_data["wallets"]
-        bank = client_data["bank"]
-    
-        # 3) Selecionar jogador
-        st.markdown("### 👤 Selecionar jogador")
-    
-        if not players:
-            st.warning("Nenhum jogador vinculado ainda. Use a aba 'Jogadores / Vínculos'.")
-            st.stop()
-    
-        lista_gamertags = sorted(players.keys())
-        gamertag_sel = st.selectbox("Jogador", lista_gamertags)
-    
-        # 4) Recuperar ou criar registros de carteira/banco
-        wallet_reg = wallets.get(gamertag_sel, {"balance": 0, "historico": []})
-        bank_reg = bank.get(gamertag_sel, {"balance": 0, "historico": []})
-    
-        saldo_carteira = wallet_reg.get("balance", 0)
-        saldo_banco = bank_reg.get("balance", 0)
-    
-        st.markdown("### 💰 Saldos atuais")
-        st.info(
-            f"Jogador **{gamertag_sel}**\n\n"
-            f"- Carteira: **{saldo_carteira} DzCoins**\n"
-            f"- Banco: **{saldo_banco} DzCoins**"
-        )
-    
-        # 5) Ajustes manuais (admin do servidor)
-        st.markdown("### 🛠 Ajustes manuais (admin)")
-    
-        col_aj_cart, col_aj_bank = st.columns(2)
-    
-        with col_aj_cart:
-            st.markdown("#### Carteira")
-            val_aj_cart = st.number_input(
-                "Ajuste na carteira (+ crédito, - débito)",
-                key="ajuste_carteira",
-                step=100,
-                value=0,
-            )
-            motivo_cart = st.text_input(
-                "Motivo (ex.: bônus evento, correção)", key="motivo_carteira"
-            )
-            if st.button("Aplicar ajuste na carteira", use_container_width=True):
-                if val_aj_cart == 0:
-                    st.error("Informe um valor diferente de zero para ajustar.")
-                else:
-                    saldo_novo = saldo_carteira + val_aj_cart
-                    wallet_reg["balance"] = saldo_novo
-    
-                    hora = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
-                    if val_aj_cart > 0:
-                        msg = f"[{hora}] AJUSTE +{val_aj_cart} (CARTEIRA) - {motivo_cart or 'sem motivo'}"
-                    else:
-                        msg = f"[{hora}] AJUSTE {val_aj_cart} (CARTEIRA) - {motivo_cart or 'sem motivo'}"
-    
-                    wallet_reg.setdefault("historico", []).append(msg)
-    
-                    wallets[gamertag_sel] = wallet_reg
-                    client_data["wallets"] = wallets
-                    clients_data[server_id] = client_data
-                    save_db(DB_CLIENTS, clients_data)
-    
-                    st.success(f"Ajuste aplicado. Novo saldo em carteira: {saldo_novo} DzCoins.")
-    
-                    # Atualiza variáveis locais para refletir o novo saldo
-                    saldo_carteira = saldo_novo
-                    wallet_reg["balance"] = saldo_novo
-                    wallets[gamertag_sel] = wallet_reg
-                    client_data["wallets"] = wallets
-                    clients_data[server_id] = client_data
-    
-        with col_aj_bank:
-            st.markdown("#### Banco")
-            val_aj_bank = st.number_input(
-                "Ajuste no banco (+ crédito, - débito)",
-                key="ajuste_banco",
-                step=100,
-                value=0,
-            )
-            motivo_bank = st.text_input(
-                "Motivo (ex.: prêmio, correção)", key="motivo_banco"
-            )
-            if st.button("Aplicar ajuste no banco", use_container_width=True):
-                if val_aj_bank == 0:
-                    st.error("Informe um valor diferente de zero para ajustar.")
-                else:
-                    saldo_novo = saldo_banco + val_aj_bank
-                    bank_reg["balance"] = saldo_novo
-    
-                    hora = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
-                    if val_aj_bank > 0:
-                        msg = f"[{hora}] AJUSTE +{val_aj_bank} (BANCO) - {motivo_bank or 'sem motivo'}"
-                    else:
-                        msg = f"[{hora}] AJUSTE {val_aj_bank} (BANCO) - {motivo_bank or 'sem motivo'}"
-    
-                    bank_reg.setdefault("historico", []).append(msg)
-    
-                    bank[gamertag_sel] = bank_reg
-                    client_data["bank"] = bank
-                    clients_data[server_id] = client_data
-                    save_db(DB_CLIENTS, clients_data)
-    
-                    st.success(f"Ajuste aplicado. Novo saldo no banco: {saldo_novo} DzCoins.")
-    
-                    saldo_banco = saldo_novo
-                    bank_reg["balance"] = saldo_novo
-                    bank[gamertag_sel] = bank_reg
-                    client_data["bank"] = bank
-                    clients_data[server_id] = client_data
-    
-        # 6) Histórico consolidado
-        st.markdown("### 📜 Histórico de movimentações")
-    
-        col_hist_1, col_hist_2 = st.columns([3, 1])
-    
-        with col_hist_2:
-            if st.button("🧹 Limpar Histórico", key=f"limpar_historico_console_{gamertag_sel}", use_container_width=True):
-                wallet_reg["historico"] = []
-                bank_reg["historico"] = []
-    
+                    msg = f"[{hora}] AJUSTE {val_aj_cart} (CARTEIRA) - {motivo_cart or 'sem motivo'}"
+
+                wallet_reg.setdefault("historico", []).append(msg)
+
                 wallets[gamertag_sel] = wallet_reg
-                bank[gamertag_sel] = bank_reg
                 client_data["wallets"] = wallets
+                clients_data[server_id] = client_data
+                save_db(DB_CLIENTS, clients_data)
+
+                st.success(f"Ajuste aplicado. Novo saldo em carteira: {saldo_novo} DzCoins.")
+
+                # Atualiza variáveis locais para refletir o novo saldo
+                saldo_carteira = saldo_novo
+                wallet_reg["balance"] = saldo_novo
+                wallets[gamertag_sel] = wallet_reg
+                client_data["wallets"] = wallets
+                clients_data[server_id] = client_data
+
+    with col_aj_bank:
+        st.markdown("#### Banco")
+        val_aj_bank = st.number_input(
+            "Ajuste no banco (+ crédito, - débito)",
+            key="ajuste_banco",
+            step=100,
+            value=0,
+        )
+        motivo_bank = st.text_input(
+            "Motivo (ex.: prêmio, correção)", key="motivo_banco"
+        )
+        if st.button("Aplicar ajuste no banco", use_container_width=True):
+            if val_aj_bank == 0:
+                st.error("Informe um valor diferente de zero para ajustar.")
+            else:
+                saldo_novo = saldo_banco + val_aj_bank
+                bank_reg["balance"] = saldo_novo
+
+                hora = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
+                if val_aj_bank > 0:
+                    msg = f"[{hora}] AJUSTE +{val_aj_bank} (BANCO) - {motivo_bank or 'sem motivo'}"
+                else:
+                    msg = f"[{hora}] AJUSTE {val_aj_bank} (BANCO) - {motivo_bank or 'sem motivo'}"
+
+                bank_reg.setdefault("historico", []).append(msg)
+
+                bank[gamertag_sel] = bank_reg
                 client_data["bank"] = bank
                 clients_data[server_id] = client_data
                 save_db(DB_CLIENTS, clients_data)
-    
-                st.success("✅ Histórico visual limpo com sucesso.")
-                st.rerun()
-    
-        historico_comb = []
-    
-        for linha in wallet_reg.get("historico", []):
-            historico_comb.append(("CARTEIRA", linha))
-    
-        for linha in bank_reg.get("historico", []):
-            historico_comb.append(("BANCO", linha))
-    
-        st.caption("As movimentações mais recentes ficam visíveis neste console com rolagem.")
-    
-        if not historico_comb:
-            historico_txt = "Nenhuma movimentação registrada ainda."
-        else:
-            linhas_console = []
-            for origem, linha in reversed(historico_comb[-200:]):
-                icone = "💰" if origem == "CARTEIRA" else "🏦"
-                linhas_console.append(f"{icone} [{origem}] {linha}")
-            historico_txt = "\n".join(linhas_console)
-    
-        st.markdown(
-            f"""
-            <div style="
-                background:#0f1117;
-                border:1px solid #2b3240;
-                border-radius:8px;
-                padding:12px;
-                height:320px;
-                overflow-y:auto;
-                font-family:Consolas, 'Courier New', monospace;
-                font-size:12px;
-                color:#d6e2f0;
-                white-space:pre-wrap;
-                line-height:1.5;
-                margin-bottom:12px;
-            ">{historico_txt}</div>
-            """,
-            unsafe_allow_html=True,
-        )
+
+                st.success(f"Ajuste aplicado. Novo saldo no banco: {saldo_novo} DzCoins.")
+
+                saldo_banco = saldo_novo
+                bank_reg["balance"] = saldo_novo
+                bank[gamertag_sel] = bank_reg
+                client_data["bank"] = bank
+                clients_data[server_id] = client_data
+
+    # 6) Histórico consolidado
+    st.markdown("### 📜 Histórico de movimentações")
+
+    col_hist_1, col_hist_2 = st.columns([3, 1])
+
+    with col_hist_2:
+        if st.button("🧹 Limpar Histórico", key=f"limpar_historico_console_{gamertag_sel}", use_container_width=True):
+            wallet_reg["historico"] = []
+            bank_reg["historico"] = []
+
+            wallets[gamertag_sel] = wallet_reg
+            bank[gamertag_sel] = bank_reg
+            client_data["wallets"] = wallets
+            client_data["bank"] = bank
+            clients_data[server_id] = client_data
+            save_db(DB_CLIENTS, clients_data)
+
+            st.success("✅ Histórico visual limpo com sucesso.")
+            st.rerun()
+
+    historico_comb = []
+
+    for linha in wallet_reg.get("historico", []):
+        historico_comb.append(("CARTEIRA", linha))
+
+    for linha in bank_reg.get("historico", []):
+        historico_comb.append(("BANCO", linha))
+
+    st.caption("As movimentações mais recentes ficam visíveis neste console com rolagem.")
+
+    if not historico_comb:
+        historico_txt = "Nenhuma movimentação registrada ainda."
+    else:
+        linhas_console = []
+        for origem, linha in reversed(historico_comb[-200:]):
+            icone = "💰" if origem == "CARTEIRA" else "🏦"
+            linhas_console.append(f"{icone} [{origem}] {linha}")
+        historico_txt = "\n".join(linhas_console)
+
+    st.markdown(
+        f"""
+        <div style="
+            background:#0f1117;
+            border:1px solid #2b3240;
+            border-radius:8px;
+            padding:12px;
+            height:320px;
+            overflow-y:auto;
+            font-family:Consolas, 'Courier New', monospace;
+            font-size:12px;
+            color:#d6e2f0;
+            white-space:pre-wrap;
+            line-height:1.5;
+            margin-bottom:12px;
+        ">{historico_txt}</div>
+        """,
+        unsafe_allow_html=True,
+    )
     
     # --- ABA PLANOS ---
 with tab_planos:
