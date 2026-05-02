@@ -4870,8 +4870,6 @@ with tabcfgeventspawns:
     
     # --- ABA PLANOS ---
 with tab_planos:
-    st.markdown("### 💎 Planos Titan Cloud Pro")
-    st.caption("Confira as funcionalidades disponíveis em cada plano.")
     starter_border = "2px solid #aaaaaa" if plano_atual == "Starter" else "1px solid #444"
     starter_badge = '<div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#aaaaaa; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;">SEU PLANO</div>' if plano_atual == "Starter" else '<div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#aaaaaa; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;">BÁSICO</div>'
     pro_border = "2px solid #00d4ff" if plano_atual == "Pro" else "1px solid #00d4ff55"
@@ -4879,7 +4877,7 @@ with tab_planos:
     enterprise_border = "2px solid #FFD700" if plano_atual == "Enterprise" else "1px solid #FFD70055"
     enterprise_badge = '<div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#FFD700; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;">SEU PLANO</div>' if plano_atual == "Enterprise" else '<div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#FFD700; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;">PREMIUM</div>'
     html = """
-        <div style="background:#0f1117; border-radius:12px; padding:24px; margin-bottom:20px;">
+        <div style="background:#1a1a2e; border-radius:12px; padding:24px; margin-bottom:20px;">
             <div style="text-align:center; margin-bottom:24px;">
                 <div style="font-size:26px; font-weight:bold; color:#00d4ff;">
                     💎 Planos Titan Cloud Pro
