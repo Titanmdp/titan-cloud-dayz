@@ -4901,14 +4901,14 @@ with tab_planos:
                         ✅ Histórico de logs<br>
                         ✅ Backup e restore<br>
                         ✅ Banco e Carteira DzCoins<br>
+                        ✅ Ranking Semanal<br>
+                        ✅ Transferência DzCoins<br>
                         ✅ Loja Virtual (Trader)<br>
                         ✅ Worker DzCoins automático<br>
                         ✅ Portal do Jogador (Discord)<br>
                         ✅ Players online + reset<br>
                         ✅ Chernarus ou Livonia<br>
                         🔒 Editores XML/JSON<br>
-                        🔒 Ranking Semanal<br>
-                        🔒 Transferência DzCoins<br>
                     </div>
                     <div style="margin-top:16px; background:#333; border-radius:6px; padding:8px; font-size:12px; color:#aaa;">
                         📧 Suporte por E-mail
