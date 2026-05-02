@@ -4381,7 +4381,7 @@ with tabcfgeventspawns:
 
 with tab_raid:
     st.subheader("🛡️ Gestão de Horários de RAID")
-    st.info("O RAID automatizado altera o arquivo `cfggameplay.json`. No início do RAID o dano em bases é ativado, e no fim é desativado automaticamente.")[cite: 2]
+    st.info("O RAID automatizado altera o arquivo `cfggameplay.json`. No início do RAID o dano em bases é ativado, e no fim é desativado automaticamente.")
 
     # Formulário de Agendamento
     with st.expander("➕ Agendar Nova Janela de RAID", expanded=True):
@@ -4404,7 +4404,7 @@ with tab_raid:
             }
             client_data.setdefault("agendas_raid", []).append(novo_raid)
             save_db(DB_CLIENTS, st.session_state.db_clients)
-            registrar_log(user_id, f"RAID Agendado: {data_r.strftime('%d/%m/%Y')} às {h_ini_r}", "info")[cite: 2]
+            registrar_log(user_id, f"RAID Agendado: {data_r.strftime('%d/%m/%Y')} às {h_ini_r}", "info")
             st.success("RAID agendado com sucesso!")
             st.rerun()
 
