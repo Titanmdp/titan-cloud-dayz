@@ -2242,7 +2242,17 @@ def main():
 
         st.stop()
 
+    # Busca client_data por server_id ou por user_key (KeyUser)
+    # pois o FTP e configs sao salvos sob a KeyUser no eventos_dev.py
     client_data = clients_db.get(server_id, {})
+    if not client_data.get("ftp", {}).get("host", ""):
+        # Tenta achar pelo keyuser cujo server_id bate com o atual
+        for _kuser, _kdata in users_db.get("keys", {}).items():
+            if str(_kdata.get("server_id", "")).strip() == str(server_id).strip():
+                _alt = clients_db.get(_kuser, {})
+                if _alt.get("ftp", {}).get("host", ""):
+                    client_data = _alt
+                    break
     players = load_players_for_client(client_data)
     server_nome = st.session_state.get("portal_server_nome", "Servidor")
     nitrado_id = nitrado_id_map.get(server_id, server_id)
@@ -2285,8 +2295,21 @@ def main():
             f"""
             <div style="text-align:center; padding:30px 0 10px 0;">
                 <h2 style="color:#00d4ff;">Bem-vindo, {discord_name}! 👋</h2>
-                <p style="color:#aaa;">Para acessar o portal, vincule sua Gamertag primeiro.</p>
+                <p style="color:#555;">Para acessar o portal, vincule sua Gamertag primeiro.</p>
             </div>
+            <style>
+                div[data-testid="stForm"] label {{
+                    color: #222222 !important;
+                    font-weight: 600 !important;
+                }}
+                div[data-testid="stForm"] button[kind="primaryFormSubmit"],
+                div[data-testid="stForm"] button[data-testid="stFormSubmitButton"] {{
+                    background-color: #00d4ff !important;
+                    color: #000000 !important;
+                    font-weight: bold !important;
+                    border: none !important;
+                }}
+            </style>
             """,
             unsafe_allow_html=True,
         )
@@ -2294,7 +2317,7 @@ def main():
             gamertag = st.text_input("🎮 Gamertag (exatamente como aparece no console)", "")
             apelido = st.text_input("Apelido (opcional)", "")
             observacoes = st.text_area("Observações (opcional)", "")
-            submitted = st.form_submit_button("✅ Vincular minha Gamertag", use_container_width=True)
+            submitted = st.form_submit_button("✅ Vincular minha Gamertag", use_container_width=True, type="primary")
 
         if submitted:
             gamertag_clean = gamertag.strip()
@@ -2393,8 +2416,14 @@ def main():
             st.markdown("#### 🌐 Players Online")
             ftp_cfg_online = get_client_ftp_config(client_data)
             nitrado_token_cliente = next(
-                (v.get("nitrado_token", "") for v in users_db.get("keys", {}).values()
-                 if str(v.get("server_id", "")) == str(server_id)),
+                (
+                    v.get("nitrado_token", "")
+                    for k, v in users_db.get("keys", {}).items()
+                    if (
+                        str(v.get("server_id", "")).strip() == str(server_id).strip()
+                        or str(k).strip() == str(server_id).strip()
+                    ) and v.get("nitrado_token", "")
+                ),
                 ""
             )
             render_players_online(nitrado_id, ftp_cfg=ftp_cfg_online, nitrado_token=nitrado_token_cliente)
@@ -2437,6 +2466,15 @@ def main():
         else:
             clients_db_fresh = load_db(DB_CLIENTS, {})
             client_data_fresh = clients_db_fresh.get(server_id, {})
+            # Fallback: busca FTP pelo KeyUser se server_id nao tem FTP
+            if not client_data_fresh.get("ftp", {}).get("host", ""):
+                users_db_fresh = load_db(DB_USERS, {"keys": {}})
+                for _ku, _kd in users_db_fresh.get("keys", {}).items():
+                    if str(_kd.get("server_id", "")).strip() == str(server_id).strip():
+                        _alt = clients_db_fresh.get(_ku, {})
+                        if _alt.get("ftp", {}).get("host", ""):
+                            client_data_fresh = _alt
+                            break
             render_ranking(
                 client_data_fresh,
                 gamertag_vinculada,
