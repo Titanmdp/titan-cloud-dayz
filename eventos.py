@@ -562,8 +562,17 @@ def proworker():
                                 
                                 env_ok, env_msg = enviar_cfggameplay_via_ftp(cid, temp_file, rd["mapa"])
                                 if env_ok:
-                                    rd["status"] = "Finalizado"
-                                    registrar_log(cid, f"🛡️ RAID ENCERRADO em {rd['mapa']}! Dano em bases DESATIVADO.", "info")
+                                    # LÓGICA DE RECORRÊNCIA ADICIONADA:
+                                    if rd.get("rec") == "Diário":
+                                        rd["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
+                                        rd["status"] = "Aguardando"
+                                    elif rd.get("rec") == "Semanal":
+                                        rd["data"] = (now + timedelta(days=7)).strftime("%d/%m/%Y")
+                                        rd["status"] = "Aguardando"
+                                    else:
+                                        rd["status"] = "Finalizado"
+                                    
+                                    registrar_log(cid, f"🛡️ RAID ENCERRADO em {rd['mapa']}! Próxima execução: {rd['data']}", "info")
                                     mudou = True
                             except Exception as e:
                                 print(f"Erro ao processar JSON de RAID OFF: {e}")
@@ -4392,6 +4401,24 @@ with tab_raid:
         with col_r2:
             h_fim_r = st.text_input("Hora Fim (ex: 23:59)", "23:59", key=f"h_fim_raid_{user_id}")
             mapa_r = st.selectbox("Mapa do RAID", ["Chernarus", "Livonia"], key=f"mapa_raid_{user_id}")
+            # ADICIONADO: Campo de Recorrência
+            rec_r = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key=f"rec_raid_{user_id}")
+
+        if st.button("🚀 Confirmar Agendamento de RAID", use_container_width=True):
+            novo_raid = {
+                "id": str(time.time()),
+                "data": data_r.strftime("%d/%m/%Y"),
+                "in": h_ini_r,
+                "out": h_fim_r,
+                "mapa": mapa_r,
+                "rec": rec_r, # Salvando a recorrência
+                "status": "Aguardando"
+            }
+            client_data.setdefault("agendas_raid", []).append(novo_raid)
+            save_db(DB_CLIENTS, st.session_state.db_clients)
+            registrar_log(user_id, f"RAID Agendado ({rec_r}): {data_r.strftime('%d/%m/%Y')} às {h_ini_r}", "info")
+            st.success(f"RAID {rec_r} agendado!")
+            st.rerun()
         
         if st.button("🚀 Confirmar Agendamento de RAID", use_container_width=True):
             novo_raid = {
