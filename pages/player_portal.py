@@ -335,6 +335,25 @@ def trocar_code_por_token(code: str):
     }
 
 # =========================================================
+# 3.1 FUNÇÕES DE PLANO
+# =========================================================
+
+PERMISSOES = {
+    "transferencia_jogador": ["Pro", "Enterprise", "Admin"],
+    "ranking_semanal":       ["Pro", "Enterprise", "Admin"],
+}
+
+def plano_permite(plano_atual: str, funcionalidade: str) -> bool:
+    return plano_atual in PERMISSOES.get(funcionalidade, [])
+
+def bloquear_funcionalidade(plano_atual: str, funcionalidade_nome: str, plano_minimo: str = "Pro"):
+    st.warning(
+        f"🔒 **{funcionalidade_nome}** não está disponível no seu plano atual "
+        f"(**{plano_atual}**). Esta funcionalidade está disponível a partir do plano "
+        f"**{plano_minimo}**. Entre em contato com o suporte para fazer upgrade."
+    )
+
+# =========================================================
 # 4. FUNÇÕES NITRADO API
 # =========================================================
 
@@ -2227,6 +2246,15 @@ def main():
     players = load_players_for_client(client_data)
     server_nome = st.session_state.get("portal_server_nome", "Servidor")
     nitrado_id = nitrado_id_map.get(server_id, server_id)
+
+    # ----------------------------------------------------------
+    # 8.4.1 PLANO DO SERVIDOR
+    # ----------------------------------------------------------
+    plano_atual = "Starter"
+    for key_data in users_db.get("keys", {}).values():
+        if str(key_data.get("server_id", "")).strip() == str(server_id):
+            plano_atual = key_data.get("plano", "Starter")
+            break
 
     # ----------------------------------------------------------
     # 8.5 VALIDAÇÃO DISCORD GUILD
