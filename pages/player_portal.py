@@ -360,12 +360,13 @@ def bloquear_funcionalidade(plano_atual: str, funcionalidade_nome: str, plano_mi
 def nitrado_headers():
     return {"Authorization": f"Bearer {NITRADO_TOKEN}"}
 
-def get_players_online(nitrado_id: str) -> dict:
-    if not NITRADO_TOKEN:
+def get_players_online(nitrado_id: str, nitrado_token: str = "") -> dict:
+    token = nitrado_token or NITRADO_TOKEN
+    if not token:
         return {"players": [], "total": 0, "erro": "Token não configurado"}
     try:
         url = f"{NITRADO_API}/services/{nitrado_id}/gameservers"
-        resp = requests.get(url, headers=nitrado_headers(), timeout=10)
+        resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
             gs = data.get("data", {}).get("gameserver", {})
@@ -1464,10 +1465,10 @@ def get_online_from_adm(ftp_cfg: dict) -> list:
     return [n for n, v in conectados.items() if v]
 
 
-def render_players_online(nitrado_id: str, ftp_cfg: dict = None):
+def render_players_online(nitrado_id: str, ftp_cfg: dict = None, nitrado_token: str = ""):
     @st.fragment(run_every=60)
     def _players():
-        dados = get_players_online(nitrado_id)
+        dados = get_players_online(nitrado_id, nitrado_token=nitrado_token)
 
         if "erro" in dados:
             st.warning(f"⚠️ Players Online indisponível: {dados['erro']}")
@@ -1593,11 +1594,10 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
         "📋 Extrato",
         "➡️ Depositar (Carteira → Banco)",
         "⬅️ Sacar (Banco → Carteira)",
-        "🔁 Transferir para outro jogador",
     ]
 
     if plano_permite(plano_atual, "transferencia_jogador"):
-        opcoes_banco.append("Transferir para outro jogador")
+        opcoes_banco.append("🔁 Transferir para outro jogador")
 
     op = st.radio(
         "Operação",
@@ -2392,7 +2392,12 @@ def main():
         with col_a:
             st.markdown("#### 🌐 Players Online")
             ftp_cfg_online = get_client_ftp_config(client_data)
-            render_players_online(nitrado_id, ftp_cfg=ftp_cfg_online)
+            nitrado_token_cliente = next(
+                (v.get("nitrado_token", "") for v in users_db.get("keys", {}).values()
+                 if str(v.get("server_id", "")) == str(server_id)),
+                ""
+            )
+            render_players_online(nitrado_id, ftp_cfg=ftp_cfg_online, nitrado_token=nitrado_token_cliente)
 
         with col_b:
             st.markdown("#### 🔄 Reset do Servidor")
