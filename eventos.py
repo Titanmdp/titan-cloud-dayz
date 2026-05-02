@@ -529,12 +529,13 @@ def proworker():
                     fim_r = str_to_time(rd["data"], rd["out"])
 
                     # Ação: INICIAR RAID (Ligar o dano/disableBaseDamage = False)
-                    if rd["status"] == "Aguardando" and now >= inicio_r: # <--- AJUSTADO[cite: 5]
+                    if rd["status"] == "Aguardando" and now >= inicio_r:
                         ok, content, msg = baixarcfggameplayviaftp(cid, rd["mapa"])
                         if ok:
                             try:
                                 cfg_json = json.loads(content.decode("utf-8"))
-                                cfg_json["GeneralData"]["disableBaseDamage"] = False
+                                # Alteração da trava de segurança (GRC)
+                                cfg_json["GeneralData"]["disableBaseDamage"] = False 
                                 
                                 temp_file = f"raid_on_{cid}.json"
                                 with open(temp_file, "w") as f:
@@ -547,6 +548,35 @@ def proworker():
                                     mudou = True
                             except Exception as e:
                                 print(f"Erro ao processar JSON de RAID ON: {e}")
+
+                    # Ação: ENCERRAR RAID (Desligar o dano/disableBaseDamage = True)
+                    elif rd["status"] == "Ativo" and now >= fim_r:
+                        ok, content, msg = baixarcfggameplayviaftp(cid, rd["mapa"])
+                        if ok:
+                            try:
+                                cfg_json = json.loads(content.decode("utf-8"))
+                                cfg_json["GeneralData"]["disableBaseDamage"] = True
+                                
+                                temp_file = f"raid_off_{cid}.json"
+                                with open(temp_file, "w") as f:
+                                    json.dump(cfg_json, f, indent=4)
+                                
+                                env_ok, env_msg = enviar_cfggameplay_via_ftp(cid, temp_file, rd["mapa"])
+                                if env_ok:
+                                    # Lógica de Recorrência (Auditável)
+                                    if rd.get("rec") == "Diário":
+                                        rd["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
+                                        rd["status"] = "Aguardando"
+                                    elif rd.get("rec") == "Semanal":
+                                        rd["data"] = (now + timedelta(days=7)).strftime("%d/%m/%Y")
+                                        rd["status"] = "Aguardando"
+                                    else:
+                                        rd["status"] = "Finalizado"
+                                    
+                                    registrar_log(cid, f"🛡️ RAID ENCERRADO em {rd['mapa']}! Próxima execução: {rd['data']}", "info")
+                                    mudou = True
+                            except Exception as e:
+                                print(f"Erro ao processar JSON de RAID OFF: {e}")
 
                     # Ação: ENCERRAR RAID (Desligar o dano/disableBaseDamage = True)
                     elif rd["status"] == "Ativo" and now >= fim_r:
@@ -4401,42 +4431,23 @@ with tab_raid:
         with col_r2:
             h_fim_r = st.text_input("Hora Fim (ex: 23:59)", "23:59", key=f"h_fim_raid_{user_id}")
             mapa_r = st.selectbox("Mapa do RAID", ["Chernarus", "Livonia"], key=f"mapa_raid_{user_id}")
-            # ADICIONADO: Campo de Recorrência para Governança do Servidor
-        rec_r = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key=f"rec_raid_{user_id}")
-
-        # BOTÃO CORRIGIDO COM KEY ÚNICA
-        if st.button("🚀 Confirmar Agendamento de RAID", use_container_width=True, key=f"btn_confirm_raid_{user_id}"):
-            novo_raid = {
-                "id": str(time.time()),
-                "data": data_r.strftime("%d/%m/%Y"),
-                "in": h_ini_r,
-                "out": h_fim_r,
-                "mapa": mapa_r,
-                "rec": rec_r, 
-                "status": "Aguardando"
-            }
-            client_data.setdefault("agendas_raid", []).append(novo_raid)
-            save_db(DB_CLIENTS, st.session_state.db_clients)
-            
-            # Log de Auditoria para rastreabilidade[cite: 1, 7]
-            registrar_log(user_id, f"RAID Agendado ({rec_r}): {data_r.strftime('%d/%m/%Y')} às {h_ini_r}", "info")
-            
-            st.success(f"RAID {rec_r} agendado com sucesso!")
-            st.rerun()
+            rec_r = st.selectbox("Recorrência", ["Único", "Diário", "Semanal"], key=f"rec_raid_{user_id}")
         
-        if st.button("🚀 Confirmar Agendamento de RAID", use_container_width=True):
+        # BOTÃO ÚNICO COM KEY PARA EVITAR DUPLICIDADE
+        if st.button("🚀 Confirmar Agendamento de RAID", use_container_width=True, key=f"btn_confirmar_raid_final_{user_id}"):
             novo_raid = {
                 "id": str(time.time()),
                 "data": data_r.strftime("%d/%m/%Y"),
                 "in": h_ini_r,
                 "out": h_fim_r,
                 "mapa": mapa_r,
+                "rec": rec_r,
                 "status": "Aguardando"
             }
             client_data.setdefault("agendas_raid", []).append(novo_raid)
             save_db(DB_CLIENTS, st.session_state.db_clients)
-            registrar_log(user_id, f"RAID Agendado: {data_r.strftime('%d/%m/%Y')} às {h_ini_r}", "info")
-            st.success("RAID agendado com sucesso!")
+            registrar_log(user_id, f"RAID Agendado ({rec_r}): {data_r.strftime('%d/%m/%Y')} às {h_ini_r}", "info")
+            st.success(f"RAID {rec_r} agendado com sucesso!")
             st.rerun()
 
     # Lista de RAIDs Agendados
@@ -4448,6 +4459,7 @@ with tab_raid:
         for r in raids_lista:
             cor_r = "🔵" if r["status"] == "Aguardando" else "🟢" if r["status"] == "Ativo" else "⚪"
             with st.expander(f"{cor_r} RAID {r['mapa']} | {r['data']} | {r['in']} às {r['out']}"):
+                st.write(f"**Recorrência:** {r.get('rec', 'Único')}")
                 st.write(f"**Status:** {r['status']}")
                 if st.button("Excluir RAID", key=f"del_raid_{r['id']}", type="secondary"):
                     client_data["agendas_raid"] = [i for i in client_data["agendas_raid"] if i["id"] != r["id"]]
