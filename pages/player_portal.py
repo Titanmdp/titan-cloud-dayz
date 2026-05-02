@@ -1468,26 +1468,41 @@ def get_online_from_adm(ftp_cfg: dict) -> list:
 def render_players_online(nitrado_id: str, ftp_cfg: dict = None, nitrado_token: str = ""):
     @st.fragment(run_every=60)
     def _players():
+        # Tenta obter dados da API Nitrado
         dados = get_players_online(nitrado_id, nitrado_token=nitrado_token)
 
-        # AJUSTE: Fallback imediato se a API Nitrado falhar (Erro 500)
+        # AJUSTE: Se a API falhar (Erro 500), tenta o Log ADM via FTP antes de exibir erro
         if "erro" in dados:
             if ftp_cfg:
+                # Tenta ler do Log ADM
                 players_adm = get_online_from_adm(ftp_cfg)
-                if players_adm:
-                    total = len(players_adm)
-                    st.markdown(f'<div style="background:#1a1a2e;border-radius:10px;padding:14px;border:1px solid #7a4b1f;margin-bottom:8px;"><div style="font-size:13px;color:#ffcc66;margin-bottom:4px;">🌐 Players Online (via Log ADM)</div><div style="font-size:28px;font-weight:bold;color:#00ff88;">{total}</div></div>', unsafe_allow_html=True)
-                    with st.expander(f"Ver jogadores ({total})", expanded=False):
-                        for nome in players_adm:
-                            st.markdown(f"◆ `{nome}`")
-                    return
+                if players_adm is not None:
+                    total_adm = len(players_adm)
+                    # Exibe o box de sucesso usando os dados do log
+                    st.markdown(
+                        f'<div style="background:#1a1a2e;border-radius:10px;padding:14px;border:1px solid #7a4b1f;margin-bottom:8px;">'
+                        f'<div style="font-size:13px;color:#ffcc66;margin-bottom:4px;">🌐 Players Online (via Log ADM)</div>'
+                        f'<div style="font-size:28px;font-weight:bold;color:#00ff88;">{total_adm}</div></div>',
+                        unsafe_allow_html=True,
+                    )
+                    if total_adm > 0:
+                        with st.expander(f"Ver jogadores ({total_adm})", expanded=False):
+                            for nome in players_adm:
+                                st.markdown(f"◆ `{nome}`")
+                    else:
+                        st.caption("Nenhum jogador online detectado no log.")
+                    return # Sai da função com sucesso via log
+
+        # Se não houver erro na API, segue o fluxo normal
+        if "erro" in dados:
             st.warning(f"⚠️ Players Online indisponível: {dados['erro']}")
             return
 
         total = dados.get("total", 0)
+        players = dados.get("players", [])
         maximo = dados.get("max", 0)
 
-        # Se a API não retornou nomes, tenta pelo log ADM
+        # Fallback caso a API retorne total > 0 mas sem nomes
         if total > 0 and not players and ftp_cfg:
             players = get_online_from_adm(ftp_cfg)
 
@@ -1503,7 +1518,7 @@ def render_players_online(nitrado_id: str, ftp_cfg: dict = None, nitrado_token: 
             with st.expander(f"Ver jogadores ({total})", expanded=False):
                 for nome in players:
                     st.markdown(f"◆ `{nome}`")
-        elif total > 0 and not players:
+        elif total > 0:
             st.caption(f"{total} jogador(es) online, lista de nomes indisponível.")
         else:
             st.caption("Nenhum jogador online no momento.")
