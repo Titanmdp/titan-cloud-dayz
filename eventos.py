@@ -1712,6 +1712,13 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     "ID do Servidor na Nitrado (opcional, ex.: 18927875)",
                     placeholder="Se preencher, será usado como ID interno do servidor",
                 )
+                
+                nitrado_token_input = st.text_input(
+                    "Token Nitrado do Cliente",
+                    placeholder="Token gerado na conta Nitrado do cliente",
+                    type="password",
+                )
+                
                 discord_guild_id_input = st.text_input(
                     "ID do Servidor Discord (Guild ID)",
                     placeholder="Ex.: 1234567890123456789",
@@ -1767,6 +1774,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                             "expires": data_exp,
                             "plano": plano_sel,
                             "discord_guild_id": discord_guild_id_input.strip(),
+                            "nitrado_token": nitrado_token_input.strip(),
                         }
                         save_db(DB_USERS, st.session_state.db_users)
 
@@ -1833,6 +1841,32 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
 
                 st.divider()
 
+                st.markdown("#### ⚙️ Configurações do Servidor")
+                client_cfg = st.session_state.db_clients.get(k, {})
+                ftp_cfg = client_cfg.get("ftp", {})
+                col_cfg1, col_cfg2 = st.columns(2)
+                with col_cfg1:
+                    st.write(f"**🎮 Nitrado ID:** `{v.get('server_id', 'Não configurado')}`")
+                    st.write(f"**💬 Discord Guild ID:** `{v.get('discord_guild_id', 'Não configurado')}`")
+                    nitrado_token_salvo = v.get('nitrado_token', '')
+                    nitrado_token_masked = nitrado_token_salvo[:4] + "*" * (len(nitrado_token_salvo) - 4) if len(nitrado_token_salvo) > 4 else "Não configurado"
+                    st.write(f"**🔑 Nitrado Token:** `{nitrado_token_masked}`")
+                    novo_token = st.text_input("Atualizar Nitrado Token", value=nitrado_token_salvo, type="password", key=f"ntoken_{k}")
+                    if st.button("💾 Salvar Token", key=f"save_ntoken_{k}", use_container_width=True):
+                        st.session_state.db_users["keys"][k]["nitrado_token"] = novo_token.strip()
+                        save_db(DB_USERS, st.session_state.db_users)
+                        st.success("Token Nitrado atualizado!")
+                        st.rerun()
+                with col_cfg2:
+                    st.write(f"**🖥️ FTP Host:** `{ftp_cfg.get('host', 'Não configurado')}`")
+                    st.write(f"**👤 FTP User:** `{ftp_cfg.get('user', 'Não configurado')}`")
+                    ftp_pass = ftp_cfg.get('pass', '')
+                    ftp_pass_masked = ftp_pass[:2] + "*" * (len(ftp_pass) - 2) if len(ftp_pass) > 2 else "Não configurado"
+                    st.write(f"**🔒 FTP Pass:** `{ftp_pass_masked}`")
+                    st.write(f"**🔌 FTP Port:** `{ftp_cfg.get('port', '21')}`")
+
+                st.divider()
+
                 c_edit1, c_edit2 = st.columns(2)
                 with c_edit1:
                     st.markdown("#### 📝 Informações e Plano")
@@ -1883,11 +1917,20 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
 
                 st.divider()
                 if st.button("🗑️ EXCLUIR CLIENTE PERMANENTEMENTE", key=f"del_{k}", type="primary", use_container_width=True):
-                    del st.session_state.db_users["keys"][k]
-                    if k in st.session_state.db_clients:
-                        del st.session_state.db_clients[k]
-                    save_db(DB_USERS, st.session_state.db_users)
-                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                    # Relê do disco para garantir dados atualizados
+                    db_users_fresh = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
+                    db_clients_fresh = load_db(DB_CLIENTS, {})
+
+                    if k in db_users_fresh["keys"]:
+                        del db_users_fresh["keys"][k]
+                    if k in db_clients_fresh:
+                        del db_clients_fresh[k]
+
+                    save_db(DB_USERS, db_users_fresh)
+                    save_db(DB_CLIENTS, db_clients_fresh)
+
+                    st.session_state.db_users = db_users_fresh
+                    st.session_state.db_clients = db_clients_fresh
                     st.rerun()
 
         # --- TAB 3: CONFIG PLANOS ---
