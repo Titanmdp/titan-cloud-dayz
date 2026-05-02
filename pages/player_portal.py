@@ -1583,6 +1583,41 @@ def render_reset_info(client_data: dict):
         unsafe_allow_html=True,
     )
 
+def render_player_card(dados_stats, gamertag, nid, discord_tag, saldo_total):
+    """
+    Gera o visual estilizado do Player Stats.
+    """
+    xp = dados_stats.get("xp", 0.0)
+    nivel = dados_stats.get("nivel", 1)
+    # Garante que format_seconds_hhmmss seja acessível aqui
+    barra_progresso = "▉" * int((xp % 100) / 10) + "░" * (10 - int((xp % 100) / 10))
+    pct = int(xp % 100)
+
+    st.markdown(
+        f"""
+        <div style="background:#111; border-left: 5px solid #00ff00; padding:20px; border-radius:10px; font-family:monospace; color:white;">
+            <div style="font-size:18px; font-weight:bold;">ℙ𝕝𝕒𝕪𝕖𝕣 𝕊𝕥𝕒𝕥𝕤</div>
+            <div style="color:#aaa; font-size:12px;">nid: {nid}</div>
+            <div style="color:#aaa; font-size:12px;">@{discord_tag}</div>
+            <br>
+            <div style="font-size:24px; font-weight:bold;">{gamertag}</div>
+            <div style="color:#00d4ff; font-style:italic;"><b>XP</b> {xp:.2f} <b>Nível:</b> {nivel}</div>
+            <div style="font-size:16px;">{barra_progresso} <span style="background:#333; padding:2px 5px; border-radius:4px; font-size:10px;">{pct}%</span></div>
+            <br>
+            <div style="line-height:1.2;">
+                ╒Total de vítimas: {dados_stats.get('pvp_kills', 0)}<br>
+                ╞Total de mortes: {dados_stats.get('pvp_deaths', 0)}<br>
+                ╞Matou na semana: {dados_stats.get('pvp_kills', 0)}<br>
+                ╘Morreu em PvP: {dados_stats.get('pvp_deaths', 0)}<br>
+                ╒Total em DzCoins: {saldo_total:,.0f}<br>
+                ╞Tempo Sobrevivendo: {format_seconds_hhmmss(dados_stats.get('total_survival_seconds', 0))}<br>
+                ╘Tempo online total: {format_seconds_hhmmss(dados_stats.get('total_play_seconds', 0))}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 # =========================================================
 # 6. ABA BANCO DZCOINS
 # =========================================================
@@ -2458,15 +2493,26 @@ def main():
 
         with col_c:
             st.markdown("#### 📊 Meu Resumo")
-            wallet_saldo = client_data.get("wallets", {}).get(
-                gamertag_vinculada, {}
-            ).get("balance", 0)
-            bank_saldo = client_data.get("bank", {}).get(
-                gamertag_vinculada, {}
-            ).get("balance", 0)
-            st.metric("💰 Carteira", f"{wallet_saldo} DzCoins")
-            st.metric("🏦 Banco", f"{bank_saldo} DzCoins")
-            st.metric("💎 Total", f"{wallet_saldo + bank_saldo} DzCoins")
+            
+            # Busca dados de XP/Stats processados na semana para o card
+            ftp_cfg_stats = get_client_ftp_config(client_data)
+            meu_stats = {}
+            if ftp_cfg_stats:
+                # Otimização: Tenta carregar os stats para alimentar o card
+                log_semanal = ftp_download_adm_files_weekly(ftp_cfg_stats, max_files=1)
+                all_stats = parse_adm_semanal(log_semanal)
+                meu_stats = all_stats.get(gamertag_vinculada, {})
+
+            wallet_saldo = client_data.get("wallets", {}).get(gamertag_vinculada, {}).get("balance", 0)
+            bank_saldo = client_data.get("bank", {}).get(gamertag_vinculada, {}).get("balance", 0)
+            
+            render_player_card(
+                dados_stats=meu_stats,
+                gamertag=gamertag_vinculada,
+                nid=nitrado_id,
+                discord_tag=discord_name,
+                saldo_total=(wallet_saldo + bank_saldo)
+            )
 
     # --- ABA BANCO ---
     with tab_banco:
