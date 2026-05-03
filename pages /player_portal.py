@@ -41,7 +41,7 @@ DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID", "")
 DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET", "")
 DISCORD_REDIRECT_URI = os.environ.get(
     "DISCORD_REDIRECT_URI",
-    "https://titan-cloud-dayz-dev.onrender.com/player_portal",
+    "https://titan-cloud-dayz-prd.onrender.com/player_portal",
 )
 DISCORD_AUTHORIZE_URL = "https://discord.com/api/oauth2/authorize"
 DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
