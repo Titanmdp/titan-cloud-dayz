@@ -155,8 +155,7 @@ CFGGAMEPLAY_REMOTE_PATHS = {
 
 # --- BANCO DE DADOS (JSON) / UPLOADS ---
 UPLOAD_DIR = "uploads"
-if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 # =========================================================
