@@ -344,6 +344,29 @@ def enviar_ao_discord(webhook_url: str, titulo: str, mensagem: str, cor: int = 6
     except Exception as e:
         print(f"Erro ao enviar Webhook Discord: {e}")
 
+def render_heatmap(client_data):
+    st.subheader("🔥 Mapa de Calor de Atividade")
+    
+    # Busca os dados processados pelo Worker no clients_data.json
+    data = client_data.get("heatmap_data", [])
+    if not data:
+        st.info("Ainda não há dados suficientes para gerar o mapa. Aguarde o processamento dos logs.")
+        return
+
+    df = pd.DataFrame(data, columns=["Z", "X"])
+    
+    # Gera um gráfico de densidade 2D simulando as coordenadas do mapa
+    fig = px.density_heatmap(
+        df, x="X", y="Z", 
+        nbinsx=100, nbinsy=100, 
+        color_continuous_scale="Viridis",
+        title="Zonas de Maior Atividade (Últimos Logs)"
+    )
+    
+    # Estética 'Dark Mode' para alinhar com o tema Titan
+    fig.update_layout(plot_bgcolor="black", paper_bgcolor="black", font_color="white")
+    st.plotly_chart(fig, use_container_width=True)
+
 # ---------- HELPERS TYPES.XML (ECONOMIA) ----------
 
 def parse_types_xml(xmlbytes):
