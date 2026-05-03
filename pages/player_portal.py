@@ -6,6 +6,8 @@ import urllib.parse
 import io
 import re
 import html
+import math
+import plotly.express as px
 from datetime import datetime, timezone, timedelta
 from ftplib import FTP
 from functools import lru_cache
@@ -92,6 +94,40 @@ try:
 except Exception as e:
     LivoniaHeightmap = None
     print(f"[Elevation] Módulo de elevação do Livonia indisponível: {e}")
+
+# =========================================================
+# 2. FUNÇÕES DE UTILIDADE E CÁLCULO (NOVO)
+# =========================================================
+
+def calcular_distancia_3d(pos1, pos2):
+    """
+    Calcula a distância euclidiana entre dois pontos no mapa DayZ (X, Y, Z).
+    Utilizada para auditoria de proximidade de objetos (raio de 25m).
+    """
+    return math.sqrt((pos1[0]-pos2[0])**2 + (pos1[1]-pos2[1])**2 + (pos1[2]-pos2[2])**2)
+
+def enviar_ao_discord(webhook_url: str, titulo: str, mensagem: str, cor: int = 65280):
+    """
+    Envia um Embed formatado para o Discord via Webhook.
+    Cores comuns (Decimal): Verde (65280), Vermelho (16711680), Azul (255).
+    """
+    if not webhook_url:
+        return
+        
+    payload = {
+        "embeds": [{
+            "title": titulo,
+            "description": mensagem,
+            "color": cor,
+            "footer": {"text": "Titan Cloud PRO • Auditoria Automatizada"},
+            "timestamp": datetime.now(FUSO_BR).isoformat()
+        }]
+    }
+    
+    try:
+        requests.post(webhook_url, json=payload, timeout=5)
+    except Exception as e:
+        print(f"Erro ao enviar Webhook Discord: {e}")
 
 # =========================================================
 # 2. FUNÇÕES DE PERSISTÊNCIA
@@ -761,15 +797,19 @@ def parse_adm_killfeed_pve(log_text: str) -> list:
     return eventos
 
 
-def parse_adm_conexoes(log_text: str) -> list:
+def parse_adm_conexoes(log_text: str, feeds_config: dict = None) -> list:
     """
     Extrai eventos de conexão e desconexão do log .ADM.
     Retorna lista de dicts ordenada do mais recente.
+    feeds_config: dicionário com as permissões de exibição (ex: coordenadas_killfeed).
     """
     eventos = []
 
     if not log_text or not log_text.strip():
         return eventos
+
+    # Determina se as coordenadas devem ser exibidas
+    exibir_coords = feeds_config.get("coordenadas_killfeed", True) if feeds_config else True[cite: 7]
 
     log_date = None
     for line in log_text.splitlines():
@@ -821,15 +861,19 @@ def parse_adm_conexoes(log_text: str) -> list:
         if m:
             hora, nome, pos = m.group(1), m.group(2), m.group(3)
             hora_connect[nome] = parse_dt(hora)
+            
+            # Filtro de Governança aplicado à descrição
+            desc = f"Conectou em {pos}" if exibir_coords else "Conectou ao servidor"
+            
             eventos.append({
                 "tipo": "connected",
                 "hora": hora,
                 "dt": parse_dt(hora),
                 "jogador": nome,
-                "posicao": pos,
+                "posicao": pos if exibir_coords else "",
                 "duracao": "",
                 "icone": "🟢",
-                "descricao": f"Conectou em {pos}",
+                "descricao": desc,
             })
             continue
 
@@ -842,15 +886,20 @@ def parse_adm_conexoes(log_text: str) -> list:
                 delta = int((dt_disc - hora_connect[nome]).total_seconds())
                 duracao = format_seconds_hhmmss(delta)
                 hora_connect.pop(nome, None)
+            
+            # Filtro de Governança aplicado à descrição[cite: 7]
+            local_txt = f" de {pos}" if exibir_coords else ""
+            sessao_txt = f" — Sessão: {duracao}" if duracao else ""
+            
             eventos.append({
                 "tipo": "disconnected",
                 "hora": hora,
                 "dt": dt_disc,
                 "jogador": nome,
-                "posicao": pos,
+                "posicao": pos if exibir_coords else "",
                 "duracao": duracao,
                 "icone": "🔴",
-                "descricao": f"Desconectou de {pos}" + (f" — Sessão: {duracao}" if duracao else ""),
+                "descricao": f"Desconectou{local_txt}{sessao_txt}",
             })
             continue
 
@@ -858,18 +907,18 @@ def parse_adm_conexoes(log_text: str) -> list:
     return eventos
 
 
-def parse_adm_killfeed_pvp(log_text: str) -> list:
+def parse_adm_killfeed_pvp(log_text: str, feeds_config: dict = None) -> list:
     """
     Extrai eventos de kill PvP do log .ADM.
-    Formato esperado:
-    HH:MM:SS | Player "Assassino" (...) killed Player "Vitima" (...)
-    ou
-    HH:MM:SS | Player "Vitima" (...)[HP: 0] hit by Player "Assassino" ... for X damage (Arma)
+    feeds_config: dicionário com as permissões de exibição.
     """
     eventos = []
 
     if not log_text or not log_text.strip():
         return eventos
+
+    # Determina se as coordenadas devem ser ocultadas (GRC)
+    exibir_coords = feeds_config.get("coordenadas_killfeed", True) if feeds_config else True
 
     log_date = None
     for line in log_text.splitlines():
@@ -953,11 +1002,15 @@ def parse_adm_killfeed_pvp(log_text: str) -> list:
             })
             continue
 
-        # (Opcional) Padrão 3: died PvP com posição
+        # (Opcional) Padrão 3: died PvP com posição controlada
         m = re_died_pvp.match(line)
         if m:
             hora, vitima, pos = m.group(1), m.group(2), m.group(3)
             arma = ultima_arma_pvp.pop(vitima, "Desconhecida")
+            
+            # Filtro de exibição de local
+            local_txt = f" em {pos}" if exibir_coords else ""
+            
             eventos.append({
                 "tipo": "pvp_kill",
                 "hora": hora,
@@ -967,14 +1020,168 @@ def parse_adm_killfeed_pvp(log_text: str) -> list:
                 "arma": arma,
                 "dano": "",
                 "parte_corpo": "",
-                "posicao": pos,
+                "posicao": pos if exibir_coords else "",
                 "icone": "💀",
-                "descricao": f"{vitima} morreu (PvP) em {pos} — arma: {arma}",
+                "descricao": f"{vitima} morreu (PvP){local_txt} — arma: {arma}",
             })
             continue
 
     eventos.sort(key=lambda x: x.get("dt") or datetime.min.replace(tzinfo=FUSO_BR), reverse=True)
     return eventos
+
+def analisar_glitches(log_text: str, feeds_config: dict, client_data: dict, mapa: str):
+    """
+    Auditoria de Glitch: Detecta Subsolo e Spam de Objetos (Fogueiras/Hortas).
+    Regra Spam: >1 objeto no raio de 25m em menos de 60min = BAN.
+    """
+    violacoes = []
+    if not log_text or not feeds_config:
+        return violacoes
+
+    # 'tracking_acoes' armazena o histórico temporário no seu clients_data.json
+    tracking = client_data.get("tracking_acoes", {})
+    agora = datetime.now(FUSO_BR) 
+    
+    # Mapeamento de chaves para os switches do painel
+    itens_spam = {
+        "Fireplace": "glitch_fogueiras",
+        "GardenPlot": "glitch_hortas"
+    }
+
+    # Regex 1: Posição Geral (Subsolo)
+    re_pos = re.compile(r'Player "([^"]+)" \([^)]*pos=<([\d., -]+)>')
+    # Regex 2: Colocação de Objetos (Spam)
+    re_placed = re.compile(r'Player "([^"]+)" .* placed (Fireplace|GardenPlot) at pos=<([\d., -]+)>')
+
+    for line in log_text.splitlines():
+        line_lower = line.lower()
+        
+        # --- PARTE A: AUDITORIA DE SPAM (FOGUEIRAS/HORTAS) ---
+        m_spam = re_placed.search(line)
+        if m_spam:
+            nome, item, pos_str = m_spam.group(1), m_spam.group(2), m_spam.group(3)
+            
+            if feeds_config.get(itens_spam[item], True):
+                try:
+                    parts = [float(p.strip()) for p in pos_str.split(',')]
+                    pos_atual = (parts[0], parts[1], parts[2])
+                    
+                    if nome not in tracking:
+                        tracking[nome] = []
+                    
+                    # Filtra histórico do jogador: mesmo item nos últimos 60 minutos
+                    acoes_recentes = [
+                        a for a in tracking[nome] 
+                        if a['tipo'] == item and (agora - datetime.fromisoformat(a['dt'])).total_seconds() < 3600
+                    ]
+
+                    # Verifica Raio de 25 metros
+                    for acao in acoes_recentes:
+                        distancia = calcular_distancia_3d(pos_atual, acao['pos'])
+                        if distancia <= 25.0:
+                            violacoes.append({
+                                "jogador": nome,
+                                "tipo": f"Spam de {item}",
+                                "detalhe": f"Multiplos {item} em raio de {distancia:.1f}m em < 60min",
+                                "pos": pos_str,
+                                "banir": True  # Gatilho para inclusão na Banlist
+                            })
+                    
+                    # Registra a ação para correlação futura
+                    tracking[nome].append({
+                        "tipo": item, 
+                        "pos": pos_atual, 
+                        "dt": agora.isoformat()
+                    })
+                except: pass
+
+        # --- PARTE B: AUDITORIA DE SUBSOLO (ELEVAÇÃO) ---
+        m_pos = re_pos.search(line)
+        if m_pos and feeds_config.get("glitch_subsolo", True):
+            nome, pos_str = m_pos.group(1), m_pos.group(2)
+            try:
+                parts = [float(p.strip()) for p in pos_str.split(',')]
+                px, py, pz = parts[0], parts[1], parts[2]
+                
+                y_terreno, _ = get_local_elevation_by_map(px, pz, mapa)
+                if y_terreno and py < (y_terreno - 1.5): # Margem de segurança
+                    violacoes.append({
+                        "jogador": nome,
+                        "tipo": "Subsolo",
+                        "detalhe": f"Abaixo do mapa (Y:{py:.1f} / Terra:{y_terreno:.1f})",
+                        "pos": pos_str,
+                        "banir": False # Geralmente kick ou aviso, admin decide se bane
+                    })
+            except: pass
+            
+    # --- LIMPEZA DE DADOS (PURGE) ---
+    # Remove registros com mais de 1h para manter o JSON leve
+    for player in list(tracking.keys()):
+        tracking[player] = [
+            a for a in tracking[player] 
+            if (agora - datetime.fromisoformat(a['dt'])).total_seconds() < 3600
+        ]
+        if not tracking[player]:
+            tracking.pop(player)
+        
+    return violacoes
+
+def extrair_coordenadas_mapa(log_text: str):
+    """
+    Extrai todas as coordenadas de players para gerar o Mapa de Calor.
+    """
+    coords = []
+    if not log_text:
+        return coords
+
+    # Regex para capturar qualquer posição de jogador no log
+    re_pos = re.compile(r'pos=<([\d., -]+)>')
+    
+    for line in log_text.splitlines():
+        m = re_pos.search(line)
+        if m:
+            try:
+                parts = [float(p.strip()) for p in m.group(1).split(',')]
+                # DayZ usa (X, Y, Z). Para o mapa, focamos em X e Z (horizontal)
+                coords.append([parts[2], parts[0]]) # Invertido para o padrão de mapas (Lat/Lon)
+            except:
+                continue
+    return coords
+
+def aplicar_banimento_ftp(ftp_cfg: dict, gamertag: str):
+    """
+    Executa o banimento automático via FTP.
+    Adiciona a gamertag ao arquivo banlist.txt do servidor.
+    """
+    try:
+        # 1. Conexão e Download
+        with ftplib.FTP(ftp_cfg['host'], ftp_cfg['user'], ftp_cfg['pass']) as ftp:
+            ftp.cwd(ftp_cfg.get('path', '/')) # Acessa a pasta raiz ou definida
+            
+            # Tenta baixar o arquivo atual
+            temp_filename = "banlist_temp.txt"
+            with open(temp_filename, "wb") as f:
+                try:
+                    ftp.retrbinary("RETR banlist.txt", f.write)
+                except:
+                    # Se o arquivo não existir, cria um novo
+                    pass
+
+            # 2. Edição do Arquivo (Adiciona o infrator)
+            with open(temp_filename, "a") as f:
+                f.write(f"\n{gamertag}")
+            
+            # 3. Upload do arquivo atualizado
+            with open(temp_filename, "rb") as f:
+                ftp.storbinary("STOR banlist.txt", f)
+            
+            # Limpeza local
+            if os.path.exists(temp_filename):
+                os.remove(temp_filename)
+            return True
+    except Exception as e:
+        print(f"Erro ao aplicar banimento FTP: {e}")
+        return False
 
 # =========================================================
 # 4.3 RANKING SEMANAL — ACUMULADO 7 DIAS
@@ -1442,43 +1649,65 @@ def render_relogio():
         )
     _clock()
 
-def get_online_from_adm(ftp_cfg: dict) -> list:
-    """Lê o log ADM do dia e retorna lista de jogadores atualmente online."""
+def get_online_from_adm(ftp_cfg: dict, feeds_config: dict = None) -> list:
+    """
+    Lê o log ADM do dia e retorna lista de jogadores atualmente online.
+    feeds_config: dicionário com as permissões (ex: conta_players_online).
+    """
+    # Validação de Governança: Verifica se a função está ativa no painel
+    # Usando players_online_auto conforme definido na sua estrutura de feeds
+    if feeds_config and not feeds_config.get("players_online_auto", True):
+        return []
+
     log_text, _ = ftp_download_latest_adm(ftp_cfg)
     if not log_text:
         return []
+
     conectados = {}
     for line in log_text.splitlines():
         line = line.strip()
         if not line:
             continue
+            
         m = re.match(r'^(\d{2}:\d{2}:\d{2}) \| Player "([^"]+)"', line)
         if not m:
             continue
+            
         nome = m.group(2)
         if "(DEAD)" in line:
             continue
+            
         if "is connected" in line and "is connecting" not in line:
             conectados[nome] = True
         elif "has been disconnected" in line:
             conectados.pop(nome, None)
+            
     return [n for n, v in conectados.items() if v]
 
 
-def render_players_online(nitrado_id: str, ftp_cfg: dict = None, nitrado_token: str = ""):
+def render_players_online(nitrado_id: str, ftp_cfg: dict = None, nitrado_token: str = "", feeds_config: dict = None):
+    """
+    Renderiza o box de jogadores online com fallback para o log ADM.
+    feeds_config: dicionário vindo do client_data['feeds_config'].
+    """
     @st.fragment(run_every=60)
     def _players():
+        # 1. Verifica se a função de monitoramento está ativa globalmente para o servidor
+        if feeds_config and not feeds_config.get("players_online_auto", True):
+            st.info("ℹ️ Monitoramento de Players Online desativado pelo administrador.")
+            return
+
         # Tenta obter dados da API Nitrado
         dados = get_players_online(nitrado_id, nitrado_token=nitrado_token)
 
-        # AJUSTE: Se a API falhar (Erro 500), tenta o Log ADM via FTP antes de exibir erro
+        # 2. AJUSTE: Se a API falhar, tenta o Log ADM via FTP (respeitando as chaves de feed)
         if "erro" in dados:
             if ftp_cfg:
-                # Tenta ler do Log ADM
-                players_adm = get_online_from_adm(ftp_cfg)
+                # Passamos o feeds_config para a função de parser
+                players_adm = get_online_from_adm(ftp_cfg, feeds_config=feeds_config)
+                
                 if players_adm is not None:
                     total_adm = len(players_adm)
-                    # Exibe o box de sucesso usando os dados do log
                     st.markdown(
                         f'<div style="background:#1a1a2e;border-radius:10px;padding:14px;border:1px solid #7a4b1f;margin-bottom:8px;">'
                         f'<div style="font-size:13px;color:#ffcc66;margin-bottom:4px;">🌐 Players Online (via Log ADM)</div>'
@@ -1491,9 +1720,9 @@ def render_players_online(nitrado_id: str, ftp_cfg: dict = None, nitrado_token: 
                                 st.markdown(f"◆ `{nome}`")
                     else:
                         st.caption("Nenhum jogador online detectado no log.")
-                    return # Sai da função com sucesso via log
+                    return 
 
-        # Se não houver erro na API, segue o fluxo normal
+        # 3. Se não houver erro na API, segue o fluxo normal
         if "erro" in dados:
             st.warning(f"⚠️ Players Online indisponível: {dados['erro']}")
             return
@@ -1502,9 +1731,9 @@ def render_players_online(nitrado_id: str, ftp_cfg: dict = None, nitrado_token: 
         players = dados.get("players", [])
         maximo = dados.get("max", 0)
 
-        # Fallback caso a API retorne total > 0 mas sem nomes
+        # Fallback caso a API retorne total > 0 mas sem nomes (respeitando feeds_config)[cite: 3, 4]
         if total > 0 and not players and ftp_cfg:
-            players = get_online_from_adm(ftp_cfg)
+            players = get_online_from_adm(ftp_cfg, feeds_config=feeds_config)
 
         st.markdown(
             f'<div style="background:#1a1a2e;border-radius:10px;padding:14px;border:1px solid #444;margin-bottom:8px;">'
@@ -1524,6 +1753,60 @@ def render_players_online(nitrado_id: str, ftp_cfg: dict = None, nitrado_token: 
             st.caption("Nenhum jogador online no momento.")
 
     _players()
+
+# =========================================================
+# 3. COMPONENTES DE ANALYTICS E INTELIGÊNCIA
+# =========================================================
+
+def render_heatmap(client_data):
+    st.subheader("🔥 Mapa de Calor de Atividade")
+    
+    # Busca os dados processados pelo Worker no clients_data.json
+    data = client_data.get("heatmap_data", [])
+    if not data:
+        st.info("Ainda não há dados suficientes para gerar o mapa. Aguarde o processamento dos logs.")
+        return
+
+    df = pd.DataFrame(data, columns=["Z", "X"])
+    
+    # Gera um gráfico de densidade 2D simulando as coordenadas do mapa
+    fig = px.density_heatmap(
+        df, x="X", y="Z", 
+        nbinsx=100, nbinsy=100, 
+        color_continuous_scale="Viridis",
+        title="Zonas de Maior Atividade (Últimos Logs)"
+    )
+    
+    # Estética 'Dark Mode' para alinhar com o tema Titan
+    fig.update_layout(plot_bgcolor="black", paper_bgcolor="black", font_color="white")
+    st.plotly_chart(fig, use_container_width=True)
+
+def processar_ranking_global(eventos_pvp: list, eventos_conexao: list):
+    """
+    Consolida estatísticas para o Ranking Global.
+    Regra: Kills (+10 pts), Mortes (-5 pts), Tempo Online (1 pt/hora).
+    """
+    ranking = {}
+
+    # Processa Kills e Mortes (PvP)
+    for ev in eventos_pvp:
+        vitima = ev.get("vitima")
+        assassino = ev.get("assassino")
+
+        if assassino:
+            stats = ranking.get(assassino, {"kills": 0, "mortes": 0, "pontos": 0})
+            stats["kills"] += 1
+            stats["pontos"] += 10
+            ranking[assassino] = stats
+
+        if vitima:
+            stats = ranking.get(vitima, {"kills": 0, "mortes": 0, "pontos": 0})
+            stats["mortes"] += 1
+            stats["pontos"] = max(0, stats["pontos"] - 5)
+            ranking[vitima] = stats
+
+    # Retorna lista ordenada por pontos
+    return sorted(ranking.items(), key=lambda x: x[1]['pontos'], reverse=True)
 
 def render_reset_info(client_data: dict):
     agora = datetime.now(FUSO_BR)
@@ -1833,6 +2116,13 @@ def render_banco(client_data: dict, clients_db: dict, server_id: str, gamertag: 
 # =========================================================
 
 def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict, server_id: str):
+    # --- TRAVA DE GOVERNANÇA (GRC) ---
+    # Verifica se o administrador ativou o Ranking Automático
+    feeds = client_data.get("feeds_config", {})
+    if not feeds.get("ranking_auto", True):
+        st.info("ℹ️ O Ranking Global está temporariamente desativado pelo administrador.")
+        return
+
     ftp_cfg = get_client_ftp_config(client_data)
     if not ftp_cfg:
         st.warning(
@@ -2458,14 +2748,27 @@ def main():
     st.divider()
 
     # ----------------------------------------------------------
-    # 8.8 ABAS PRINCIPAIS (todas dentro de main())
+    # 8.8 ABAS DINÂMICAS POR PERFIL (GRC)
     # ----------------------------------------------------------
-    tab_inicio, tab_banco, tab_ranking, tab_loja = st.tabs([
-        "🏠 Início",
-        "🏦 Banco DzCoins",
-        "🏆 Ranking",
-        "🛒 Loja Virtual",
-    ])
+    
+    # Define a lista base de títulos
+    titulos_abas = ["🏠 Início", "🏦 Banco DzCoins", "🏆 Ranking", "🛒 Loja Virtual"]
+
+    # Identifica se é o Administrador do Servidor (Dono da KeyUser)
+    # Jogadores comuns entram via Discord e não possuem role 'client' neste contexto
+    is_admin_servidor = st.session_state.get("role") == "client"
+
+    if is_admin_servidor:
+        titulos_abas.append("⚙️ Feeds / Bot")
+
+    # Cria as abas dinamicamente
+    abas_objetos = st.tabs(titulos_abas)
+
+    # Atribuição das variáveis baseada na ordem
+    tab_inicio = abas_objetos[0]
+    tab_banco = abas_objetos[1]
+    tab_ranking = abas_objetos[2]
+    tab_loja = abas_objetos[3]
 
     # --- ABA INÍCIO ---
     with tab_inicio:
@@ -2485,7 +2788,7 @@ def main():
                 ),
                 ""
             )
-            render_players_online(nitrado_id, ftp_cfg=ftp_cfg_online, nitrado_token=nitrado_token_cliente)
+            render_players_online(nitrado_id, ftp_cfg=ftp_cfg_online, nitrado_token=nitrado_token_cliente, feeds_config=client_data.get("feeds_config"))
 
         with col_b:
             st.markdown("#### 🔄 Reset do Servidor")
@@ -2494,11 +2797,9 @@ def main():
         with col_c:
             st.markdown("#### 📊 Meu Resumo")
             
-            # Busca dados de XP/Stats processados na semana para o card
             ftp_cfg_stats = get_client_ftp_config(client_data)
             meu_stats = {}
             if ftp_cfg_stats:
-                # Otimização: Tenta carregar os stats para alimentar o card
                 log_semanal = ftp_download_adm_files_weekly(ftp_cfg_stats, max_files=1)
                 all_stats = parse_adm_semanal(log_semanal)
                 meu_stats = all_stats.get(gamertag_vinculada, {})
@@ -2530,13 +2831,14 @@ def main():
     # --- ABA RANKING ---
     with tab_ranking:
         st.markdown("### 🏆 Ranking Semanal")
-
         if not plano_permite(plano_atual, "ranking_semanal"):
             bloquear_funcionalidade(plano_atual, "🏆 Ranking Semanal")
+        elif not client_data.get("feeds_config", {}).get("ranking", True):
+            st.warning("⚠️ O módulo de Ranking Semanal está desativado para este servidor.")
+            st.info("O administrador do servidor pode reativá-lo na aba '⚙️ Feeds / Bot'.")
         else:
             clients_db_fresh = load_db(DB_CLIENTS, {})
             client_data_fresh = clients_db_fresh.get(server_id, {})
-            # Fallback: busca FTP pelo KeyUser se server_id nao tem FTP
             if not client_data_fresh.get("ftp", {}).get("host", ""):
                 users_db_fresh = load_db(DB_USERS, {"keys": {}})
                 for _ku, _kd in users_db_fresh.get("keys", {}).items():
@@ -2545,12 +2847,38 @@ def main():
                         if _alt.get("ftp", {}).get("host", ""):
                             client_data_fresh = _alt
                             break
-            render_ranking(
-                client_data_fresh,
-                gamertag_vinculada,
-                clients_db_fresh,
-                server_id,
-            )
+            render_ranking(client_data_fresh, gamertag_vinculada, clients_db_fresh, server_id)
+
+    # --- ABA FEEDS / BOT (EXCLUSIVA ADMIN SERVIDOR) ---
+    if is_admin_servidor:
+        tab_feeds = abas_objetos[4]
+        with tab_feeds:
+            st.header("⚙️ Configuração de Feeds e Auditoria")
+            st.info("Painel restrito para gestão de governança do bot e logs.")
+            
+            feeds = client_data.get("feeds_config", {})
+            
+            c_f1, c_f2 = st.columns(2)
+            with c_f1:
+                st.subheader("🛡️ Auditoria")
+                feeds["glitch_subsolo"] = st.toggle("Glitch Subsolo", value=feeds.get("glitch_subsolo", True))
+                feeds["glitch_fogueiras"] = st.toggle("Spam Fogueiras", value=feeds.get("glitch_fogueiras", True))
+                feeds["glitch_hortas"] = st.toggle("Spam Hortas", value=feeds.get("glitch_hortas", True))
+            with c_f2:
+                st.subheader("📊 Analytics")
+                feeds["mapa_calor"] = st.toggle("Mapa de Calor", value=feeds.get("mapa_calor", True))
+                feeds["ranking_auto"] = st.toggle("Ranking Global", value=feeds.get("ranking_auto", True))
+            
+            st.divider()
+            webhook_online = st.text_input("🌐 Webhook: Players Online", value=feeds.get("webhook_players_online", ""))
+            webhook_admin = st.text_input("🛡️ Webhook: Alertas Staff", value=feeds.get("webhook_admin_logs", ""))
+            
+            if st.button("💾 Salvar Configurações de Governança"):
+                feeds["webhook_players_online"] = webhook_online
+                feeds["webhook_admin_logs"] = webhook_admin
+                client_data["feeds_config"] = feeds
+                save_db(DB_CLIENTS, st.session_state.db_clients)
+                st.success("✅ Governança atualizada!")
 
         # --- ABA LOJA VIRTUAL ---
     with tab_loja:
