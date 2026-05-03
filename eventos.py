@@ -332,7 +332,7 @@ def enviar_ao_discord(webhook_url: str, titulo: str, mensagem: str, cor: int = 6
     """
     if not webhook_url:
         return
-        
+
     payload = {
         "embeds": [{
             "title": titulo,
@@ -342,11 +342,87 @@ def enviar_ao_discord(webhook_url: str, titulo: str, mensagem: str, cor: int = 6
             "timestamp": datetime.now(FUSO_BR).isoformat()
         }]
     }
-    
+
     try:
         requests.post(webhook_url, json=payload, timeout=5)
     except Exception as e:
         print(f"Erro ao enviar Webhook Discord: {e}")
+
+
+# --- Eventos disponíveis para webhooks ---
+WEBHOOK_EVENTOS_DISPONIVEIS = {
+    "players_online":       {"label": "👥 Players Online",              "categoria": "jogadores", "cor": 0x00FF88},
+    "player_conectou":      {"label": "🟢 Player Entrou no Servidor",   "categoria": "jogadores", "cor": 0x00FF88},
+    "player_desconectou":   {"label": "🔴 Player Saiu do Servidor",     "categoria": "jogadores", "cor": 0xFF4444},
+    "pvp_kill":             {"label": "⚔️ Kill PvP",                    "categoria": "pvp",       "cor": 0xFF6600},
+    "pve_hit":              {"label": "🧟 Hit por Infected",            "categoria": "pve",       "cor": 0xAA44FF},
+    "morte_ambiente":       {"label": "💀 Morte por Ambiente/Suicídio", "categoria": "mortes",    "cor": 0x888888},
+    "compra_loja":          {"label": "🛒 Compra na Loja",              "categoria": "loja",      "cor": 0xFFD700},
+    "dzcoins_distribuicao": {"label": "💰 Distribuição de DzCoins",     "categoria": "dzcoins",   "cor": 0x00D4FF},
+    "ranking_atualizacao":  {"label": "🏆 Atualização do Ranking",      "categoria": "ranking",   "cor": 0xFFAA00},
+    "reset_servidor":       {"label": "🔄 Reset do Servidor",           "categoria": "servidor",  "cor": 0x4488FF},
+    "anti_glitch":          {"label": "🚨 Anti-Glitch Detectado",       "categoria": "auditoria", "cor": 0xFF0000},
+}
+
+
+def enviar_webhook_evento(
+    client_data: dict,
+    evento: str,
+    titulo: str,
+    descricao: str,
+    campos: list = None,
+):
+    """
+    Envia um evento para todos os webhooks configurados que
+    têm esse evento habilitado.
+
+    client_data : dict do servidor
+    evento      : chave do evento ex. 'pvp_kill'
+    titulo      : título do embed
+    descricao   : descrição do embed
+    campos      : lista de dicts com 'name' e 'value' para fields do embed
+    """
+    webhooks_cfg = client_data.get("webhooks_config", [])
+    if not webhooks_cfg:
+        return
+
+    info_evento = WEBHOOK_EVENTOS_DISPONIVEIS.get(evento, {})
+    cor = info_evento.get("cor", 0x00D4FF)
+
+    embed = {
+        "title": titulo,
+        "description": descricao,
+        "color": cor,
+        "footer": {"text": "Titan Cloud PRO • Auditoria Automatizada"},
+        "timestamp": datetime.now(FUSO_BR).isoformat(),
+    }
+
+    if campos:
+        embed["fields"] = [
+            {
+                "name": c["name"],
+                "value": c["value"],
+                "inline": c.get("inline", True),
+            }
+            for c in campos
+        ]
+
+    payload = {"embeds": [embed]}
+
+    for wh in webhooks_cfg:
+        if not wh.get("ativo", True):
+            continue
+        if evento not in wh.get("eventos", []):
+            continue
+
+        url = wh.get("url", "").strip()
+        if not url:
+            continue
+
+        try:
+            requests.post(url, json=payload, timeout=5)
+        except Exception as e:
+            print(f"[Webhook] Erro ao enviar para '{wh.get('nome', '?')}': {e}")
 
 def render_heatmap(client_data):
     st.subheader("🔥 Mapa de Calor de Atividade")
