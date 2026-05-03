@@ -321,6 +321,29 @@ def get_user_location():
         "pais": "---",
     }
 
+def enviar_ao_discord(webhook_url: str, titulo: str, mensagem: str, cor: int = 65280):
+    """
+    Envia um Embed formatado para o Discord via Webhook.
+    Cores comuns (Decimal): Verde (65280), Vermelho (16711680), Azul (255).
+    """
+    if not webhook_url:
+        return
+        
+    payload = {
+        "embeds": [{
+            "title": titulo,
+            "description": mensagem,
+            "color": cor,
+            "footer": {"text": "Titan Cloud PRO • Auditoria Automatizada"},
+            "timestamp": datetime.now(FUSO_BR).isoformat()
+        }]
+    }
+    
+    try:
+        requests.post(webhook_url, json=payload, timeout=5)
+    except Exception as e:
+        print(f"Erro ao enviar Webhook Discord: {e}")
+
 # ---------- HELPERS TYPES.XML (ECONOMIA) ----------
 
 def parse_types_xml(xmlbytes):
@@ -485,7 +508,12 @@ def proworker():
             now = get_hora_brasilia()
             db_all = load_db(DB_CLIENTS, {})
             mudou = False
-            for cid, cinfo in db_all.items():
+            forfor cid, cinfo in db_all.items():
+                # --- TRAVA DE SEGURANÇA (GRC/GOVERNANÇA) ---
+                # Se o administrador desativar "Baixar Logs Servidor", o worker ignora este cliente
+                if not cinfo.get("feeds_config", {}).get("baixar_logs", True):
+                    continue 
+
                 # --- 1. LÓGICA DE AGENDAS DE ARQUIVOS (EXISTENTE) ---
                 for ag in cinfo.get("agendas", []):
                     hora_entrada = str_to_time(ag.get("data"), ag.get("in"))
@@ -607,6 +635,70 @@ def proworker():
                             except Exception as e:
                                 print(f"Erro ao processar JSON de RAID OFF: {e}")
 
+                # --- PASSO 6: LOGICA ANTI-GLITCH (GRC/GOVERNANÇA) ---
+                feeds = cinfo.get("feeds_config", {})
+                webhook_admin = feeds.get("webhook_admin_logs") # Canal de Auditoria da Staff
+                
+                if feeds.get("glitch_subsolo") or feeds.get("glitch_hortas") or feeds.get("glitch_fogueiras"):
+                    log_txt, _ = ftp_download_latest_adm(cinfo["ftp"])
+                    
+                    if log_txt:
+                        mapa_atual = cinfo.get("loja", {}).get("mapa_padrao", "Chernarus")
+                        alertas = analisar_glitches(log_txt, feeds, cinfo, mapa_atual)
+                        
+                        for v in alertas:
+                            if v.get("banir"): 
+                                sucesso = aplicar_banimento_ftp(cinfo["ftp"], v['jogador'])
+                                if sucesso:
+                                    msg = f"🔨 BANIMENTO AUTOMÁTICO: {v['jogador']} por {v['tipo']}!"
+                                    registrar_log(cid, msg, "erro")
+                                    
+                                    # Notifica o Discord (Staff) sobre o BAN
+                                    if webhook_admin:
+                                        enviar_ao_discord(
+                                            webhook_admin, 
+                                            "🔨 PUNIÇÃO EXECUTADA", 
+                                            f"**Jogador:** {v['jogador']}\n**Motivo:** {v['tipo']}\n**Detalhe:** {v['detalhe']}",
+                                            cor=16711680 # Vermelho Crítico
+                                        )
+                                    
+                                    cinfo.get("tracking_acoes", {}).pop(v['jogador'], None)
+                                else:
+                                    registrar_log(cid, f"❌ FALHA AO BANIR: {v['jogador']} (Erro FTP)", "erro")
+                            else:
+                                # Alerta comum de subsolo (apenas log/aviso)
+                                msg_alerta = f"🚨 ALERTA GLITCH: {v['jogador']} detectado em {v['tipo']}! Pos: {v['pos']}"
+                                registrar_log(cid, msg_alerta, "erro")
+                                
+                                # Notifica o Discord (Staff) sobre o Alerta
+                                if webhook_admin:
+                                    enviar_ao_discord(
+                                        webhook_admin, 
+                                        "🚨 SUSPEITA DE GLITCH", 
+                                        f"**Jogador:** {v['jogador']}\n**Tipo:** {v['tipo']}\n**Posição:** {v['pos']}",
+                                        cor=16776960 # Amarelo Alerta
+                                    )
+
+                # --- PASSO 7: LOGICA MAPA DE CALOR (INTELIGÊNCIA) ---
+                if feeds.get("mapa_calor", True):
+                    # O sistema já baixou o log para o Anti-Glitch, aproveitamos o conteúdo
+                    if 'log_txt' in locals() and log_txt:
+                        novas_coords = extrair_coordenadas_mapa(log_txt)
+                        
+                        # Mantém apenas as últimas 5.000 posições para não inflar o JSON
+                        historico_coords = cinfo.get("heatmap_data", [])
+                        historico_coords.extend(novas_coords)
+                        cinfo["heatmap_data"] = historico_coords[-5000:]
+
+                # --- PASSO 8: RANKING AUTOMATIZADO (GRC) ---
+                if feeds.get("ranking_auto", True):
+                    # Se os logs PvP já foram processados nesta rodada
+                    if 'eventos_pvp' in locals():
+                        ranking_atualizado = processar_ranking_global(eventos_pvp, [])
+                        cinfo["ranking_global"] = ranking_atualizado # Salva no DB
+
+
+
             if mudou:
                 save_db(DB_CLIENTS, db_all)
         except Exception as e:
@@ -621,6 +713,49 @@ def start_worker_once():
         WORKER_STARTED = True
         threading.Thread(target=proworker, daemon=True).start()
         threading.Thread(target=worker_dzcoins_automatico, daemon=True).start()
+
+# ---------- HELPER GESTÃO DE PEDIDOS (ADMIN SERVIDOR) ----------
+def render_gestao_pedidos(client_data, server_id):
+    st.subheader("📦 Auditoria e Gestão de Pedidos")
+    st.info("Monitore as vendas e realize estornos de DzCoins se necessário.")
+
+    pedidos = client_data.get("pedidos", [])
+    if not pedidos:
+        st.info("Nenhum pedido realizado na loja até o momento.")
+        return
+
+    # 1. Resumo Econômico
+    col_r1, col_r2, col_r3 = st.columns(3)
+    faturamento = sum(int(p.get("preco", 0)) for p in pedidos)
+    col_r1.metric("Total de Pedidos", len(pedidos))
+    col_r2.metric("Faturamento", f"{faturamento} DzCoins")
+    col_r3.metric("Pendentes", len([p for p in pedidos if p.get("status") == "Aguardando Reset"]))
+
+    # 2. Tabela de Pedidos
+    df_pedidos = pd.DataFrame(pedidos)
+    colunas = ['data_compra', 'gamertag', 'item_nome', 'preco', 'status', 'id']
+    st.dataframe(df_pedidos[colunas], use_container_width=True, hide_index=True)
+
+    # 3. Área de Estorno
+    with st.expander("🔴 Realizar Estorno (Devolução)"):
+        id_estorno = st.selectbox("Selecione o ID do Pedido:", df_pedidos['id'].tolist())
+        motivo = st.text_input("Motivo do Estorno:")
+        if st.button("Confirmar Estorno e Devolver Saldo", type="primary"):
+            idx = next((i for i, p in enumerate(pedidos) if p['id'] == id_estorno), None)
+            if idx is not None:
+                p = pedidos[idx]
+                secao = "wallets" if "Carteira" in p['origem_pagamento'] else "bank"
+                gt = p['gamertag']
+                valor = int(p['preco'])
+                
+                # Devolve o valor ao jogador
+                client_data.setdefault(secao, {}).setdefault(gt, {"balance": 0, "historico": []})
+                client_data[secao][gt]["balance"] += valor
+                client_data[secao][gt]["historico"].append(f"[{get_hora_brasilia().strftime('%H:%M')}] ESTORNO: +{valor} (Motivo: {motivo})")
+                
+                pedidos.pop(idx) # Remove o pedido
+                save_db(DB_CLIENTS, st.session_state.db_clients)
+                st.success("✅ Estorno concluído!"); time.sleep(1); st.rerun()
 
 # ---------- HELPER GENÉRICO DE DOWNLOAD VIA FTP ----------
 
@@ -2254,14 +2389,28 @@ if st.session_state.get("role") == "admin":
 else:
     user_id = st.session_state.user_key
 
-if user_id not in st.session_state.db_clients:
-    st.session_state.db_clients[user_id] = {
-        "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
-        "agendas": [],
-        "logs": [],
-        "comunicados": [],
+# --- PASSO 2: INICIALIZAÇÃO DA ESTRUTURA DE FEEDS (GRC/GOVERNANÇA) ---
+if "feeds_config" not in client_data:
+    client_data["feeds_config"] = {
+        "coordenadas_killfeed": True,
+        "feed_conexao": True,
+        "feed_construcao": True,
+        "combatlog": True,
+        "ping_adm": True,
+        "loja_automatica": True,
+        "glitch_subsolo": True,
+        "ranking": True,
+        "baixar_logs": True,
+        "mod_pve": False,
+        "zona_pvp": False
     }
+    # Salva imediatamente para garantir a integridade do JSON
     save_db(DB_CLIENTS, st.session_state.db_clients)
+    
+# --- PASSO 7: ESTRUTURA PARA DETECÇÃO DE SPAM DE OBJETOS (GRC) ---[cite: 1]
+if "tracking_acoes" not in client_data:
+    client_data["tracking_acoes"] = {} 
+    save_db(DB_CLIENTS, st.session_state.db_clients)[cite: 1]
 
 client_data = st.session_state.db_clients[user_id]
 # Sempre relê do disco para garantir que alterações do admin sejam refletidas
@@ -2472,12 +2621,25 @@ with st.sidebar:
 
 # --- TABS PRINCIPAIS CLIENTE ---
 st.title(f"🎮 {user_info['server']}")
-# Adicione "🛡️ Agenda de RAID" na lista de abas
-tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab_raid, tab6, tab7, tab8, tab_planos = st.tabs([
-    "📅 Eventos Agendados", "📋 Histórico Logs", "📢 Comunicados", "🧬 Loot / types.xml",
-    "🌍 Ambiente / globals.xml", "⚙️ Gameplay / cfggameplay.json", "📅 Eventos / events.xml",
-    "💬 Mensagens / messages.xml", "📍 Spawns / cfgeventspawns.xml","🛡️ Agenda de RAID",
-    "🛒 Loja / Trader", "👥 Jogadores", "🏦 Banco / Carteira", "💎 Planos",
+
+# Inclusão da "⚙️ Feeds / Bot" entre "🏦 Banco / Carteira" e "💎 Planos"
+tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab_raid, tab6, tab7, tab_analytics, tab8, tab_feeds, tab_planos = st.tabs([
+    "📅 Eventos Agendados", 
+    "📋 Histórico Logs", 
+    "📢 Comunicados", 
+    "🧬 Loot / types.xml",
+    "🌍 Ambiente / globals.xml", 
+    "⚙️ Gameplay / cfggameplay.json", 
+    "📅 Eventos / events.xml",
+    "💬 Mensagens / messages.xml", 
+    "📍 Spawns / cfgeventspawns.xml",
+    "🛡️ Agenda de RAID",
+    "🛒 Loja / Trader", 
+    "👥 Jogadores", 
+    "📊 Analytics",
+    "🏦 Banco / Carteira", 
+    "⚙️ Feeds / Bot",
+    "💎 Planos",
 ])
 
 with tab1:
@@ -4467,207 +4629,133 @@ with tab_raid:
                     st.rerun()
     
 with tab6:
-    st.subheader("🛒 Loja / Trader")
-    st.info("Configure aqui o catálogo de itens da loja do seu servidor.")
+    st.subheader("🛒 Loja / Trader & Gestão de Vendas")
+    
+    # --- SUB-NAVEGAÇÃO INTERNA GRC ---
+    # Permite alternar funções sem poluir o topo do site com mais abas
+    menu_interno_loja = st.radio(
+        "Selecione a operação:",
+        ["📦 Gestão de Pedidos", "🛠️ Configurar Catálogo"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key=f"menu_interno_loja_{user_id}"
+    )
+    
+    st.divider()
 
-    # Descobre o server_id real vinculado ao usuário logado
-    server_id_loja = st.session_state.db_users.get("keys", {}).get(
-        user_id, {}
-    ).get("server_id", user_id)
+    # --- 1. TELA DE GESTÃO E ESTORNO (NOVO) ---
+    if menu_interno_loja == "📦 Gestão de Pedidos":
+        # Chama a função de auditoria declarada anteriormente
+        # Certifique-se de que a função 'render_gestao_pedidos' foi inserida no Passo 1 anterior
+        server_id_loja = st.session_state.db_users.get("keys", {}).get(user_id, {}).get("server_id", user_id)
+        client_data_loja = st.session_state.db_clients.get(server_id_loja, {})
+        render_gestao_pedidos(client_data_loja, server_id_loja)
 
-    # Recarrega a base mais atual do disco
-    db_completo = load_db(DB_CLIENTS, {})
+    # --- 2. TELA DE CONFIGURAÇÃO DE ITENS (CÓDIGO ORIGINAL) ---
+    else:
+        st.info("Configure aqui o catálogo de itens da loja do seu servidor.")
 
-    # Garante estrutura mínima do servidor
-    if server_id_loja not in db_completo:
-        db_completo[server_id_loja] = {
-            "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
-            "agendas": [],
-            "logs": [],
-            "comunicados": [],
-            "players": {},
-            "loja": {
-                "mapa_padrao": "Chernarus",
-                "posicao_padrao": "",
-                "itens": [],
+        # Descobre o server_id real vinculado ao usuário logado
+        server_id_loja = st.session_state.db_users.get("keys", {}).get(user_id, {}).get("server_id", user_id)
+
+        # Recarrega a base mais atual do disco para garantir integridade
+        db_completo = load_db(DB_CLIENTS, {})
+
+        # Garante estrutura mínima do servidor
+        if server_id_loja not in db_completo:
+            db_completo[server_id_loja] = {
+                "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
+                "agendas": [],
+                "logs": [],
+                "comunicados": [],
+                "players": {},
+                "loja": {"mapa_padrao": "Chernarus", "posicao_padrao": "", "itens": []},
+            }
+
+        client_data_loja = db_completo[server_id_loja]
+
+        if "loja" not in client_data_loja:
+            client_data_loja["loja"] = {"mapa_padrao": "Chernarus", "posicao_padrao": "", "itens": []}
+
+        loja = client_data_loja["loja"]
+        loja.setdefault("mapa_padrao", "Chernarus")
+        loja.setdefault("posicao_padrao", "")
+        loja.setdefault("itens", [])
+
+        st.markdown("### ⚙️ Configurações gerais da Loja")
+
+        col_conf1, col_conf2 = st.columns(2)
+        with col_conf1:
+            loja_mapa_padrao = st.selectbox(
+                "Mapa padrão da Loja",
+                ["Chernarus", "Livonia"],
+                index=["Chernarus", "Livonia"].index(loja.get("mapa_padrao", "Chernarus")),
+                key=f"loja_mapa_padrao_{user_id}",
+            )
+        with col_conf2:
+            loja_posicao_padrao = st.text_input(
+                "Coordenadas padrão de entrega (opcional)",
+                value=loja.get("posicao_padrao", ""),
+                help="Opcional. Coordenadas de referência para spawn do item.",
+                key=f"loja_posicao_padrao_{user_id}",
+            )
+
+        st.markdown("### 📦 Itens do Catálogo")
+
+        df_loja_key = f"df_loja_{server_id_loja}"
+        loja_version_key = f"df_loja_version_{server_id_loja}"
+        loja_serializada = json.dumps(loja, sort_keys=True, ensure_ascii=False)
+
+        if (df_loja_key not in st.session_state or 
+            loja_version_key not in st.session_state or 
+            st.session_state[loja_version_key] != loja_serializada):
+            st.session_state[df_loja_key] = loja_itens_to_df(loja)
+            st.session_state[loja_version_key] = loja_serializada
+
+        df_loja = st.session_state[df_loja_key]
+
+        edited_df_loja = st.data_editor(
+            df_loja,
+            num_rows="dynamic",
+            hide_index=True,
+            column_config={
+                "id": st.column_config.NumberColumn("ID", min_value=1, step=1),
+                "nome": "Nome",
+                "classe": "Classe DayZ",
+                "categoria": "Categoria",
+                "preco": st.column_config.NumberColumn("Preço (💎)", min_value=0, step=1),
+                "quantidade": st.column_config.NumberColumn("Qtd", min_value=1, step=1),
+                "ativo": st.column_config.CheckboxColumn("Ativo", default=True),
             },
-        }
-
-    client_data_loja = db_completo[server_id_loja]
-
-    # Garante estrutura da loja
-    if "loja" not in client_data_loja:
-        client_data_loja["loja"] = {
-            "mapa_padrao": "Chernarus",
-            "posicao_padrao": "",
-            "itens": [],
-        }
-
-    loja = client_data_loja["loja"]
-    loja.setdefault("mapa_padrao", "Chernarus")
-    loja.setdefault("posicao_padrao", "")
-    loja.setdefault("itens", [])
-
-    st.markdown("### ⚙️ Configurações gerais da Loja")
-
-    col_conf1, col_conf2 = st.columns(2)
-    with col_conf1:
-        loja_mapa_padrao = st.selectbox(
-            "Mapa padrão da Loja",
-            ["Chernarus", "Livonia"],
-            index=["Chernarus", "Livonia"].index(loja.get("mapa_padrao", "Chernarus")),
-            key="loja_mapa_padrao",
-        )
-    with col_conf2:
-        loja_posicao_padrao = st.text_input(
-            "Coordenadas padrão de entrega (opcional)",
-            value=loja.get("posicao_padrao", ""),
-            help=(
-                "Opcional. Use um mapa como dayz.xam.nu ou iZurvive, clique no local desejado, "
-                "copie as coordenadas (ex: 2432.34/4353.87) ou a descrição e cole aqui. "
-                "O player poderá informar outra posição na página de compra."
-            ),
-            key="loja_posicao_padrao",
+            key=f"editor_loja_{server_id_loja}",
         )
 
-    st.markdown("### 📦 Itens da Loja")
+        st.markdown("### 💾 Salvar catálogo")
+        col_loja1, col_loja2, col_loja3, col_loja4 = st.columns(4)
 
-    df_loja_key = f"df_loja_{server_id_loja}"
-    loja_version_key = f"df_loja_version_{server_id_loja}"
+        with col_loja1:
+            if st.button("Aplicar na Sessão", use_container_width=True, key=f"btn_apply_loja_{user_id}"):
+                st.session_state[df_loja_key] = edited_df_loja
+                st.success("Alterações aplicadas temporariamente.")
 
-    loja_serializada = json.dumps(loja, sort_keys=True, ensure_ascii=False)
+        with col_loja2:
+            if st.button("Salvar no Titan Cloud", use_container_width=True, key=f"btn_save_cloud_{user_id}"):
+                db_completo = load_db(DB_CLIENTS, {})
+                itens_atualizados = df_to_loja_itens(edited_df_loja)
+                loja_obj = {"mapa_padrao": loja_mapa_padrao, "posicao_padrao": loja_posicao_padrao, "itens": itens_atualizados}
+                db_completo[server_id_loja]["loja"] = loja_obj
+                save_db(DB_CLIENTS, db_completo)
+                st.session_state.db_clients = db_completo
+                st.success("✅ Catálogo salvo e persistido!"); st.rerun()
 
-    if (
-        df_loja_key not in st.session_state
-        or loja_version_key not in st.session_state
-        or st.session_state[loja_version_key] != loja_serializada
-    ):
-        st.session_state[df_loja_key] = loja_itens_to_df(loja)
-        st.session_state[loja_version_key] = loja_serializada
-
-    df_loja = st.session_state[df_loja_key]
-
-    st.info(
-        "Colunas: id (ordem de exibição), nome (visível para o player), "
-        "classe (nome do item no DayZ, ex: M4A1), categoria, preço (DzCoins), quantidade por compra, ativo."
-    )
-
-    edited_df_loja = st.data_editor(
-        df_loja,
-        num_rows="dynamic",
-        hide_index=True,
-        column_config={
-            "id": st.column_config.NumberColumn(
-                "ID (ordem)",
-                help="Ordem do item na lista / identificador para compras.",
-                min_value=1,
-                step=1,
-            ),
-            "nome": "Nome (exibido na loja)",
-            "classe": "Classe DayZ (ex: M4A1)",
-            "categoria": "Categoria (Armas, Kits, etc.)",
-            "preco": st.column_config.NumberColumn(
-                "Preço (DzCoins)",
-                min_value=0,
-                step=1,
-            ),
-            "quantidade": st.column_config.NumberColumn(
-                "Quantidade",
-                min_value=1,
-                step=1,
-            ),
-            "ativo": st.column_config.CheckboxColumn(
-                "Ativo",
-                default=True,
-                help="Se desmarcado, o item não aparece para os jogadores.",
-            ),
-        },
-        key=f"editor_loja_{server_id_loja}",
-    )
-
-    st.markdown("### 💾 Salvar catálogo")
-
-    col_loja1, col_loja2, col_loja3, col_loja4 = st.columns(4)
-
-    with col_loja1:
-        if st.button("Aplicar alterações na sessão (Loja)", use_container_width=True):
-            st.session_state[df_loja_key] = edited_df_loja
-            st.success("Alterações aplicadas na sessão da Loja.")
-
-    with col_loja2:
-        if st.button("Salvar Loja no Titan Cloud", key=f"btn_salvar_{user_id}", use_container_width=True):
-            db_completo = load_db(DB_CLIENTS, {})
-
-            if server_id_loja not in db_completo:
-                db_completo[server_id_loja] = {
-                    "ftp": {"host": "", "user": "", "pass": "", "port": "21"},
-                    "agendas": [],
-                    "logs": [],
-                    "comunicados": [],
-                    "players": {},
-                }
-
-            if "loja" not in db_completo[server_id_loja]:
-                db_completo[server_id_loja]["loja"] = {}
-
+        with col_loja3:
             itens_atualizados = df_to_loja_itens(edited_df_loja)
-            loja_obj = {
-                "mapa_padrao": loja_mapa_padrao,
-                "posicao_padrao": loja_posicao_padrao,
-                "itens": itens_atualizados,
-            }
-
-            db_completo[server_id_loja]["loja"] = loja_obj
-            save_db(DB_CLIENTS, db_completo)
-
-            st.session_state.db_clients = db_completo
-            st.session_state[df_loja_key] = loja_itens_to_df(loja_obj)
-            st.session_state[loja_version_key] = json.dumps(
-                loja_obj, sort_keys=True, ensure_ascii=False
-            )
-
-            st.success(f"✅ Catálogo salvo com sucesso para o Servidor {server_id_loja}!")
-            st.rerun()
-
-    with col_loja3:
-        if st.button("⬇️ Baixar Loja (JSON)", use_container_width=True):
-            itens_atualizados = df_to_loja_itens(edited_df_loja)
-            loja_preview = {
-                "servidor": user_info.get("server", "Servidor"),
-                "mapa_padrao": loja_mapa_padrao,
-                "posicao_padrao": loja_posicao_padrao,
-                "itens": itens_atualizados,
-            }
-            loja_json = json.dumps(loja_preview, indent=4, ensure_ascii=False)
-
-            st.download_button(
-                label="Baixar arquivo Loja_Titan.json",
-                data=loja_json.encode("utf-8"),
-                file_name="Loja_Titan.json",
-                mime="application/json",
-                use_container_width=True,
-            )
+            loja_json = json.dumps({"servidor": user_info.get("server"), "itens": itens_atualizados}, indent=4, ensure_ascii=False)
+            st.download_button(label="⬇️ Baixar JSON", data=loja_json.encode("utf-8"), file_name="Loja_Titan.json", mime="application/json", use_container_width=True)
             
-    with col_loja4:
-        if st.button("🔄 Recarregar Loja da Base", use_container_width=True):
-            db_recarregado = load_db(DB_CLIENTS, {})
-
-            if server_id_loja not in db_recarregado:
-                st.warning("Servidor não encontrado na base de dados.")
-            else:
-                client_data_recarregado = db_recarregado[server_id_loja]
-                loja_recarregada = client_data_recarregado.get("loja", {})
-                loja_recarregada.setdefault("mapa_padrao", "Chernarus")
-                loja_recarregada.setdefault("posicao_padrao", "")
-                loja_recarregada.setdefault("itens", [])
-
-                st.session_state[df_loja_key] = loja_itens_to_df(loja_recarregada)
-                st.session_state[loja_version_key] = json.dumps(
-                    loja_recarregada, sort_keys=True, ensure_ascii=False
-                )
-                st.session_state.db_clients = db_recarregado
-
-                st.success("✅ Loja recarregada diretamente da base.")
+        with col_loja4:
+            if st.button("🔄 Recarregar Base", use_container_width=True, key=f"btn_reload_db_{user_id}"):
+                st.session_state.pop(df_loja_key, None)
                 st.rerun()
 
 with tab7:
@@ -4770,6 +4858,14 @@ with tab7:
             st.session_state[df_players_key] = edited_df_players
 
             st.success("Vínculos de jogadores salvos com sucesso no Titan Cloud!")
+
+with tab_analytics:
+    # Verifica se o administrador ativou o feed no painel de Governança
+    feeds = client_data.get("feeds_config", {})
+    if feeds.get("mapa_calor", True):
+        render_heatmap(client_data)
+    else:
+        st.warning("⚠️ O Mapa de Calor está desativado nas configurações de Feeds (Aba ⚙️ Feeds / Bot).")
 
 with tab8:
     st.subheader("🏦 Banco & Carteira")
@@ -4980,6 +5076,51 @@ with tab8:
         """,
         unsafe_allow_html=True,
     )
+
+with tab_feeds:
+    st.header("⚙️ Configuração de Feeds e Automações")
+    st.info("Configure os gatilhos de auditoria GRC e as integrações com o Discord.")
+
+    # Carrega as configurações atuais do servidor
+    feeds = client_data.get("feeds_config", {})
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("🛡️ Auditoria Anti-Glitch")
+        feeds["glitch_subsolo"] = st.toggle("Ativar: Glitch Subsolo", value=feeds.get("glitch_subsolo", True))
+        feeds["glitch_fogueiras"] = st.toggle("Ativar: Spam de Fogueiras", value=feeds.get("glitch_fogueiras", True))
+        feeds["glitch_hortas"] = st.toggle("Ativar: Spam de Hortas", value=feeds.get("glitch_hortas", True))
+        
+    with col2:
+        st.subheader("📊 Inteligência e Ranking")
+        feeds["mapa_calor"] = st.toggle("Ativar: Mapa de Calor", value=feeds.get("mapa_calor", True))
+        feeds["ranking_auto"] = st.toggle("Ativar: Ranking Global", value=feeds.get("ranking_auto", True))
+
+    st.divider()
+
+    st.subheader("🔗 Integração Discord (Webhooks)")
+    webhook_online = st.text_input(
+        "🌐 Webhook: Players Online", 
+        value=feeds.get("webhook_players_online", ""),
+        placeholder="https://discord.com/api/webhooks/..."
+    )
+
+    webhook_admin = st.text_input(
+        "🛡️ Webhook: Alertas de Auditoria (Staff)", 
+        value=feeds.get("webhook_admin_logs", ""),
+        placeholder="https://discord.com/api/webhooks/..."
+    )
+
+    if st.button("💾 Salvar Configurações de Governança"):
+        # Atualiza os links de Webhook no dicionário
+        feeds["webhook_players_online"] = webhook_online
+        feeds["webhook_admin_logs"] = webhook_admin
+        
+        # Persiste no banco de dados para o Worker ler
+        client_data["feeds_config"] = feeds
+        save_db(DB_CLIENTS, st.session_state.db_clients)
+        st.success("✅ Configurações salvas! O sistema de auditoria foi atualizado.")
     
     # --- ABA PLANOS ---
 with tab_planos:
