@@ -7,7 +7,6 @@ import io
 import re
 import html
 import math
-import plotly.express as px
 from datetime import datetime, timezone, timedelta
 from ftplib import FTP
 from functools import lru_cache
