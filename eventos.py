@@ -483,15 +483,80 @@ def dispararftppro(clientid, acao, filename, localpath, mapapath):
 
 def worker_dzcoins_automatico():
     """
-    Worker que distribui DzCoins automaticamente para jogadores online
-    conforme configurado pelo admin em dzcoins_config.
+    Worker que distribui DzCoins automaticamente APENAS para jogadores
+    que estão online no servidor no momento da distribuição.
     Roda em loop contínuo em thread separada.
     """
+    import ftplib
+    import io
+    import re
+
+    def get_online_players_ftp(ftp_cfg: dict) -> list:
+        """
+        Lê o último arquivo .ADM via FTP e retorna lista
+        de jogadores atualmente online.
+        """
+        if not ftp_cfg:
+            return []
+
+        try:
+            # Lista arquivos .ADM
+            with ftplib.FTP() as ftp:
+                ftp.connect(ftp_cfg["host"], int(ftp_cfg["port"]), timeout=15)
+                ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
+                ftp.cwd("dayzxb/config")
+
+                arquivos = [
+                    a for a in ftp.nlst()
+                    if a.upper().endswith(".ADM")
+                ]
+                if not arquivos:
+                    return []
+
+                arquivos.sort(reverse=True)
+                ultimo = arquivos[0]
+
+                buffer = io.BytesIO()
+                ftp.retrbinary(f"RETR {ultimo}", buffer.write)
+                texto = buffer.getvalue().decode("utf-8", errors="ignore")
+
+        except Exception as e:
+            print(f"[DzCoins Worker] Erro ao ler ADM via FTP: {e}")
+            return []
+
+        # Parser de quem está online
+        conectados = {}
+        re_player = re.compile(r'\d{2}:\d{2}:\d{2} \| Player "(.+?)"')
+
+        for line in texto.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+
+            m = re_player.match(line)
+            if not m:
+                continue
+
+            nome = m.group(1)
+
+            if "DEAD" in line:
+                continue
+
+            if "is connected" in line and "is connecting" not in line:
+                conectados[nome] = True
+            elif "has been disconnected" in line:
+                conectados.pop(nome, None)
+
+        return [n for n, v in conectados.items() if v]
+
     while True:
         try:
             db = load_db(DB_CLIENTS, {})
+
             for server_id, client_data in db.items():
                 config = client_data.get("dzcoins_config", {})
+
+                # Verifica se o worker está ativo
                 if not config.get("ativo", False):
                     continue
 
@@ -501,29 +566,67 @@ def worker_dzcoins_automatico():
                 if quantidade <= 0 or intervalo <= 0:
                     continue
 
-                players = client_data.get("players", {})
-                if not players:
+                # Pega configuração FTP do servidor
+                ftp_cfg = client_data.get("ftp", {})
+                host = ftp_cfg.get("host", "")
+                user = ftp_cfg.get("user", "")
+                pwd = ftp_cfg.get("pass", "")
+                port = int(ftp_cfg.get("port", 21) or 21)
+
+                if not host or not user or not pwd:
+                    print(f"[DzCoins Worker] FTP não configurado para {server_id}, pulando.")
                     continue
 
-                wallets = client_data.setdefault("wallets", {})
-                hora_atual = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
-                alterou = False
+                ftp_config = {
+                    "host": host,
+                    "user": user,
+                    "pass": pwd,
+                    "port": port,
+                }
 
-                for gamertag in players:
-                    wallet = wallets.setdefault(gamertag, {"balance": 0, "historico": []})
-                    wallet["balance"] = wallet.get("balance", 0) + quantidade
-                    wallet["historico"].append(
-                        f"[{hora_atual}] GANHO AUTOMÁTICO +{quantidade} DzCoins (tempo de jogo)"
+                # Busca jogadores online via ADM
+                jogadores_online = get_online_players_ftp(ftp_config)
+
+                if not jogadores_online:
+                    print(f"[DzCoins Worker] Nenhum jogador online em {server_id}.")
+                    continue
+
+                # Distribui DzCoins apenas para quem está online
+                players_vinculados = client_data.get("players", {})
+                wallets = client_data.setdefault("wallets", {})
+                hora_atual = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
+
+                alterou = False
+                contemplados = []
+
+                for gamertag in jogadores_online:
+                    # Só distribui se o jogador estiver vinculado no servidor
+                    if gamertag not in players_vinculados:
+                        continue
+
+                    wallet = wallets.setdefault(
+                        gamertag, {"balance": 0, "historico": []}
                     )
+                    wallet["balance"] = wallet.get("balance", 0) + quantidade
+                    wallet.setdefault("historico", []).append(
+                        f"[{hora_atual}] +{quantidade} DzCoins (tempo de jogo online)"
+                    )
+                    contemplados.append(gamertag)
                     alterou = True
 
                 if alterou:
                     db[server_id] = client_data
                     save_db(DB_CLIENTS, db)
+                    print(
+                        f"[DzCoins Worker] {server_id} — "
+                        f"{len(contemplados)} jogador(es) contemplado(s): "
+                        f"{', '.join(contemplados)}"
+                    )
 
         except Exception as e:
-            print(f"[worker_dzcoins] Erro: {e}")
+            print(f"[DzCoins Worker] Erro geral: {e}")
 
+        # Aguarda o menor intervalo configurado entre todos os servidores
         try:
             db2 = load_db(DB_CLIENTS, {})
             intervalos = [
