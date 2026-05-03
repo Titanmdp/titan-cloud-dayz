@@ -199,22 +199,22 @@ threading.Thread(target=manter_vivo, daemon=True).start()
 def load_db(file, default_data):
     with db_lock:
         if os.path.exists(file):
-        try:
-            with open(file, "r", encoding="utf-8") as f:
-                conteudo = f.read()
-                if not conteudo.strip():
-                    return default_data
-                return json.loads(conteudo)
-        except Exception as e:
-            backup = file + ".bak"
-            if os.path.exists(backup):
-                try:
-                    with open(backup, "r", encoding="utf-8") as f:
-                        return json.loads(f.read())
-                except Exception:
-                    pass
-            print(f"Erro ao carregar {file}: {e}")
-    return default_data
+            try:
+                with open(file, "r", encoding="utf-8") as f:
+                    conteudo = f.read()
+                    if not conteudo.strip():
+                        return default_data
+                    return json.loads(conteudo)
+            except Exception as e:
+                backup = file + ".bak"
+                if os.path.exists(backup):
+                    try:
+                        with open(backup, "r", encoding="utf-8") as f:
+                            return json.loads(f.read())
+                    except Exception:
+                        pass
+                print(f"Erro ao carregar {file}: {e}")
+        return default_data
 
 
 def save_db(file, data):
