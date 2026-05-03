@@ -808,7 +808,7 @@ def parse_adm_conexoes(log_text: str, feeds_config: dict = None) -> list:
         return eventos
 
     # Determina se as coordenadas devem ser exibidas
-    exibir_coords = feeds_config.get("coordenadas_killfeed", True) if feeds_config else True[cite: 7]
+    exibir_coords = feeds_config.get("coordenadas_killfeed", True) if feeds_config else True
 
     log_date = None
     for line in log_text.splitlines():
@@ -886,7 +886,7 @@ def parse_adm_conexoes(log_text: str, feeds_config: dict = None) -> list:
                 duracao = format_seconds_hhmmss(delta)
                 hora_connect.pop(nome, None)
             
-            # Filtro de Governança aplicado à descrição[cite: 7]
+            # Filtro de Governança aplicado à descrição
             local_txt = f" de {pos}" if exibir_coords else ""
             sessao_txt = f" — Sessão: {duracao}" if duracao else ""
             
@@ -1092,7 +1092,8 @@ def analisar_glitches(log_text: str, feeds_config: dict, client_data: dict, mapa
                         "pos": pos_atual, 
                         "dt": agora.isoformat()
                     })
-                except: pass
+                except Exception: 
+                    pass
 
         # --- PARTE B: AUDITORIA DE SUBSOLO (ELEVAÇÃO) ---
         m_pos = re_pos.search(line)
@@ -1111,7 +1112,8 @@ def analisar_glitches(log_text: str, feeds_config: dict, client_data: dict, mapa
                         "pos": pos_str,
                         "banir": False # Geralmente kick ou aviso, admin decide se bane
                     })
-            except: pass
+            except Exception: 
+                pass
             
     # --- LIMPEZA DE DADOS (PURGE) ---
     # Remove registros com mais de 1h para manter o JSON leve
@@ -1141,10 +1143,9 @@ def extrair_coordenadas_mapa(log_text: str):
         if m:
             try:
                 parts = [float(p.strip()) for p in m.group(1).split(',')]
-                # DayZ usa (X, Y, Z). Para o mapa, focamos em X e Z (horizontal)
-                coords.append([parts[2], parts[0]]) # Invertido para o padrão de mapas (Lat/Lon)
-            except:
-                continue
+                coords.append([parts[2], parts[0]])
+            except (ValueError, IndexError, AttributeError):
+                continue  # Ou pass, dependendo do contexto
     return coords
 
 def aplicar_banimento_ftp(ftp_cfg: dict, gamertag: str):
@@ -1162,7 +1163,7 @@ def aplicar_banimento_ftp(ftp_cfg: dict, gamertag: str):
             with open(temp_filename, "wb") as f:
                 try:
                     ftp.retrbinary("RETR banlist.txt", f.write)
-                except:
+                except Exception:
                     # Se o arquivo não existir, cria um novo
                     pass
 
@@ -2853,7 +2854,7 @@ def main():
                 feeds["webhook_players_online"] = webhook_online
                 feeds["webhook_admin_logs"] = webhook_admin
                 client_data["feeds_config"] = feeds
-                save_db(DB_CLIENTS, st.session_state.db_clients)
+                save_db(DB_CLIENTS, st.session_state.get("portal_server_nome", "Servidor")
                 st.success("✅ Governança atualizada!")
 
         # --- ABA LOJA VIRTUAL ---
