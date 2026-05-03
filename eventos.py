@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 import base64
 import plotly.express as px
+import threading
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
@@ -196,7 +197,8 @@ threading.Thread(target=manter_vivo, daemon=True).start()
 
 
 def load_db(file, default_data):
-    if os.path.exists(file):
+    with db_lock:
+        if os.path.exists(file):
         try:
             with open(file, "r", encoding="utf-8") as f:
                 conteudo = f.read()
@@ -216,9 +218,9 @@ def load_db(file, default_data):
 
 
 def save_db(file, data):
-    # Só bloqueia se data for None; dicionários vazios ainda podem ser salvos
-    if data is None:
-        return
+    with db_lock:  # ADICIONAR ESTA LINHA
+        if data is None:
+            return
 
     try:
         # Cria backup antes de sobrescrever, se existir
@@ -2433,7 +2435,7 @@ if "feeds_config" not in client_data:
     # Salva imediatamente para garantir a integridade do JSON
     save_db(DB_CLIENTS, st.session_state.db_clients)
     
-# --- PASSO 7: ESTRUTURA PARA DETECÇÃO DE SPAM DE OBJETOS (GRC) ---[cite: 1]
+# --- PASSO 7: ESTRUTURA PARA DETECÇÃO DE SPAM DE OBJETOS (GRC) ---
 if "tracking_acoes" not in client_data:
     client_data["tracking_acoes"] = {} 
     save_db(DB_CLIENTS, st.session_state.db_clients)
