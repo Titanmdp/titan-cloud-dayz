@@ -4947,6 +4947,145 @@ with tab8:
     wallets = client_data["wallets"]
     bank = client_data["bank"]
 
+    # --- Configuração do Worker DzCoins ---
+    st.markdown("### ⚙️ Configuração de Ganho Automático de DzCoins")
+    st.caption(
+        "Os jogadores ganham DzCoins automaticamente enquanto estão online. "
+        "Configure abaixo a quantidade e o intervalo de distribuição."
+    )
+
+    dz_config = client_data.get("dzcoins_config", {})
+
+    col_dz1, col_dz2, col_dz3 = st.columns(3)
+
+    with col_dz1:
+        dz_ativo = st.toggle(
+            "✅ Ativar distribuição automática",
+            value=dz_config.get("ativo", False),
+            key="dzcoins_ativo_toggle",
+        )
+
+    with col_dz2:
+        dz_quantidade = st.number_input(
+            "💰 DzCoins por intervalo",
+            min_value=1,
+            max_value=10000,
+            value=int(dz_config.get("quantidade_dzcoins", 10)),
+            step=1,
+            help="Quantidade de DzCoins distribuída para cada jogador online a cada intervalo.",
+            key="dzcoins_quantidade_input",
+        )
+
+    with col_dz3:
+        dz_intervalo = st.number_input(
+            "⏱️ Intervalo (minutos)",
+            min_value=1,
+            max_value=1440,
+            value=int(dz_config.get("intervalo_minutos", 60)),
+            step=1,
+            help="A cada quantos minutos os DzCoins serão distribuídos para jogadores online.",
+            key="dzcoins_intervalo_input",
+        )
+
+    # Preview do ganho estimado
+    ganho_hora = round((60 / max(dz_intervalo, 1)) * dz_quantidade, 2)
+    ganho_dia = round(ganho_hora * 24, 2)
+
+    st.markdown(
+        f"""
+        <div style="
+            background:#0f1b12;
+            border:1px solid #1f5a34;
+            border-radius:8px;
+            padding:12px 16px;
+            margin:10px 0 16px 0;
+            font-size:13px;
+            color:#d6e2f0;
+        ">
+            📊 <b style="color:#57ff9a;">Estimativa de ganho:</b>
+            &nbsp;&nbsp;
+            <b style="color:#ffffff;">{ganho_hora}</b>
+            <span style="color:#aaa;"> DzCoins/hora</span>
+            &nbsp;&nbsp;|&nbsp;&nbsp;
+            <b style="color:#ffffff;">{ganho_dia}</b>
+            <span style="color:#aaa;"> DzCoins/dia</span>
+            &nbsp;&nbsp;
+            <span style="color:#666; font-size:11px;">
+                (jogador online 100% do tempo)
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if st.button(
+        "💾 Salvar Configuração DzCoins",
+        key="salvar_dzcoins_config",
+        use_container_width=True,
+        type="primary",
+    ):
+        client_data["dzcoins_config"] = {
+            "ativo": dz_ativo,
+            "quantidade_dzcoins": int(dz_quantidade),
+            "intervalo_minutos": int(dz_intervalo),
+        }
+        clients_data[server_id] = client_data
+        save_db(DB_CLIENTS, clients_data)
+        registrar_log(
+            user_id,
+            f"DzCoins automático: {'ativado' if dz_ativo else 'desativado'} — "
+            f"{dz_quantidade} DzCoins a cada {dz_intervalo} min.",
+            "sucesso",
+        )
+        st.success(
+            f"✅ Configuração salva! "
+            f"{'Sistema ativado' if dz_ativo else 'Sistema desativado'}. "
+            f"Jogadores ganharão {dz_quantidade} DzCoins a cada {dz_intervalo} minuto(s)."
+        )
+        st.rerun()
+
+    # Status atual do worker
+    if dz_config.get("ativo", False):
+        st.markdown(
+            f"""
+            <div style="
+                background:#0f1b12;
+                border:1px solid #1f5a34;
+                border-radius:8px;
+                padding:10px 14px;
+                margin-bottom:16px;
+                font-size:12px;
+                color:#57ff9a;
+            ">
+                🟢 <b>Worker DzCoins ativo</b> —
+                distribuindo <b>{dz_config.get('quantidade_dzcoins', 0)} DzCoins</b>
+                a cada <b>{dz_config.get('intervalo_minutos', 60)} minutos</b>
+                para jogadores online.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+            <div style="
+                background:#1b1b1b;
+                border:1px solid #444;
+                border-radius:8px;
+                padding:10px 14px;
+                margin-bottom:16px;
+                font-size:12px;
+                color:#888;
+            ">
+                🔴 <b>Worker DzCoins desativado</b> —
+                nenhum DzCoin está sendo distribuído automaticamente.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
+
     # 3) Selecionar jogador
     st.markdown("### 👤 Selecionar jogador")
 
@@ -5009,7 +5148,6 @@ with tab8:
 
                 st.success(f"Ajuste aplicado. Novo saldo em carteira: {saldo_novo} DzCoins.")
 
-                # Atualiza variáveis locais para refletir o novo saldo
                 saldo_carteira = saldo_novo
                 wallet_reg["balance"] = saldo_novo
                 wallets[gamertag_sel] = wallet_reg
@@ -5061,7 +5199,11 @@ with tab8:
     col_hist_1, col_hist_2 = st.columns([3, 1])
 
     with col_hist_2:
-        if st.button("🧹 Limpar Histórico", key=f"limpar_historico_console_{gamertag_sel}", use_container_width=True):
+        if st.button(
+            "🧹 Limpar Histórico",
+            key=f"limpar_historico_console_{gamertag_sel}",
+            use_container_width=True,
+        ):
             wallet_reg["historico"] = []
             bank_reg["historico"] = []
 
