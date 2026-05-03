@@ -2854,7 +2854,8 @@ def main():
                 feeds["webhook_players_online"] = webhook_online
                 feeds["webhook_admin_logs"] = webhook_admin
                 client_data["feeds_config"] = feeds
-                save_db(DB_CLIENTS, st.session_state.get("portal_server_nome", "Servidor")
+                clients_db[server_id] = client_data
+                save_db(DB_CLIENTS, clients_db)
                 st.success("✅ Governança atualizada!")
 
         # --- ABA LOJA VIRTUAL ---
