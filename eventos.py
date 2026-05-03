@@ -12,6 +12,7 @@ import smtplib
 import xml.etree.ElementTree as ET
 import pandas as pd
 import base64
+import plotly.express as px
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from streamlit_javascript import st_javascript
