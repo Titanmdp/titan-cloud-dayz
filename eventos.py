@@ -576,7 +576,6 @@ def worker_dzcoins_automatico():
             return []
 
         try:
-            # Lista arquivos .ADM
             with ftplib.FTP() as ftp:
                 ftp.connect(ftp_cfg["host"], int(ftp_cfg["port"]), timeout=15)
                 ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
@@ -646,7 +645,7 @@ def worker_dzcoins_automatico():
                 ftp_cfg = client_data.get("ftp", {})
                 host = ftp_cfg.get("host", "")
                 user = ftp_cfg.get("user", "")
-                pwd = ftp_cfg.get("pass", "")
+                pwd  = ftp_cfg.get("pass", "")
                 port = int(ftp_cfg.get("port", 21) or 21)
 
                 if not host or not user or not pwd:
@@ -667,7 +666,7 @@ def worker_dzcoins_automatico():
                     print(f"[DzCoins Worker] Nenhum jogador online em {server_id}.")
                     continue
 
-                # Distribui DzCoins apenas para quem está online
+                # Distribui DzCoins apenas para quem está online e vinculado
                 players_vinculados = client_data.get("players", {})
                 wallets = client_data.setdefault("wallets", {})
                 hora_atual = datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M")
@@ -676,7 +675,6 @@ def worker_dzcoins_automatico():
                 contemplados = []
 
                 for gamertag in jogadores_online:
-                    # Só distribui se o jogador estiver vinculado no servidor
                     if gamertag not in players_vinculados:
                         continue
 
@@ -698,6 +696,70 @@ def worker_dzcoins_automatico():
                         f"{len(contemplados)} jogador(es) contemplado(s): "
                         f"{', '.join(contemplados)}"
                     )
+
+                    # --- Dispara webhook de distribuição de DzCoins ---
+                    try:
+                        _webhooks_cfg = client_data.get("webhooks_config", [])
+
+                        for _wh in _webhooks_cfg:
+                            if not _wh.get("ativo", True):
+                                continue
+                            if "dzcoins_distribuicao" not in _wh.get("eventos", []):
+                                continue
+
+                            _url = _wh.get("url", "").strip()
+                            if not _url:
+                                continue
+
+                            _payload = {
+                                "embeds": [{
+                                    "title": "💰 DzCoins Distribuídos",
+                                    "description": (
+                                        f"**{len(contemplados)}** jogador(es) receberam "
+                                        f"DzCoins por tempo de jogo online."
+                                    ),
+                                    "color": 0x00D4FF,
+                                    "fields": [
+                                        {
+                                            "name": "💎 DzCoins por jogador",
+                                            "value": str(quantidade),
+                                            "inline": True,
+                                        },
+                                        {
+                                            "name": "👥 Total contemplados",
+                                            "value": str(len(contemplados)),
+                                            "inline": True,
+                                        },
+                                        {
+                                            "name": "🕒 Horário",
+                                            "value": hora_atual,
+                                            "inline": True,
+                                        },
+                                        {
+                                            "name": "👤 Jogadores",
+                                            "value": "\n".join(
+                                                f"• {g}" for g in contemplados
+                                            ) or "Nenhum",
+                                            "inline": False,
+                                        },
+                                    ],
+                                    "footer": {
+                                        "text": "Titan Cloud PRO • Worker DzCoins"
+                                    },
+                                    "timestamp": datetime.now(FUSO_BR).isoformat(),
+                                }]
+                            }
+
+                            try:
+                                requests.post(_url, json=_payload, timeout=5)
+                            except Exception as _e:
+                                print(
+                                    f"[Webhook DzCoins] Erro ao enviar para "
+                                    f"'{_wh.get('nome', '?')}': {_e}"
+                                )
+
+                    except Exception as _e:
+                        print(f"[Webhook DzCoins] Erro geral: {_e}")
 
         except Exception as e:
             print(f"[DzCoins Worker] Erro geral: {e}")
@@ -5436,49 +5498,258 @@ with tab8:
     )
 
 with tab_feeds:
-    st.header("⚙️ Configuração de Feeds e Automações")
-    st.info("Configure os gatilhos de auditoria GRC e as integrações com o Discord.")
+    st.header("🔔 Feeds & Webhooks")
+    st.caption("Configure os canais do Discord e escolha quais eventos cada canal vai receber.")
 
-    # Carrega as configurações atuais do servidor
     feeds = client_data.get("feeds_config", {})
 
-    col1, col2 = st.columns(2)
+    # ================================================================
+    # SEÇÃO 1 — Gestão de Webhooks Dinâmicos
+    # ================================================================
+    st.markdown("### 📡 Meus Webhooks")
 
-    with col1:
-        st.subheader("🛡️ Auditoria Anti-Glitch")
-        feeds["glitch_subsolo"] = st.toggle("Ativar: Glitch Subsolo", value=feeds.get("glitch_subsolo", True))
-        feeds["glitch_fogueiras"] = st.toggle("Ativar: Spam de Fogueiras", value=feeds.get("glitch_fogueiras", True))
-        feeds["glitch_hortas"] = st.toggle("Ativar: Spam de Hortas", value=feeds.get("glitch_hortas", True))
-        
-    with col2:
-        st.subheader("📊 Inteligência e Ranking")
-        feeds["mapa_calor"] = st.toggle("Ativar: Mapa de Calor", value=feeds.get("mapa_calor", True))
-        feeds["ranking_auto"] = st.toggle("Ativar: Ranking Global", value=feeds.get("ranking_auto", True))
+    webhooks_cfg = client_data.get("webhooks_config", [])
+
+    # --- Formulário para adicionar novo webhook ---
+    with st.expander("➕ Adicionar novo Webhook", expanded=False):
+        col_wh1, col_wh2 = st.columns([1, 2])
+
+        with col_wh1:
+            novo_wh_nome = st.text_input(
+                "Nome do canal",
+                placeholder="Ex: #kills-pvp, #loja, #staff",
+                key="novo_wh_nome",
+            )
+
+        with col_wh2:
+            novo_wh_url = st.text_input(
+                "URL do Webhook",
+                placeholder="https://discord.com/api/webhooks/...",
+                key="novo_wh_url",
+            )
+
+        st.markdown("**Eventos que este webhook vai receber:**")
+
+        # Agrupa eventos por categoria
+        categorias_eventos = {}
+        for chave, info in WEBHOOK_EVENTOS_DISPONIVEIS.items():
+            cat = info["categoria"]
+            if cat not in categorias_eventos:
+                categorias_eventos[cat] = []
+            categorias_eventos[cat].append((chave, info["label"]))
+
+        novos_eventos_sel = []
+        cols_cats = st.columns(len(categorias_eventos))
+
+        for idx, (cat, eventos) in enumerate(categorias_eventos.items()):
+            with cols_cats[idx]:
+                st.markdown(f"**{cat.upper()}**")
+                for chave, label in eventos:
+                    if st.checkbox(
+                        label,
+                        key=f"novo_wh_evt_{chave}",
+                        value=False,
+                    ):
+                        novos_eventos_sel.append(chave)
+
+        col_btn1, col_btn2 = st.columns([1, 3])
+        with col_btn1:
+            if st.button(
+                "💾 Adicionar Webhook",
+                key="btn_adicionar_webhook",
+                use_container_width=True,
+                type="primary",
+            ):
+                if not novo_wh_nome.strip():
+                    st.error("❌ Informe um nome para o webhook.")
+                elif not novo_wh_url.strip().startswith("https://discord.com/api/webhooks/"):
+                    st.error("❌ URL inválida. Use uma URL de webhook do Discord.")
+                elif not novos_eventos_sel:
+                    st.error("❌ Selecione pelo menos um evento.")
+                else:
+                    novo_wh = {
+                        "id": str(int(datetime.now(FUSO_BR).timestamp())),
+                        "nome": novo_wh_nome.strip(),
+                        "url": novo_wh_url.strip(),
+                        "eventos": novos_eventos_sel,
+                        "ativo": True,
+                        "criado_em": datetime.now(FUSO_BR).strftime("%d/%m/%Y %H:%M"),
+                    }
+                    webhooks_cfg.append(novo_wh)
+                    client_data["webhooks_config"] = webhooks_cfg
+                    clients_data[server_id] = client_data
+                    save_db(DB_CLIENTS, clients_data)
+                    registrar_log(
+                        user_id,
+                        f"Webhook '{novo_wh_nome}' adicionado com {len(novos_eventos_sel)} evento(s).",
+                        "sucesso",
+                    )
+                    st.success(f"✅ Webhook '{novo_wh_nome}' adicionado com sucesso!")
+                    st.rerun()
 
     st.divider()
 
-    st.subheader("🔗 Integração Discord (Webhooks)")
-    webhook_online = st.text_input(
-        "🌐 Webhook: Players Online", 
-        value=feeds.get("webhook_players_online", ""),
-        placeholder="https://discord.com/api/webhooks/..."
-    )
+    # --- Lista de webhooks cadastrados ---
+    if not webhooks_cfg:
+        st.info("Nenhum webhook cadastrado ainda. Clique em '➕ Adicionar novo Webhook' para começar.")
+    else:
+        st.markdown(f"**{len(webhooks_cfg)} webhook(s) configurado(s):**")
 
-    webhook_admin = st.text_input(
-        "🛡️ Webhook: Alertas de Auditoria (Staff)", 
-        value=feeds.get("webhook_admin_logs", ""),
-        placeholder="https://discord.com/api/webhooks/..."
-    )
+        for idx, wh in enumerate(webhooks_cfg):
+            ativo = wh.get("ativo", True)
+            cor_status = "#57ff9a" if ativo else "#ff6b6b"
+            status_txt = "🟢 Ativo" if ativo else "🔴 Pausado"
+            eventos_wh = wh.get("eventos", [])
+            labels_eventos = [
+                WEBHOOK_EVENTOS_DISPONIVEIS.get(e, {}).get("label", e)
+                for e in eventos_wh
+            ]
 
-    if st.button("💾 Salvar Configurações de Governança"):
-        # Atualiza os links de Webhook no dicionário
-        feeds["webhook_players_online"] = webhook_online
-        feeds["webhook_admin_logs"] = webhook_admin
-        
-        # Persiste no banco de dados para o Worker ler
+            with st.expander(
+                f"{status_txt} — {wh.get('nome', 'Sem nome')} "
+                f"| {len(eventos_wh)} evento(s)",
+                expanded=False,
+            ):
+                col_info, col_acoes = st.columns([3, 1])
+
+                with col_info:
+                    st.markdown(
+                        f"""
+                        <div style="
+                            background:#1a1a2e;
+                            border-radius:8px;
+                            padding:12px;
+                            font-size:12px;
+                            color:#d6e2f0;
+                            margin-bottom:10px;
+                        ">
+                            <b style="color:#ffffff;">URL:</b>
+                            <span style="color:#888;">
+                                {wh.get('url', '')[:60]}...
+                            </span><br>
+                            <b style="color:#ffffff;">Criado em:</b>
+                            <span style="color:#888;">
+                                {wh.get('criado_em', '---')}
+                            </span><br>
+                            <b style="color:#ffffff;">Eventos:</b><br>
+                            {"<br>".join(f"&nbsp;&nbsp;• {l}" for l in labels_eventos)}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                with col_acoes:
+                    # Toggle ativo/pausado
+                    novo_status = st.toggle(
+                        "Ativo",
+                        value=ativo,
+                        key=f"wh_toggle_{wh['id']}",
+                    )
+                    if novo_status != ativo:
+                        webhooks_cfg[idx]["ativo"] = novo_status
+                        client_data["webhooks_config"] = webhooks_cfg
+                        clients_data[server_id] = client_data
+                        save_db(DB_CLIENTS, clients_data)
+                        st.rerun()
+
+                    # Botão de teste
+                    if st.button(
+                        "🧪 Testar",
+                        key=f"wh_test_{wh['id']}",
+                        use_container_width=True,
+                    ):
+                        try:
+                            test_payload = {
+                                "embeds": [{
+                                    "title": "🧪 Teste de Webhook",
+                                    "description": (
+                                        f"Webhook **{wh.get('nome')}** "
+                                        f"está funcionando corretamente!"
+                                    ),
+                                    "color": 0x00D4FF,
+                                    "footer": {
+                                        "text": "Titan Cloud PRO • Teste de Conectividade"
+                                    },
+                                    "timestamp": datetime.now(FUSO_BR).isoformat(),
+                                }]
+                            }
+                            resp = requests.post(
+                                wh["url"],
+                                json=test_payload,
+                                timeout=5,
+                            )
+                            if resp.status_code in (200, 204):
+                                st.success("✅ Enviado!")
+                            else:
+                                st.error(f"❌ Status {resp.status_code}")
+                        except Exception as e:
+                            st.error(f"❌ Erro: {e}")
+
+                    # Botão de remover
+                    if st.button(
+                        "🗑️ Remover",
+                        key=f"wh_del_{wh['id']}",
+                        use_container_width=True,
+                        type="primary",
+                    ):
+                        webhooks_cfg.pop(idx)
+                        client_data["webhooks_config"] = webhooks_cfg
+                        clients_data[server_id] = client_data
+                        save_db(DB_CLIENTS, clients_data)
+                        registrar_log(
+                            user_id,
+                            f"Webhook '{wh.get('nome')}' removido.",
+                            "info",
+                        )
+                        st.success(f"✅ Webhook removido.")
+                        st.rerun()
+
+    st.divider()
+
+    # ================================================================
+    # SEÇÃO 2 — Configurações de Auditoria (feeds existentes)
+    # ================================================================
+    st.markdown("### 🛡️ Auditoria & Analytics")
+
+    cf1, cf2 = st.columns(2)
+
+    with cf1:
+        st.subheader("Anti-Glitch")
+        feeds["glitch_subsolo"] = st.toggle(
+            "Glitch Subsolo",
+            value=feeds.get("glitch_subsolo", True),
+        )
+        feeds["glitch_fogueiras"] = st.toggle(
+            "Spam de Fogueiras",
+            value=feeds.get("glitch_fogueiras", True),
+        )
+        feeds["glitch_hortas"] = st.toggle(
+            "Spam de Hortas",
+            value=feeds.get("glitch_hortas", True),
+        )
+
+    with cf2:
+        st.subheader("Analytics")
+        feeds["mapa_calor"] = st.toggle(
+            "Mapa de Calor",
+            value=feeds.get("mapa_calor", True),
+        )
+        feeds["ranking_auto"] = st.toggle(
+            "Ranking Global",
+            value=feeds.get("ranking_auto", True),
+        )
+
+    st.divider()
+
+    if st.button(
+        "💾 Salvar Configurações de Auditoria",
+        key="salvar_feeds_auditoria",
+        use_container_width=True,
+    ):
         client_data["feeds_config"] = feeds
-        save_db(DB_CLIENTS, st.session_state.db_clients)
-        st.success("✅ Configurações salvas! O sistema de auditoria foi atualizado.")
+        clients_data[server_id] = client_data
+        save_db(DB_CLIENTS, clients_data)
+        st.success("✅ Configurações de auditoria salvas!")
     
     # --- ABA PLANOS ---
 with tab_planos:
