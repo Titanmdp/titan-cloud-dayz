@@ -1539,9 +1539,64 @@ def registrar_compra(
     success = enviar_pedidos_via_ftp(
         client_id=server_id,
         pedidos=pedidos_pendentes,
-        mapa=mapa
+        mapa=mapa,
     )
 
+    # --- Dispara webhook de compra na loja ---
+    try:
+        _webhooks_cfg = client_data.get("webhooks_config", [])
+        _wh_campos = [
+            {"name": "🎒 Item",        "value": item.get("nome", "?"),             "inline": True},
+            {"name": "📦 Quantidade",  "value": str(item.get("quantidade", 1)),    "inline": True},
+            {"name": "💰 Preço",       "value": f"{preco} DzCoins",                "inline": True},
+            {"name": "👤 Jogador",     "value": gamertag,                          "inline": True},
+            {"name": "💳 Origem",      "value": origem,                            "inline": True},
+            {"name": "🗺️ Mapa",        "value": mapa,                              "inline": True},
+            {"name": "📍 Coordenadas", "value": coordenadas.strip() or "N/A",      "inline": False},
+            {"name": "🕒 Data",        "value": hora_br,                           "inline": True},
+            {"name": "📡 FTP",         "value": "✅ Enviado" if success else "⚠️ Pendente", "inline": True},
+        ]
+
+        for _wh in _webhooks_cfg:
+            if not _wh.get("ativo", True):
+                continue
+            if "compra_loja" not in _wh.get("eventos", []):
+                continue
+
+            _url = _wh.get("url", "").strip()
+            if not _url:
+                continue
+
+            _payload = {
+                "embeds": [{
+                    "title": "🛒 Nova Compra na Loja",
+                    "description": (
+                        f"**{gamertag}** realizou uma compra na "
+                        f"Loja Virtual do servidor."
+                    ),
+                    "color": 0xFFD700,
+                    "fields": [
+                        {
+                            "name": c["name"],
+                            "value": c["value"],
+                            "inline": c.get("inline", True),
+                        }
+                        for c in _wh_campos
+                    ],
+                    "footer": {"text": "Titan Cloud PRO • Loja Virtual"},
+                    "timestamp": datetime.now(FUSO_BR).isoformat(),
+                }]
+            }
+
+            try:
+                requests.post(_url, json=_payload, timeout=5)
+            except Exception as _e:
+                print(f"[Webhook Loja] Erro ao enviar para '{_wh.get('nome', '?')}': {_e}")
+
+    except Exception as _e:
+        print(f"[Webhook Loja] Erro geral: {_e}")
+
+    # Retorno final
     if success:
         clients_db[server_id] = client_data
         return True, "Pedido registrado e arquivo enviado via FTP."
