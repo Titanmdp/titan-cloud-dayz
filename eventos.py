@@ -508,7 +508,7 @@ def proworker():
             now = get_hora_brasilia()
             db_all = load_db(DB_CLIENTS, {})
             mudou = False
-            forfor cid, cinfo in db_all.items():
+            for cid, cinfo in db_all.items():
                 # --- TRAVA DE SEGURANÇA (GRC/GOVERNANÇA) ---
                 # Se o administrador desativar "Baixar Logs Servidor", o worker ignora este cliente
                 if not cinfo.get("feeds_config", {}).get("baixar_logs", True):
