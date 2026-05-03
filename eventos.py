@@ -5801,7 +5801,7 @@ with tab_planos:
                     {pro_badge}
                     <div style="font-size:28px; margin-top:8px;">⭐</div>
                     <div style="font-size:18px; font-weight:bold; color:#00d4ff; margin:8px 0 4px;">Pro</div>
-                    <div style="font-size:26px; font-weight:bold; color:#ffffff; margin-bottom:4px;">R$ 49,90</div>
+                    <div style="font-size:26px; font-weight:bold; color:#ffffff; margin-bottom:4px;">R$ 49,99</div>
                     <div style="font-size:11px; color:#666; margin-bottom:16px;">por mês</div>
                     <hr style="border-color:#333; margin-bottom:16px;">
                     <div style="font-size:12px; color:#d6e2f0; text-align:left; line-height:2;">
@@ -5828,7 +5828,7 @@ with tab_planos:
                     {enterprise_badge}
                     <div style="font-size:28px; margin-top:8px;">👑</div>
                     <div style="font-size:18px; font-weight:bold; color:#FFD700; margin:8px 0 4px;">Enterprise</div>
-                    <div style="font-size:26px; font-weight:bold; color:#ffffff; margin-bottom:4px;">R$ 59,90</div>
+                    <div style="font-size:26px; font-weight:bold; color:#ffffff; margin-bottom:4px;">R$ 59,99</div>
                     <div style="font-size:11px; color:#666; margin-bottom:16px;">por mês</div>
                     <hr style="border-color:#333; margin-bottom:16px;">
                     <div style="font-size:12px; color:#d6e2f0; text-align:left; line-height:2;">
