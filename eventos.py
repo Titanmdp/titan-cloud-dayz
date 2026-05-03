@@ -2389,6 +2389,8 @@ if st.session_state.get("role") == "admin":
 else:
     user_id = st.session_state.user_key
 
+client_data = st.session_state.db_clients[user_id]
+
 # --- PASSO 2: INICIALIZAÇÃO DA ESTRUTURA DE FEEDS (GRC/GOVERNANÇA) ---
 if "feeds_config" not in client_data:
     client_data["feeds_config"] = {
@@ -2412,7 +2414,6 @@ if "tracking_acoes" not in client_data:
     client_data["tracking_acoes"] = {} 
     save_db(DB_CLIENTS, st.session_state.db_clients)[cite: 1]
 
-client_data = st.session_state.db_clients[user_id]
 # Sempre relê do disco para garantir que alterações do admin sejam refletidas
 _db_users_fresh = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
 
