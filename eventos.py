@@ -2412,7 +2412,7 @@ if "feeds_config" not in client_data:
 # --- PASSO 7: ESTRUTURA PARA DETECÇÃO DE SPAM DE OBJETOS (GRC) ---[cite: 1]
 if "tracking_acoes" not in client_data:
     client_data["tracking_acoes"] = {} 
-    save_db(DB_CLIENTS, st.session_state.db_clients)[cite: 1]
+    save_db(DB_CLIENTS, st.session_state.db_clients)
 
 # Sempre relê do disco para garantir que alterações do admin sejam refletidas
 _db_users_fresh = load_db(DB_USERS, {"admin_key": "ALEX_ADMIN", "keys": {}})
