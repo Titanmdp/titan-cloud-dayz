@@ -154,7 +154,11 @@ CFGGAMEPLAY_REMOTE_PATHS = {
 }
 
 # --- BANCO DE DADOS (JSON) / UPLOADS ---
-UPLOAD_DIR = "uploads"
+if os.path.exists("/var/data"):
+    UPLOAD_DIR = "/var/data/uploads"
+else:
+    UPLOAD_DIR = "uploads"
+
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
@@ -187,12 +191,11 @@ def buscar_localizacao_cliente():
 def manter_vivo():
     while True:
         try:
-            url = "https://titan-cloud-dayz.onrender.com"
+            url = "https://titan-cloud-dayz-dev.onrender.com"
             requests.get(url, timeout=10)
         except Exception:
             pass
         time.sleep(600)
-
 
 threading.Thread(target=manter_vivo, daemon=True).start()
 
@@ -2666,7 +2669,14 @@ if st.session_state.get("role") == "admin":
 else:
     user_id = st.session_state.user_key
 
+if user_id not in st.session_state.db_clients:
+    st.session_state.db_clients[user_id] = {}
 client_data = st.session_state.db_clients[user_id]
+
+# --- PASSO 1: INICIALIZAÇÃO DA ESTRUTURA FTP ---
+if "ftp" not in client_data:
+    client_data["ftp"] = {"host": "", "user": "", "pass": "", "port": "21"}
+    save_db(DB_CLIENTS, st.session_state.db_clients)
 
 # --- PASSO 2: INICIALIZAÇÃO DA ESTRUTURA DE FEEDS (GRC/GOVERNANÇA) ---
 if "feeds_config" not in client_data:
@@ -2683,7 +2693,6 @@ if "feeds_config" not in client_data:
         "mod_pve": False,
         "zona_pvp": False
     }
-    # Salva imediatamente para garantir a integridade do JSON
     save_db(DB_CLIENTS, st.session_state.db_clients)
     
 # --- PASSO 7: ESTRUTURA PARA DETECÇÃO DE SPAM DE OBJETOS (GRC) ---
@@ -2850,17 +2859,21 @@ with st.sidebar:
     st.divider()
 
     st.subheader("⚙️ Configurações FTP")
+
+    if "ftp" not in client_data:
+        client_data["ftp"] = {"host": "", "user": "", "pass": "", "port": "21"}
+
     client_data["ftp"]["host"] = st.text_input(
-        "Host", value=client_data["ftp"]["host"], key="f_host_main"
+        "Host", value=client_data.get("ftp", {}).get("host", ""), key="f_host_main"
     )
     client_data["ftp"]["user"] = st.text_input(
-        "Usuário", value=client_data["ftp"]["user"], key="f_user_main"
+        "Usuário", value=client_data.get("ftp", {}).get("user", ""), key="f_user_main"
     )
     client_data["ftp"]["pass"] = st.text_input(
-        "Senha", type="password", value=client_data["ftp"]["pass"], key="f_pass_main"
+        "Senha", type="password", value=client_data.get("ftp", {}).get("pass", ""), key="f_pass_main"
     )
     client_data["ftp"]["port"] = st.text_input(
-        "Porta", value=client_data["ftp"]["port"], key="f_port_main"
+        "Porta", value=client_data.get("ftp", {}).get("port", "21"), key="f_port_main"
     )
 
     col_f1, col_f2 = st.columns(2)
@@ -5332,7 +5345,6 @@ with tab8:
 
     if not players:
         st.warning("Nenhum jogador vinculado ainda. Use a aba 'Jogadores / Vínculos'.")
-        st.stop()
 
     lista_gamertags = sorted(players.keys())
     gamertag_sel = st.selectbox("Jogador", lista_gamertags)
