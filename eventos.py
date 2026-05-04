@@ -3023,6 +3023,9 @@ with tab1:
                         "status": "Aguardando",
                     }
 
+                    if "agendas" not in client_data:
+                        client_data["agendas"] = []
+
                     client_data["agendas"].append(nova_agenda)
                     save_db(DB_CLIENTS, st.session_state.db_clients)
                     registrar_log(
