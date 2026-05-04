@@ -529,7 +529,7 @@ def apply_df_to_types_xml(tree, root, df):
     return header + xmlbytes
 
 
-def dispararftpproc(clientid, acao, filename, localpath, remote_dir):
+def dispararftppro(clientid, acao, filename, localpath, remote_dir):
     """
     Faz UPLOAD ou DELETE de um arquivo agendado no FTP do cliente.
     Retorna: (ok: bool, msg: str)
