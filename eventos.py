@@ -2768,8 +2768,8 @@ with st.sidebar:
     st.write(f"Servidor: **{user_info['server']}**")
 
     st.divider()
-        st.page_link("pages/player_portal.py", label="🎮 Portal do Jogador", use_container_width=True)
-        st.divider()
+    st.page_link("pages/player_portal.py", label="🎮 Portal do Jogador", use_container_width=True)
+    st.divider()
 
     # --- Badge do plano ---
     cor_plano = (
