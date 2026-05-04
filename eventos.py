@@ -2851,17 +2851,21 @@ with st.sidebar:
     st.divider()
 
     st.subheader("⚙️ Configurações FTP")
+
+    if "ftp" not in client_data:
+        client_data["ftp"] = {"host": "", "user": "", "pass": "", "port": "21"}
+
     client_data["ftp"]["host"] = st.text_input(
-        "Host", value=client_data["ftp"]["host"], key="f_host_main"
+        "Host", value=client_data.get("ftp", {}).get("host", ""), key="f_host_main"
     )
     client_data["ftp"]["user"] = st.text_input(
-        "Usuário", value=client_data["ftp"]["user"], key="f_user_main"
+        "Usuário", value=client_data.get("ftp", {}).get("user", ""), key="f_user_main"
     )
     client_data["ftp"]["pass"] = st.text_input(
-        "Senha", type="password", value=client_data["ftp"]["pass"], key="f_pass_main"
+        "Senha", type="password", value=client_data.get("ftp", {}).get("pass", ""), key="f_pass_main"
     )
     client_data["ftp"]["port"] = st.text_input(
-        "Porta", value=client_data["ftp"]["port"], key="f_port_main"
+        "Porta", value=client_data.get("ftp", {}).get("port", "21"), key="f_port_main"
     )
 
     col_f1, col_f2 = st.columns(2)
