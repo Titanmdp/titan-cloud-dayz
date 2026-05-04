@@ -12,6 +12,8 @@ from ftplib import FTP
 from functools import lru_cache
 from pathlib import Path
 
+st.session_state["_is_player_portal"] = True
+
 # Import seguro da função de FTP
 try:
     from ftp_utils import enviar_pedidos_via_ftp
