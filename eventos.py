@@ -218,19 +218,16 @@ def load_db(file, default_data):
 
 
 def save_db(file, data):
-    with db_lock:  # ADICIONAR ESTA LINHA
+    with db_lock:
         if data is None:
             return
-
-    try:
-        # Cria backup antes de sobrescrever, se existir
-        if os.path.exists(file):
-            shutil.copy(file, file + ".bak")
-
-        with open(file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-    except Exception as e:
-        st.error(f"Erro ao salvar banco de dados: {e}")
+        try:
+            if os.path.exists(file):
+                shutil.copy(file, file + ".bak")
+            with open(file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"Erro ao salvar banco de dados: {e}")
 
 
 def enviar_email(destino, assunto, mensagem):
@@ -989,6 +986,8 @@ def start_worker_once():
         WORKER_STARTED = True
         threading.Thread(target=proworker, daemon=True).start()
         threading.Thread(target=worker_dzcoins_automatico, daemon=True).start()
+        
+start_worker_once()
 
 # ---------- HELPER GESTÃO DE PEDIDOS (ADMIN SERVIDOR) ----------
 def render_gestao_pedidos(client_data, server_id):
