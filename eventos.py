@@ -1036,8 +1036,6 @@ def start_worker_once():
         threading.Thread(target=proworker, daemon=True).start()
         threading.Thread(target=worker_dzcoins_automatico, daemon=True).start()
         print("[Titan] Workers iniciados com sucesso.")
-        
-start_worker_once()
 
 # ---------- HELPER GESTÃO DE PEDIDOS (ADMIN SERVIDOR) ----------
 def render_gestao_pedidos(client_data, server_id):
@@ -1809,7 +1807,7 @@ def worker_processar_pedidos():
         except Exception as e:
             print(f"Erro no worker de pedidos: {e}")
         
-        time.sleep(30)
+        time.sleep(15)
 
 # ---------- HELPERS GLOBALS.XML (AMBIENTE) ----------
 
@@ -5919,3 +5917,5 @@ with tab_planos:
         </div>
     """.format(starter_border=starter_border, starter_badge=starter_badge, pro_border=pro_border, pro_badge=pro_badge, enterprise_border=enterprise_border, enterprise_badge=enterprise_badge)
     st.markdown(html, unsafe_allow_html=True)
+
+start_worker_once()
