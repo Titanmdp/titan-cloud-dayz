@@ -979,11 +979,9 @@ def proworker():
         time.sleep(15)
 
 
-WORKER_STARTED = False
 def start_worker_once():
-    global WORKER_STARTED
-    if not WORKER_STARTED:
-        WORKER_STARTED = True
+    if "WORKER_STARTED" not in st.session_state:
+        st.session_state["WORKER_STARTED"] = True
         threading.Thread(target=proworker, daemon=True).start()
         threading.Thread(target=worker_dzcoins_automatico, daemon=True).start()
         
