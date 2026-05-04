@@ -154,11 +154,7 @@ CFGGAMEPLAY_REMOTE_PATHS = {
 }
 
 # --- BANCO DE DADOS (JSON) / UPLOADS ---
-if os.path.exists("/var/data"):
-    UPLOAD_DIR = "/var/data/uploads"
-else:
-    UPLOAD_DIR = "uploads"
-
+UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
@@ -191,7 +187,7 @@ def buscar_localizacao_cliente():
 def manter_vivo():
     while True:
         try:
-            url = "https://titan-cloud-dayz-dev.onrender.com"
+            url = "https://titan-cloud-dayz-prd.onrender.com"
             requests.get(url, timeout=10)
         except Exception:
             pass
@@ -222,19 +218,16 @@ def load_db(file, default_data):
 
 
 def save_db(file, data):
-    with db_lock:  # ADICIONAR ESTA LINHA
+    with db_lock:
         if data is None:
             return
-
-    try:
-        # Cria backup antes de sobrescrever, se existir
-        if os.path.exists(file):
-            shutil.copy(file, file + ".bak")
-
-        with open(file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-    except Exception as e:
-        st.error(f"Erro ao salvar banco de dados: {e}")
+        try:
+            if os.path.exists(file):
+                shutil.copy(file, file + ".bak")
+            with open(file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"Erro ao salvar banco de dados: {e}")
 
 
 def enviar_email(destino, assunto, mensagem):
@@ -993,6 +986,8 @@ def start_worker_once():
         WORKER_STARTED = True
         threading.Thread(target=proworker, daemon=True).start()
         threading.Thread(target=worker_dzcoins_automatico, daemon=True).start()
+        
+start_worker_once()
 
 # ---------- HELPER GESTÃO DE PEDIDOS (ADMIN SERVIDOR) ----------
 def render_gestao_pedidos(client_data, server_id):
@@ -2000,7 +1995,6 @@ if not st.session_state.get("authenticated"):
             st.info(f"Um código será enviado para: **{admin_email_rec[:3]}***@{admin_email_rec.split('@')[-1]}")
             if st.button("📧 Enviar código de recuperação", use_container_width=True):
                 import random
-                # Bloqueia novo envio se já foi enviado há menos de 2 minutos
                 ultimo_envio = db_users_rec.get("mfa_last_sent", "")
                 if ultimo_envio:
                     try:
@@ -2127,6 +2121,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
         if st.button("🚀 Usar Sistema (Modo Teste)", use_container_width=True):
             st.session_state.view_mode = "client"
             st.rerun()
+        st.page_link("pages/player_portal.py", label="🎮 Portal do Jogador", use_container_width=True)
         if st.button("🔴 Logout (Admin)", use_container_width=True):
             for k in ["authenticated", "role", "view_mode", "user_key", "session_token"]:
                 st.session_state.pop(k, None)
@@ -2765,6 +2760,10 @@ with st.sidebar:
 
     st.write(f"Servidor: **{user_info['server']}**")
 
+    st.divider()
+    st.page_link("pages/player_portal.py", label="🎮 Portal do Jogador", use_container_width=True)
+    st.divider()
+
     # --- Badge do plano ---
     cor_plano = (
         "#FFD700" if plano_atual == "Enterprise"
@@ -3022,6 +3021,9 @@ with tab1:
                         "rec": rec,
                         "status": "Aguardando",
                     }
+
+                    if "agendas" not in client_data:
+                        client_data["agendas"] = []
 
                     client_data["agendas"].append(nova_agenda)
                     save_db(DB_CLIENTS, st.session_state.db_clients)
