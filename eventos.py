@@ -5341,7 +5341,6 @@ with tab8:
 
     if not players:
         st.warning("Nenhum jogador vinculado ainda. Use a aba 'Jogadores / Vínculos'.")
-        st.stop()
 
     lista_gamertags = sorted(players.keys())
     gamertag_sel = st.selectbox("Jogador", lista_gamertags)
