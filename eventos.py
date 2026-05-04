@@ -1980,10 +1980,6 @@ with st.sidebar:
 # 5. TELA DE LOGIN (APENAS PARA PORTAL DO ADMIN)
 # =========================================================
 
-# Libera acesso direto ao player_portal sem autenticação
-if st.session_state.get("_is_player_portal"):
-    st.stop()
-
 if not st.session_state.get("authenticated"):
     st.title("🔑 Titan Cloud - Login (Admin)")
 
