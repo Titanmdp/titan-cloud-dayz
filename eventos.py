@@ -2128,6 +2128,12 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                 st.session_state.pop(k, None)
             st.rerun()
 
+        st.page_link("pages/player_portal.py", label="🎮 Portal do Jogador", use_container_width=True)
+        if st.button("🔴 Logout (Admin)", use_container_width=True):
+            for k in ["authenticated", "role", "view_mode", "user_key", "session_token"]:
+                st.session_state.pop(k, None)
+            st.rerun()
+
     st.title("🛡️ Painel de Controle - Administrador")
 
     # -------------------------------------------------------
@@ -2760,6 +2766,10 @@ with st.sidebar:
             st.rerun()
 
     st.write(f"Servidor: **{user_info['server']}**")
+
+    st.divider()
+        st.page_link("pages/player_portal.py", label="🎮 Portal do Jogador", use_container_width=True)
+        st.divider()
 
     # --- Badge do plano ---
     cor_plano = (
