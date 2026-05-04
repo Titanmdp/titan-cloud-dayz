@@ -1980,6 +1980,10 @@ with st.sidebar:
 # 5. TELA DE LOGIN (APENAS PARA PORTAL DO ADMIN)
 # =========================================================
 
+# Libera acesso direto ao player_portal sem autenticação
+if st.session_state.get("_is_player_portal"):
+    st.stop()
+
 if not st.session_state.get("authenticated"):
     st.title("🔑 Titan Cloud - Login (Admin)")
 
@@ -1996,7 +2000,6 @@ if not st.session_state.get("authenticated"):
             st.info(f"Um código será enviado para: **{admin_email_rec[:3]}***@{admin_email_rec.split('@')[-1]}")
             if st.button("📧 Enviar código de recuperação", use_container_width=True):
                 import random
-                # Bloqueia novo envio se já foi enviado há menos de 2 minutos
                 ultimo_envio = db_users_rec.get("mfa_last_sent", "")
                 if ultimo_envio:
                     try:
