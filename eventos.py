@@ -45,8 +45,6 @@ else:
 # --- CONFIGURAÇÃO DA PÁGINA (antes de qualquer sidebar) ---
 st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
 
-start_worker_once()
-
 if IS_DEV:
     st.sidebar.warning("🚧 AMBIENTE DE TESTES (DEV)")
     st.sidebar.warning("⚠️ AMBIENTE DE DESENVOLVIMENTO (TESTES)")
