@@ -2123,15 +2123,23 @@ if not st.session_state.get("authenticated"):
 if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
     with st.sidebar:
         st.subheader("🛡️ Menu Admin")
-        if st.button("🚀 Usar Sistema (Modo Teste)", use_container_width=True):
+        
+        # Seletor de modo
+        modo_selecionado = st.selectbox(
+            "Selecione o Modo:",
+            ["Admin (Eventos)", "Client (Sistema)"],
+            index=0 if st.session_state.view_mode == "admin" else 1,
+            key="modo_selector"
+        )
+        if modo_selecionado == "Client (Sistema)" and st.session_state.view_mode == "admin":
             st.session_state.view_mode = "client"
             st.rerun()
-        if st.button("🔴 Logout (Admin)", use_container_width=True):
-            for k in ["authenticated", "role", "view_mode", "user_key", "session_token"]:
-                st.session_state.pop(k, None)
+        elif modo_selecionado == "Admin (Eventos)" and st.session_state.view_mode == "client":
+            st.session_state.view_mode = "admin"
             st.rerun()
-
+        
         st.page_link("pages/player_portal.py", label="🎮 Portal do Jogador", use_container_width=True)
+        
         if st.button("🔴 Logout (Admin)", use_container_width=True):
             for k in ["authenticated", "role", "view_mode", "user_key", "session_token"]:
                 st.session_state.pop(k, None)
