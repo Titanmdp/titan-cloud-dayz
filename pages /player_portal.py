@@ -12,7 +12,12 @@ from ftplib import FTP
 from functools import lru_cache
 from pathlib import Path
 
-st.session_state["_is_player_portal"] = True
+# set_page_config DEVE ser a primeira chamada Streamlit do arquivo
+st.set_page_config(
+    page_title="Titan Cloud Pro - Portal do Jogador",
+    page_icon="🎮",
+    layout="wide",
+)
 
 # Import seguro da função de FTP
 try:
@@ -2469,12 +2474,6 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
 # =========================================================
 
 def main():
-    st.set_page_config(
-        page_title="Titan Cloud Pro - Portal do Jogador",
-        page_icon="🎮",
-        layout="wide",
-    )
-
     # --- TEMA ---
     if "portal_tema" not in st.session_state:
         st.session_state.portal_tema = "dark"
