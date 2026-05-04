@@ -45,6 +45,8 @@ else:
 # --- CONFIGURAÇÃO DA PÁGINA (antes de qualquer sidebar) ---
 st.set_page_config(page_title="Titan Cloud PRO", layout="wide", page_icon="🚀")
 
+startworkeronce()
+
 if IS_DEV:
     st.sidebar.warning("🚧 AMBIENTE DE TESTES (DEV)")
     st.sidebar.warning("⚠️ AMBIENTE DE DESENVOLVIMENTO (TESTES)")
@@ -529,29 +531,56 @@ def apply_df_to_types_xml(tree, root, df):
     return header + xmlbytes
 
 
-def dispararftppro(clientid, acao, filename, localpath, mapapath):
+def dispararftpproc(clientid, acao, filename, localpath, remote_dir):
+    """
+    Faz UPLOAD ou DELETE de um arquivo agendado no FTP do cliente.
+    Retorna: (ok: bool, msg: str)
+    """
     dbatual = load_db(DB_CLIENTS, {})
     if clientid not in dbatual:
-        return False, "Erro"
+        return False, "Cliente não encontrado no banco"
 
-    conf = dbatual[clientid]["ftp"]
+    conf = dbatual[clientid].get("ftp", {})
+    host = conf.get("host", "").strip()
+    user = conf.get("user", "").strip()
+    pwd = conf.get("pass", "").strip()
+    port = int(conf.get("port", 21) or 21)
+
+    if not host or not user or not pwd:
+        return False, "Configuração FTP incompleta"
+
     try:
         ftp = ftplib.FTP()
-        ftp.connect(conf["host"], int(conf["port"]), timeout=15)
-        ftp.login(conf["user"], conf["pass"])
-        ftp.cwd(mapapath)
+        ftp.connect(host, port, timeout=20)
+        ftp.login(user, pwd)
+
+        if remote_dir:
+            ftp.cwd(remote_dir)
+
         if acao == "UPLOAD":
+            if not os.path.exists(localpath):
+                return False, f"Arquivo local não encontrado: {localpath}"
+
             with open(localpath, "rb") as f:
                 ftp.storbinary(f"STOR {filename}", f)
+
+            ftp.quit()
+            return True, f"UPLOAD concluído em {remote_dir}/{filename}"
+
         elif acao == "DELETE":
+            ftp.delete(filename)
+            ftp.quit()
+            return True, f"DELETE concluído em {remote_dir}/{filename}"
+
+        else:
             try:
-                ftp.delete(filename)
+                ftp.quit()
             except Exception:
                 pass
-        ftp.quit()
-        return True, "Sucesso"
-    except Exception:
-        return False, "Erro"
+            return False, f"Ação inválida: {acao}"
+
+    except Exception as e:
+        return False, f"Erro FTP [{acao}] {filename}: {str(e)}"
 
 def worker_dzcoins_automatico():
     """
@@ -789,39 +818,63 @@ def proworker():
 
                 # --- 1. LÓGICA DE AGENDAS DE ARQUIVOS (EXISTENTE) ---
                 for ag in cinfo.get("agendas", []):
-                    hora_entrada = str_to_time(ag.get("data"), ag.get("in"))
-                    hora_saida = str_to_time(ag.get("data"), ag.get("out"))
-                    
-                    if hora_entrada and now >= hora_entrada and ag.get("status") == "Aguardando":
-                        if not os.path.exists(ag["localpath"]) and ag.get("filecontent"):
-                            try:
-                                os.makedirs(os.path.dirname(ag["localpath"]), exist_ok=True)
-                                with open(ag["localpath"], "wb") as f:
-                                    f.write(base64.b64decode(ag["filecontent"]))
-                            except Exception as e:
-                                print("Erro ao recriar arquivo:", e)
-                        
-                        if not os.path.exists(ag["localpath"]):
+                    try:
+                        hora_entrada = str_to_time(ag.get("data"), ag.get("in"))
+                        hora_saida = str_to_time(ag.get("data"), ag.get("out"))
+                        status_atual = ag.get("status", "Aguardando")
+                        nome_arquivo = ag.get("file", "arquivo_desconhecido")
+                        caminho_local = ag.get("localpath", "")
+                        caminho_remoto = ag.get("path", "")
+
+                        if not hora_entrada:
                             ag["status"] = "Erro"
-                            registrar_log(cid, f"Arquivo perdido: {ag['file']}", "erro")
+                            registrar_log(cid, f"Agenda inválida: data/entrada incorreta para {nome_arquivo}", "erro")
                             mudou = True
-                        else:
-                            ok, msg = dispararftppro(cid, "UPLOAD", ag["file"], ag["localpath"], ag["path"])
-                            ag["status"] = "Ativo" if ok else "Erro"
-                            registrar_log(cid, f"UPLOAD {ag['file']} {'OK' if ok else msg}", "sucesso" if ok else "erro")
+                            continue
+
+                        if status_atual == "Aguardando" and now >= hora_entrada:
+                            if not os.path.exists(caminho_local) and ag.get("filecontent"):
+                                try:
+                                    os.makedirs(os.path.dirname(caminho_local), exist_ok=True)
+                                    with open(caminho_local, "wb") as f:
+                                        f.write(base64.b64decode(ag["filecontent"]))
+                                    registrar_log(cid, f"Arquivo recriado localmente: {nome_arquivo}", "info")
+                                except Exception as e:
+                                    ag["status"] = "Erro"
+                                    registrar_log(cid, f"Falha ao recriar arquivo {nome_arquivo}: {e}", "erro")
+                                    mudou = True
+                                    continue
+
+                            if not os.path.exists(caminho_local):
+                                ag["status"] = "Erro"
+                                registrar_log(cid, f"Arquivo perdido: {nome_arquivo}", "erro")
+                                mudou = True
+                            else:
+                                registrar_log(cid, f"Iniciando UPLOAD agendado: {nome_arquivo}", "info")
+                                ok, msg = dispararftppro(cid, "UPLOAD", nome_arquivo, caminho_local, caminho_remoto)
+                                ag["status"] = "Ativo" if ok else "Erro"
+                                registrar_log(cid, f"UPLOAD {nome_arquivo} {'OK' if ok else msg}", "sucesso" if ok else "erro")
+                                mudou = True
+
+                        if hora_saida and now >= hora_saida and ag.get("status") == "Ativo":
+                            registrar_log(cid, f"Iniciando DELETE agendado: {nome_arquivo}", "info")
+                            ok, msg = dispararftppro(cid, "DELETE", nome_arquivo, caminho_local, caminho_remoto)
+                            registrar_log(cid, f"DELETE {nome_arquivo} {'OK' if ok else msg}", "sucesso" if ok else "erro")
+
+                            if ag.get("rec") == "Diário":
+                                ag["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
+                                ag["status"] = "Aguardando"
+                            elif ag.get("rec") == "Semanal":
+                                ag["data"] = (now + timedelta(days=7)).strftime("%d/%m/%Y")
+                                ag["status"] = "Aguardando"
+                            else:
+                                ag["status"] = "Finalizado"
+
                             mudou = True
 
-                    if hora_saida and now >= hora_saida and ag.get("status") == "Ativo":
-                        ok, msg = dispararftppro(cid, "DELETE", ag["file"], ag["localpath"], ag["path"])
-                        registrar_log(cid, f"DELETE {ag['file']} {'OK' if ok else msg}", "sucesso" if ok else "erro")
-                        if ag.get("rec") == "Diário":
-                            ag["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
-                            ag["status"] = "Aguardando"
-                        elif ag.get("rec") == "Semanal":
-                            ag["data"] = (now + timedelta(days=7)).strftime("%d/%m/%Y")
-                            ag["status"] = "Aguardando"
-                        else:
-                            ag["status"] = "Finalizado"
+                    except Exception as e:
+                        ag["status"] = "Erro"
+                        registrar_log(cid, f"Erro interno no worker da agenda {ag.get('file', '?')}: {e}", "erro")
                         mudou = True
 
                 # --- 2. NOVA LÓGICA: AGENDAS DE RAID AUTOMÁTICO ---
@@ -984,6 +1037,7 @@ def start_worker_once():
         st.session_state["WORKER_STARTED"] = True
         threading.Thread(target=proworker, daemon=True).start()
         threading.Thread(target=worker_dzcoins_automatico, daemon=True).start()
+        print("[Titan] Workers iniciados com sucesso.")
         
 start_worker_once()
 
@@ -5867,8 +5921,3 @@ with tab_planos:
         </div>
     """.format(starter_border=starter_border, starter_badge=starter_badge, pro_border=pro_border, pro_badge=pro_badge, enterprise_border=enterprise_border, enterprise_badge=enterprise_badge)
     st.markdown(html, unsafe_allow_html=True)
-
-# --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
-if "worker_started" not in st.session_state:
-    threading.Thread(target=proworker, daemon=True).start()
-    st.session_state["worker_started"] = True
