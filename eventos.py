@@ -811,7 +811,9 @@ def proworker():
             for cid, cinfo in db_all.items():
                 # --- TRAVA DE SEGURANÇA (GRC/GOVERNANÇA) ---
                 # Se o administrador desativar "Baixar Logs Servidor", o worker ignora este cliente
-                if not cinfo.get("feeds_config", {}).get("baixar_logs", True):
+                baixar_logs = cinfo.get("feeds_config", {}).get("baixar_logs", True)
+                registrar_log(cid, f"Worker verificando cliente {cid}, baixar_logs={baixar_logs}", "info")
+                if not baixar_logs:
                     continue 
 
                 # --- 1. LÓGICA DE AGENDAS DE ARQUIVOS (EXISTENTE) ---
@@ -829,6 +831,9 @@ def proworker():
                             registrar_log(cid, f"Agenda inválida: data/entrada incorreta para {nome_arquivo}", "erro")
                             mudou = True
                             continue
+
+                        # DEBUG: Log para verificar se o worker está checando o agendamento
+                        registrar_log(cid, f"Verificando agenda: {nome_arquivo}, status={status_atual}, now={now}, hora_entrada={hora_entrada}, condição={now >= hora_entrada}", "info")
 
                         if status_atual == "Aguardando" and now >= hora_entrada:
                             if not os.path.exists(caminho_local) and ag.get("filecontent"):
@@ -1036,6 +1041,7 @@ def start_worker_once():
         threading.Thread(target=proworker, daemon=True).start()
         threading.Thread(target=worker_dzcoins_automatico, daemon=True).start()
         print("[Titan] Workers iniciados com sucesso.")
+        registrar_log("SYSTEM", "Workers iniciados com sucesso", "info")
 
 # ---------- HELPER GESTÃO DE PEDIDOS (ADMIN SERVIDOR) ----------
 def render_gestao_pedidos(client_data, server_id):
@@ -3044,6 +3050,19 @@ with tab1:
                 key=f"conf_btn_main_{user_id}",
             ):
                 if arquivo_em_sessao:
+                    # Validar se a data/hora é no futuro
+                    try:
+                        hora_agendada = datetime.strptime(f"{dt_ev.strftime('%d/%m/%Y')} {h_in}", "%d/%m/%Y %H:%M").replace(tzinfo=FUSO_BR)
+                        now = get_hora_brasilia()
+                        if hora_agendada <= now:
+                            st.error("A data e horário de entrada deve ser no futuro.")
+                            st.stop()
+                    except Exception as e:
+                        st.error(f"Formato de data/hora inválido: {e}")
+                        st.stop()
+
+                    safe_fn = f"{user_id[:5]}_{arquivo_em_sessao['name']}"
+                    path = os.path.join(UPLOAD_DIR, safe_fn)
                     safe_fn = f"{user_id[:5]}_{arquivo_em_sessao['name']}"
                     path = os.path.join(UPLOAD_DIR, safe_fn)
 
