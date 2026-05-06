@@ -3164,7 +3164,7 @@ with st.sidebar:
 st.title(f"🎮 {user_info['server']}")
 
 # Inclusão da "⚙️ Feeds / Bot" entre "🏦 Banco / Carteira" e "💎 Planos"
-tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab_raid, tab6, tab7, tab_analytics, tab8, tab_feeds, tab_planos = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab_raid, tab6, tab7, tab_analytics, tab_ranking, tab8, tab_feeds, tab_planos = st.tabs([
     "📅 Eventos Agendados", 
     "📋 Histórico Logs", 
     "📢 Comunicados", 
@@ -3178,6 +3178,7 @@ tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeven
     "🛒 Loja / Trader", 
     "👥 Jogadores", 
     "📊 Analytics",
+    "🏆 Ranking",
     "🏦 Banco / Carteira", 
     "⚙️ Feeds / Bot",
     "💎 Planos",
@@ -5408,6 +5409,174 @@ with tab_analytics:
         render_heatmap(client_data)
     else:
         st.warning("⚠️ O Mapa de Calor está desativado nas configurações de Feeds (Aba ⚙️ Feeds / Bot).")
+
+
+with tab_ranking:
+    st.header("🏆 Configuração do Ranking")
+    st.caption("Defina o período, modo de exibição e gerencie o ranking do seu servidor.")
+
+    clients_data_rk = load_db(DB_CLIENTS, {})
+    client_data_rk  = clients_data_rk.get(server_id, client_data)
+
+    rk_cfg = client_data_rk.get("ranking_config", {
+        "ativo": True,
+        "data_inicial": "",
+        "modo_exibicao": "cumulativo",
+        "tipo_janela": "temporada",
+        "permitir_reprocessamento": True,
+        "ultima_reconfiguracao": "",
+    })
+    rk_stats = client_data_rk.get("ranking_stats", {
+        "ultima_atualizacao": "",
+        "periodo_atual": "",
+        "acumulado": {},
+        "diario": {},
+        "semanal": {},
+        "mensal": {},
+    })
+
+    # ── Status atual ──────────────────────────────────────────────
+    st.markdown("### 📋 Status Atual")
+    sc1, sc2, sc3 = st.columns(3)
+    with sc1:
+        st.metric("Status", "✅ Ativo" if rk_cfg.get("ativo", True) else "⏸️ Pausado")
+    with sc2:
+        st.metric("Última atualização", rk_stats.get("ultima_atualizacao", "Nunca") or "Nunca")
+    with sc3:
+        st.metric("Período atual", rk_stats.get("periodo_atual", "—") or "—")
+
+    ultima_reconfig = rk_cfg.get("ultima_reconfiguracao", "")
+    if ultima_reconfig:
+        st.caption(f"⏱️ Última reconfiguração: {ultima_reconfig}")
+
+    st.divider()
+
+    # ── Formulário de configuração ────────────────────────────────
+    st.markdown("### ⚙️ Configurações do Período")
+
+    cfg_col1, cfg_col2 = st.columns(2)
+
+    with cfg_col1:
+        rk_ativo = st.toggle(
+            "✅ Ranking ativo",
+            value=rk_cfg.get("ativo", True),
+            key="rk_ativo_toggle",
+            help="Desative para pausar o processamento do ranking sem apagar os dados.",
+        )
+
+        modo_opcoes   = ["cumulativo", "janela"]
+        modo_labels   = {"cumulativo": "📈 Cumulativo (desde a data inicial)", "janela": "🪟 Por Janela (período fixo)"}
+        modo_atual    = rk_cfg.get("modo_exibicao", "cumulativo")
+        modo_idx      = modo_opcoes.index(modo_atual) if modo_atual in modo_opcoes else 0
+        rk_modo       = st.selectbox(
+            "Modo de exibição",
+            options=modo_opcoes,
+            index=modo_idx,
+            format_func=lambda x: modo_labels[x],
+            key="rk_modo_select",
+            help="Cumulativo: acumula tudo desde a data inicial.\nPor Janela: reinicia a cada período.",
+        )
+
+    with cfg_col2:
+        import datetime as _dt
+        data_str   = rk_cfg.get("data_inicial", "")
+        try:
+            data_val = _dt.datetime.strptime(data_str, "%d/%m/%Y").date() if data_str else _dt.date.today()
+        except ValueError:
+            data_val = _dt.date.today()
+
+        rk_data_inicial = st.date_input(
+            "📅 Data inicial do ranking",
+            value=data_val,
+            format="DD/MM/YYYY",
+            key="rk_data_inicial_input",
+            help="Kills e eventos anteriores a esta data são ignorados no ranking.",
+        )
+
+        janela_opcoes = ["temporada", "semanal", "mensal"]
+        janela_labels = {
+            "temporada": "🏁 Temporada (manual)",
+            "semanal":   "📆 Semanal (reinicia toda segunda)",
+            "mensal":    "🗓️ Mensal (reinicia todo dia 1)",
+        }
+        janela_atual = rk_cfg.get("tipo_janela", "temporada")
+        janela_idx   = janela_opcoes.index(janela_atual) if janela_atual in janela_opcoes else 0
+        rk_janela    = st.selectbox(
+            "Tipo de janela",
+            options=janela_opcoes,
+            index=janela_idx,
+            format_func=lambda x: janela_labels[x],
+            key="rk_janela_select",
+            disabled=(rk_modo == "cumulativo"),
+            help="Somente aplicável no modo Por Janela.",
+        )
+
+    rk_reprocess = st.toggle(
+        "🔄 Permitir reprocessamento manual",
+        value=rk_cfg.get("permitir_reprocessamento", True),
+        key="rk_reprocess_toggle",
+        help="Permite que o sistema reprocesse o ranking com base nos logs existentes ao salvar.",
+    )
+
+    st.divider()
+
+    # ── Botão salvar ──────────────────────────────────────────────
+    if st.button("💾 Salvar Configurações do Ranking", use_container_width=True, key="salvar_ranking_config"):
+        from datetime import datetime as _dtnow, timezone as _tz, timedelta as _td
+        _fuso_br = _tz(_td(hours=-3))
+        _agora   = _dtnow.now(_fuso_br).strftime("%d/%m/%Y %H:%M:%S")
+
+        client_data_rk["ranking_config"] = {
+            "ativo":                    rk_ativo,
+            "data_inicial":             rk_data_inicial.strftime("%d/%m/%Y"),
+            "modo_exibicao":            rk_modo,
+            "tipo_janela":              rk_janela,
+            "permitir_reprocessamento": rk_reprocess,
+            "ultima_reconfiguracao":    _agora,
+        }
+        clients_data_rk[server_id] = client_data_rk
+        save_db(DB_CLIENTS, clients_data_rk)
+        # Atualiza session_state para refletir imediatamente
+        st.session_state.db_clients = clients_data_rk
+        st.success(f"✅ Configurações do ranking salvas com sucesso! ({_agora})")
+        st.rerun()
+
+    st.divider()
+
+    # ── Visualização do ranking atual ─────────────────────────────
+    st.markdown("### 📊 Ranking Atual")
+
+    modo_vis = rk_cfg.get("modo_exibicao", "cumulativo")
+    if modo_vis == "cumulativo":
+        dados_rk = rk_stats.get("acumulado", {})
+        st.caption("Exibindo dados **cumulativos** desde a data inicial.")
+    else:
+        janela_vis = rk_cfg.get("tipo_janela", "temporada")
+        dados_rk   = rk_stats.get(janela_vis, rk_stats.get("acumulado", {}))
+        st.caption(f"Exibindo dados da janela **{janela_labels.get(janela_vis, janela_vis)}**.")
+
+    if dados_rk:
+        import pandas as _pd
+        ranking_list = []
+        for jogador, stats in dados_rk.items():
+            if isinstance(stats, dict):
+                ranking_list.append({
+                    "Jogador":  jogador,
+                    "Kills":    stats.get("kills", 0),
+                    "Mortes":   stats.get("deaths", 0),
+                    "K/D":      round(stats.get("kills", 0) / max(stats.get("deaths", 1), 1), 2),
+                    "XP":       stats.get("xp", 0),
+                })
+            else:
+                ranking_list.append({"Jogador": jogador, "Kills": int(stats), "Mortes": 0, "K/D": 0.0, "XP": 0})
+
+        ranking_list.sort(key=lambda x: x["Kills"], reverse=True)
+        for i, row in enumerate(ranking_list):
+            row["#"] = i + 1
+        df_rk = _pd.DataFrame(ranking_list)[["#", "Jogador", "Kills", "Mortes", "K/D", "XP"]]
+        st.dataframe(df_rk, use_container_width=True, hide_index=True)
+    else:
+        st.info("Nenhum dado de ranking disponível para o período configurado. Os dados são gerados automaticamente durante o processamento dos logs.")
 
 with tab8:
     st.subheader("🏦 Banco & Carteira")
