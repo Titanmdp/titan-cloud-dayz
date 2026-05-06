@@ -2660,8 +2660,9 @@ def main():
         }
         clients_db[server_id] = client_data
         save_db(DB_CLIENTS, clients_db)
-        server_nome = st.session_state.get("portal_server_nome", "Servidor")
-        nitrado_id = nitrado_id_map.get(server_id, server_id)
+
+    server_nome = st.session_state.get("portal_server_nome", "Servidor")
+    nitrado_id = nitrado_id_map.get(server_id, server_id)
 
     # ----------------------------------------------------------
     # 8.4.1 PLANO DO SERVIDOR
