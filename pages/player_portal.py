@@ -2584,6 +2584,7 @@ def main():
 
     discord_id = st.session_state.get("portal_discord_id")
     discord_name = st.session_state.get("portal_discord_name", "Jogador")
+    nitrado_id = st.session_state.get("portal_nitrado_id", "")
     server_id = st.session_state.get("portal_server_id")
     server_name = st.session_state.get("portal_server_name", "Servidor")
 
@@ -2617,6 +2618,7 @@ def main():
             elif sid not in clients_db:
                 st.error("Servidor não configurado. Avise o administrador.")
             else:
+                st.session_state.portal_nitrado_id = nitrado_id_map.get(sid, "")
                 st.session_state.portal_server_id = sid
                 st.session_state.portal_server_nome = nome_limpo.title()
                 st.rerun()
@@ -2635,6 +2637,29 @@ def main():
                     client_data = _alt
                     break
     players = load_players_for_client(client_data)
+    if "ranking_config" not in client_data:
+    client_data["ranking_config"] = {
+        "ativo": True,
+        "data_inicial": "",
+        "modo_exibicao": "cumulativo",
+        "tipo_janela": "temporada",
+        "permitir_reprocessamento": True,
+        "ultima_reconfiguracao": "",
+    }
+    clients_db[server_id] = client_data
+    save_db(DB_CLIENTS, clients_db)
+
+if "ranking_stats" not in client_data:
+    client_data["ranking_stats"] = {
+        "ultima_atualizacao": "",
+        "periodo_atual": "",
+        "acumulado": {},
+        "diario": {},
+        "semanal": {},
+        "mensal": {},
+    }
+    clients_db[server_id] = client_data
+    save_db(DB_CLIENTS, clients_db)
     server_nome = st.session_state.get("portal_server_nome", "Servidor")
     nitrado_id = nitrado_id_map.get(server_id, server_id)
 
@@ -2911,7 +2936,7 @@ def main():
                 client_data["feeds_config"] = feeds
                 clients_db[server_id] = client_data
                 save_db(DB_CLIENTS, clients_db)
-                st.success("✅ Governança atualizada!")
+                st.success("✅ Governança atualizada!")       
 
         # --- ABA LOJA VIRTUAL ---
     with tab_loja:
