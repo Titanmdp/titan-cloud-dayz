@@ -2460,7 +2460,94 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
         with tab_adm4:
             st.subheader("📦 Central de Migração de Dados")
             st.info("Faça backup antes de atualizar e restaure logo após o deploy.")
+
+            def get_default_db_users():
+                return {
+                    "admin_key": "ALEXADMIN",
+                    "keys": {},
+                    "config_planos": {
+                        "Starter": 2,
+                        "Pro": 8,
+                        "Enterprise": 16,
+                    },
+                    "admin_email": "",
+                    "mfa_code": "",
+                    "mfa_expiry": "",
+                    "mfa_last_sent": "",
+                    "mfa_tentativas": 0,
+                    "admin_last_session": "",
+                    "admin_local": "",
+                    "admin_last_login": "",
+                }
+
+            def get_default_client_data():
+                return {
+                    "ftp": {
+                        "host": "",
+                        "user": "",
+                        "pass": "",
+                        "port": 21,
+                    },
+                    "agendas": [],
+                    "agendas_raid": [],
+                    "logs": [],
+                    "comunicados": [],
+                    "players": {},
+                    "tracking_acoes": {},
+                    "wallets": {},
+                    "bank": {},
+                    "pedidos": [],
+                    "xpstats": {},
+                    "webhooks_config": [],
+                    "heatmap_data": [],
+                    "loja": {
+                        "mapa_padrao": "Chernarus",
+                        "posicao_padrao": "",
+                        "itens": [],
+                    },
+                    "dzcoins_config": {
+                        "ativo": False,
+                        "quantidade_dzcoins": 10,
+                        "intervalo_minutos": 60,
+                    },
+                    "feeds_config": {
+                        "coordenadas_killfeed": True,
+                        "feed_conexao": True,
+                        "feed_construcao": True,
+                        "combatlog": True,
+                        "ping_adm": True,
+                        "loja_automatica": True,
+                        "glitch_subsolo": True,
+                        "glitch_fogueiras": True,
+                        "glitch_hortas": True,
+                        "ranking": True,
+                        "ranking_auto": True,
+                        "baixar_logs": True,
+                        "mod_pve": False,
+                        "zona_pvp": False,
+                        "mapa_calor": True,
+                        "playersonlineauto": True,
+                        "webhookplayersonline": "",
+                        "webhook_admin_logs": "",
+                    },
+                }
+
+            def merge_dict_structure(base_dict, default_dict):
+                for key, value in default_dict.items():
+                    if key not in base_dict:
+                        if isinstance(value, dict):
+                            base_dict[key] = value.copy()
+                        elif isinstance(value, list):
+                            base_dict[key] = value.copy()
+                        else:
+                            base_dict[key] = value
+                    else:
+                        if isinstance(value, dict) and isinstance(base_dict.get(key), dict):
+                            merge_dict_structure(base_dict[key], value)
+                return base_dict
+
             col_back, col_rest = st.columns(2)
+
             with col_back:
                 st.markdown("### ⬇️ Exportar Backup")
                 dados_totais = {
@@ -2475,13 +2562,16 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     mime="application/json",
                     use_container_width=True,
                 )
+
             with col_rest:
                 st.markdown("### ⬆️ Importar/Restaurar")
                 arquivo_upload = st.file_uploader(
                     "Selecione o arquivo de backup", type="json"
                 )
                 if st.button(
-                    "🚀 Restaurar Dados Agora", use_container_width=True, type="primary"
+                    "🚀 Restaurar Dados Agora",
+                    use_container_width=True,
+                    type="primary",
                 ):
                     if arquivo_upload is not None:
                         try:
@@ -2498,6 +2588,127 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                                 st.error("❌ Arquivo inválido!")
                         except Exception as e:
                             st.error(f"❌ Erro: {e}")
+
+            st.divider()
+            st.markdown("### 🛠️ Manutenção da Base")
+            st.caption(
+                "Use a correção estrutural para completar campos ausentes sem apagar dados. "
+                "Use o reset total apenas se quiser começar tudo do zero."
+            )
+
+            col_fix, col_reset = st.columns(2)
+
+            with col_fix:
+                if st.button(
+                    "🧩 Corrigir Estrutura dos Bancos",
+                    use_container_width=True,
+                ):
+                    try:
+                        db_users_atual = load_db(DB_USERS, {})
+                        db_clients_atual = load_db(DB_CLIENTS, {})
+
+                        db_users_corrigido = merge_dict_structure(
+                            db_users_atual, get_default_db_users()
+                        )
+
+                        if "keys" not in db_users_corrigido or not isinstance(
+                            db_users_corrigido["keys"], dict
+                        ):
+                            db_users_corrigido["keys"] = {}
+
+                        if "config_planos" not in db_users_corrigido or not isinstance(
+                            db_users_corrigido["config_planos"], dict
+                        ):
+                            db_users_corrigido["config_planos"] = {
+                                "Starter": 2,
+                                "Pro": 8,
+                                "Enterprise": 16,
+                            }
+
+                        if not isinstance(db_clients_atual, dict):
+                            db_clients_atual = {}
+
+                        for server_id, client_data in db_clients_atual.items():
+                            if not isinstance(client_data, dict):
+                                db_clients_atual[server_id] = get_default_client_data()
+                            else:
+                                db_clients_atual[server_id] = merge_dict_structure(
+                                    client_data, get_default_client_data()
+                                )
+
+                        save_db(DB_USERS, db_users_corrigido)
+                        save_db(DB_CLIENTS, db_clients_atual)
+
+                        st.session_state.db_users = db_users_corrigido
+                        st.session_state.db_clients = db_clients_atual
+
+                        st.success("✅ Estrutura dos bancos corrigida com sucesso!")
+                        time.sleep(2)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Erro ao corrigir estrutura: {e}")
+
+            with col_reset:
+                if "confirmar_reset_base" not in st.session_state:
+                    st.session_state.confirmar_reset_base = False
+
+                if not st.session_state.confirmar_reset_base:
+                    if st.button(
+                        "🗑️ Resetar Base Completa",
+                        use_container_width=True,
+                        type="primary",
+                    ):
+                        st.session_state.confirmar_reset_base = True
+                        st.warning(
+                            "⚠️ Clique novamente para confirmar o reset total da base."
+                        )
+                        st.rerun()
+                else:
+                    st.error(
+                        "⚠️ Atenção: isso apagará todos os clientes e acessos cadastrados."
+                    )
+
+                    col_confirma, col_cancela = st.columns(2)
+
+                    with col_confirma:
+                        if st.button(
+                            "✅ Confirmar Reset Total",
+                            use_container_width=True,
+                            type="primary",
+                        ):
+                            try:
+                                db_users_atual = load_db(DB_USERS, {})
+                                admin_key_atual = db_users_atual.get("admin_key", "ALEXADMIN")
+                                admin_email_atual = db_users_atual.get("admin_email", "")
+
+                                novo_db_users = get_default_db_users()
+                                novo_db_users["admin_key"] = admin_key_atual
+                                novo_db_users["admin_email"] = admin_email_atual
+
+                                novo_db_clients = {}
+
+                                save_db(DB_USERS, novo_db_users)
+                                save_db(DB_CLIENTS, novo_db_clients)
+
+                                st.session_state.db_users = novo_db_users
+                                st.session_state.db_clients = novo_db_clients
+                                st.session_state.confirmar_reset_base = False
+
+                                st.success("✅ Base resetada com sucesso!")
+                                time.sleep(2)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Erro ao resetar base: {e}")
+
+                    with col_cancela:
+                        if st.button(
+                            "❎ Cancelar Reset",
+                            use_container_width=True,
+                        ):
+                            st.session_state.confirmar_reset_base = False
+                            st.info("Reset cancelado.")
+                            time.sleep(1)
+                            st.rerun()
 
         # --- TAB 5: COMUNICADOS ---
         with tab_adm5:
@@ -2678,6 +2889,23 @@ if "ftp" not in client_data:
     client_data["ftp"] = {"host": "", "user": "", "pass": "", "port": "21"}
     save_db(DB_CLIENTS, st.session_state.db_clients)
 
+# --- PASSO 1.1: INICIALIZAÇÃO DAS LISTAS ESSENCIAIS ---
+if "agendas" not in client_data:
+    client_data["agendas"] = []
+    save_db(DB_CLIENTS, st.session_state.db_clients)
+
+if "agendas_raid" not in client_data:
+    client_data["agendas_raid"] = []
+    save_db(DB_CLIENTS, st.session_state.db_clients)
+
+if "logs" not in client_data:
+    client_data["logs"] = []
+    save_db(DB_CLIENTS, st.session_state.db_clients)
+
+if "comunicados" not in client_data:
+    client_data["comunicados"] = []
+    save_db(DB_CLIENTS, st.session_state.db_clients)
+
 # --- PASSO 2: INICIALIZAÇÃO DA ESTRUTURA DE FEEDS (GRC/GOVERNANÇA) ---
 if "feeds_config" not in client_data:
     client_data["feeds_config"] = {
@@ -2694,6 +2922,28 @@ if "feeds_config" not in client_data:
         "zona_pvp": False
     }
     save_db(DB_CLIENTS, st.session_state.db_clients)
+
+if "ranking_config" not in client_data:
+        client_data["ranking_config"] = {
+                "ativo": True,
+                "data_inicial": "",
+                "modo_exibicao": "cumulativo",
+                "tipo_janela": "temporada",
+                "permitir_reprocessamento": True,
+                "ultima_reconfiguracao": "",
+        }
+        save_db(DB_CLIENTS, st.session_state.db_clients)
+
+if "ranking_stats" not in client_data:
+        client_data["ranking_stats"] = {
+                "ultima_atualizacao": "",
+                "periodo_atual": "",
+                "acumulado": {},
+                "diario": {},
+                "semanal": {},
+                "mensal": {},
+        }
+        save_db(DB_CLIENTS, st.session_state.db_clients)
     
 # --- PASSO 7: ESTRUTURA PARA DETECÇÃO DE SPAM DE OBJETOS (GRC) ---
 if "tracking_acoes" not in client_data:
@@ -4938,7 +5188,8 @@ with tab6:
     if menu_interno_loja == "📦 Gestão de Pedidos":
         # Chama a função de auditoria declarada anteriormente
         # Certifique-se de que a função 'render_gestao_pedidos' foi inserida no Passo 1 anterior
-        server_id_loja = st.session_state.db_users.get("keys", {}).get(user_id, {}).get("server_id", user_id)
+        nitrado_id_loja = st.session_state.db_users.get("keys", {}).get(user_id, {}).get("server_id", "")
+        server_id_loja = user_id  # ← índice correto é sempre a KeyUser
         client_data_loja = st.session_state.db_clients.get(server_id_loja, {})
         render_gestao_pedidos(client_data_loja, server_id_loja)
 
@@ -5168,7 +5419,8 @@ with tab8:
 
     # 1) Garante que há um servidor válido na sessão
     user_key = st.session_state.get("user_key", "")
-    server_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", user_key)
+    nitrado_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", "")
+    server_id = user_key
     if not server_id:
         st.error(
             "Nenhum servidor vinculado a este login.\n"
@@ -5178,19 +5430,8 @@ with tab8:
 
     # 2) Carrega dados do servidor
     clients_data = load_db(DB_CLIENTS, {})
-    if not clients_data:
-        st.warning("Nenhum cliente/servidor cadastrado em clients_data.json.")
-        st.stop()
-
-    if server_id not in clients_data:
-        st.error(
-            f"O servidor com ID {server_id} não foi encontrado em clients_data.json.\n"
-            "Verifique se o server_id está correto."
-        )
-        st.stop()
-
-    client_data = clients_data[server_id]
-
+    client_data = clients_data.get(server_id, {})
+    
     # Garante estruturas básicas
     players = client_data.get("players", {})
     if "wallets" not in client_data:
