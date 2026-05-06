@@ -2983,7 +2983,7 @@ if "ranking_config" not in client_data:
         "permitirreprocessamento": True,
         "ultimareconfiguracao": "",
     }
-    save_db(DB_CLIENTS, st.session_state.dbclients)
+    save_db(DB_CLIENTS, st.session_state.db_clients)
 
 if "rankingstats" not in client_data:
     client_data["rankingstats"] = {
@@ -2994,7 +2994,7 @@ if "rankingstats" not in client_data:
         "semanal": {},
         "mensal": {},
     }
-    save_db(DB_CLIENTS, st.session_state.dbclients)
+    save_db(DB_CLIENTS, st.session_state.db_clients)
     
 # --- PASSO 7: ESTRUTURA PARA DETECÇÃO DE SPAM DE OBJETOS (GRC) ---
 if "tracking_acoes" not in client_data:
