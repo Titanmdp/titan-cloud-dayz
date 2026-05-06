@@ -2974,8 +2974,8 @@ if "feeds_config" not in client_data:
     }
     save_db(DB_CLIENTS, st.session_state.db_clients)
 
-if "ranking_config" not in clientdata:
-    clientdata["ranking_config"] = {
+if "ranking_config" not in client_data:
+    client_data["ranking_config"] = {
         "ativo": True,
         "datainicial": "",
         "modoexibicao": "cumulativo",
@@ -2985,8 +2985,8 @@ if "ranking_config" not in clientdata:
     }
     save_db(DB_CLIENTS, st.session_state.dbclients)
 
-if "rankingstats" not in clientdata:
-    clientdata["rankingstats"] = {
+if "rankingstats" not in client_data:
+    client_data["rankingstats"] = {
         "ultimaatualizacao": "",
         "periodoatual": "",
         "acumulado": {},
