@@ -792,173 +792,244 @@ def proworker():
             now = get_hora_brasilia()
             db_all = load_db(DB_CLIENTS, {})
             mudou = False
-            for cid, cinfo in db_all.items():
+
+            for client_id, client_info in db_all.items():
+                log_txt = ""
+                eventos_pvp = []
+
                 # --- TRAVA DE SEGURANÇA (GRC/GOVERNANÇA) ---
                 # Se o administrador desativar "Baixar Logs Servidor", o worker ignora este cliente
-                if not cinfo.get("feeds_config", {}).get("baixar_logs", True):
-                    continue 
+                feeds_config = client_info.get("feeds_config", {})
+                if not feeds_config.get("baixar_logs", True):
+                    continue
 
                 # --- 1. LÓGICA DE AGENDAS DE ARQUIVOS (EXISTENTE) ---
-                for ag in cinfo.get("agendas", []):
-                    hora_entrada = str_to_time(ag.get("data"), ag.get("in"))
-                    hora_saida = str_to_time(ag.get("data"), ag.get("out"))
-                    
+                for agenda in client_info.get("agendas", []):
+                    hora_entrada = str_to_time(agenda.get("data"), agenda.get("in"))
+                    hora_saida = str_to_time(agenda.get("data"), agenda.get("out"))
+
                     # Tolerância de 30s para eventos agendados muito próximos do horário atual
-                    if hora_entrada and now >= (hora_entrada - timedelta(seconds=30)) and ag.get("status") == "Aguardando":
-                        if not os.path.exists(ag["localpath"]) and ag.get("filecontent"):
+                    if (
+                        hora_entrada
+                        and now >= (hora_entrada - timedelta(seconds=30))
+                        and agenda.get("status") == "Aguardando"
+                    ):
+                        if not os.path.exists(agenda["localpath"]) and agenda.get("filecontent"):
                             try:
-                                os.makedirs(os.path.dirname(ag["localpath"]), exist_ok=True)
-                                with open(ag["localpath"], "wb") as f:
-                                    f.write(base64.b64decode(ag["filecontent"]))
-                            except Exception as e:
-                                print("Erro ao recriar arquivo:", e)
-                        
-                        if not os.path.exists(ag["localpath"]):
-                            ag["status"] = "Erro"
-                            registrar_log(cid, f"Arquivo perdido: {ag['file']}", "erro")
+                                os.makedirs(os.path.dirname(agenda["localpath"]), exist_ok=True)
+                                with open(agenda["localpath"], "wb") as file_obj:
+                                    file_obj.write(base64.b64decode(agenda["filecontent"]))
+                            except Exception as exc:
+                                print("Erro ao recriar arquivo:", exc)
+
+                        if not os.path.exists(agenda["localpath"]):
+                            agenda["status"] = "Erro"
+                            registrar_log(client_id, f"Arquivo perdido: {agenda['file']}", "erro")
                             mudou = True
                         else:
-                            ok, msg = dispararftppro(cid, "UPLOAD", ag["file"], ag["localpath"], ag["path"])
-                            ag["status"] = "Ativo" if ok else "Erro"
-                            registrar_log(cid, f"UPLOAD {ag['file']} {'OK' if ok else msg}", "sucesso" if ok else "erro")
+                            ok, msg = disparar_ftp_pro(
+                                client_id,
+                                "UPLOAD",
+                                agenda["file"],
+                                agenda["localpath"],
+                                agenda["path"],
+                            )
+                            agenda["status"] = "Ativo" if ok else "Erro"
+                            registrar_log(
+                                client_id,
+                                f"UPLOAD {agenda['file']} {'OK' if ok else msg}",
+                                "sucesso" if ok else "erro",
+                            )
                             mudou = True
 
-                    if hora_saida and now >= hora_saida and ag.get("status") == "Ativo":
-                        ok, msg = dispararftppro(cid, "DELETE", ag["file"], ag["localpath"], ag["path"])
-                        registrar_log(cid, f"DELETE {ag['file']} {'OK' if ok else msg}", "sucesso" if ok else "erro")
-                        if ag.get("rec") == "Diário":
-                            ag["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
-                            ag["status"] = "Aguardando"
-                        elif ag.get("rec") == "Semanal":
-                            ag["data"] = (now + timedelta(days=7)).strftime("%d/%m/%Y")
-                            ag["status"] = "Aguardando"
+                    if hora_saida and now >= hora_saida and agenda.get("status") == "Ativo":
+                        ok, msg = disparar_ftp_pro(
+                            client_id,
+                            "DELETE",
+                            agenda["file"],
+                            agenda["localpath"],
+                            agenda["path"],
+                        )
+                        registrar_log(
+                            client_id,
+                            f"DELETE {agenda['file']} {'OK' if ok else msg}",
+                            "sucesso" if ok else "erro",
+                        )
+
+                        if agenda.get("rec") == "Diário":
+                            agenda["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
+                            agenda["status"] = "Aguardando"
+                        elif agenda.get("rec") == "Semanal":
+                            agenda["data"] = (now + timedelta(days=7)).strftime("%d/%m/%Y")
+                            agenda["status"] = "Aguardando"
                         else:
-                            ag["status"] = "Finalizado"
+                            agenda["status"] = "Finalizado"
+
                         mudou = True
 
-                # --- 2. NOVA LÓGICA: AGENDAS DE RAID AUTOMÁTICO ---
-                for rd in cinfo.get("agendas_raid", []):
-                    inicio_r = str_to_time(rd["data"], rd["in"])
-                    fim_r = str_to_time(rd["data"], rd["out"])
+                # --- 2. LÓGICA DE AGENDAS DE RAID AUTOMÁTICO ---
+                for raid_agenda in client_info.get("agendas_raid", []):
+                    inicio_raid = str_to_time(raid_agenda["data"], raid_agenda["in"])
+                    fim_raid = str_to_time(raid_agenda["data"], raid_agenda["out"])
 
-                    # Ação: INICIAR RAID (Ligar o dano/disableBaseDamage = False)
-                    if rd["status"] == "Aguardando" and now >= inicio_r:
-                        ok, content, msg = baixarcfggameplayviaftp(cid, rd["mapa"])
+                    # Ação: INICIAR RAID
+                    if raid_agenda["status"] == "Aguardando" and now >= inicio_raid:
+                        ok, content, msg = baixar_cfggameplay_via_ftp(client_id, raid_agenda["mapa"])
                         if ok:
                             try:
                                 cfg_json = json.loads(content.decode("utf-8"))
-                                # Alteração da trava de segurança (GRC)
-                                cfg_json["GeneralData"]["disableBaseDamage"] = False 
-                                
-                                temp_file = f"raid_on_{cid}.json"
-                                with open(temp_file, "w") as f:
-                                    json.dump(cfg_json, f, indent=4)
-                                
-                                env_ok, env_msg = enviar_cfggameplay_via_ftp(cid, temp_file, rd["mapa"])
-                                if env_ok:
-                                    rd["status"] = "Ativo"
-                                    registrar_log(cid, f"🔥 RAID INICIADO em {rd['mapa']}! Dano em bases ATIVADO.", "sucesso")
-                                    mudou = True
-                            except Exception as e:
-                                print(f"Erro ao processar JSON de RAID ON: {e}")
+                                cfg_json["GeneralData"]["disableBaseDamage"] = False
 
-                    # Ação: ENCERRAR RAID (Desligar o dano/disableBaseDamage = True)
-                    elif rd["status"] == "Ativo" and now >= fim_r:
-                        ok, content, msg = baixarcfggameplayviaftp(cid, rd["mapa"])
+                                temp_file = f"raid_on_{client_id}.json"
+                                with open(temp_file, "w", encoding="utf-8") as file_obj:
+                                    json.dump(cfg_json, file_obj, indent=4, ensure_ascii=False)
+
+                                env_ok, env_msg = enviar_cfggameplay_via_ftp(
+                                    client_id,
+                                    temp_file,
+                                    raid_agenda["mapa"],
+                                )
+                                if env_ok:
+                                    raid_agenda["status"] = "Ativo"
+                                    registrar_log(
+                                        client_id,
+                                        f"🔥 RAID INICIADO em {raid_agenda['mapa']}! Dano em bases ATIVADO.",
+                                        "sucesso",
+                                    )
+                                    mudou = True
+                            except Exception as exc:
+                                print(f"Erro ao processar JSON de RAID ON: {exc}")
+
+                    # Ação: ENCERRAR RAID
+                    elif raid_agenda["status"] == "Ativo" and now >= fim_raid:
+                        ok, content, msg = baixar_cfggameplay_via_ftp(client_id, raid_agenda["mapa"])
                         if ok:
                             try:
                                 cfg_json = json.loads(content.decode("utf-8"))
                                 cfg_json["GeneralData"]["disableBaseDamage"] = True
-                                
-                                temp_file = f"raid_off_{cid}.json"
-                                with open(temp_file, "w") as f:
-                                    json.dump(cfg_json, f, indent=4)
-                                
-                                env_ok, env_msg = enviar_cfggameplay_via_ftp(cid, temp_file, rd["mapa"])
-                                if env_ok:
-                                    # Lógica de Recorrência (Auditável)
-                                    if rd.get("rec") == "Diário":
-                                        rd["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
-                                        rd["status"] = "Aguardando"
-                                    elif rd.get("rec") == "Semanal":
-                                        rd["data"] = (now + timedelta(days=7)).strftime("%d/%m/%Y")
-                                        rd["status"] = "Aguardando"
-                                    else:
-                                        rd["status"] = "Finalizado"
-                                    
-                                    registrar_log(cid, f"🛡️ RAID ENCERRADO em {rd['mapa']}! Próxima execução: {rd['data']}", "info")
-                                    mudou = True
-                            except Exception as e:
-                                print(f"Erro ao processar JSON de RAID OFF: {e}")
 
-                # --- PASSO 6: LOGICA ANTI-GLITCH (GRC/GOVERNANÇA) ---
-                feeds = cinfo.get("feeds_config", {})
-                webhook_admin = feeds.get("webhook_admin_logs") # Canal de Auditoria da Staff
-                
-                if feeds.get("glitch_subsolo") or feeds.get("glitch_hortas") or feeds.get("glitch_fogueiras"):
-                    log_txt, _ = ftp_download_latest_adm(cinfo["ftp"])
-                    
+                                temp_file = f"raid_off_{client_id}.json"
+                                with open(temp_file, "w", encoding="utf-8") as file_obj:
+                                    json.dump(cfg_json, file_obj, indent=4, ensure_ascii=False)
+
+                                env_ok, env_msg = enviar_cfggameplay_via_ftp(
+                                    client_id,
+                                    temp_file,
+                                    raid_agenda["mapa"],
+                                )
+                                if env_ok:
+                                    if raid_agenda.get("rec") == "Diário":
+                                        raid_agenda["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
+                                        raid_agenda["status"] = "Aguardando"
+                                    elif raid_agenda.get("rec") == "Semanal":
+                                        raid_agenda["data"] = (now + timedelta(days=7)).strftime("%d/%m/%Y")
+                                        raid_agenda["status"] = "Aguardando"
+                                    else:
+                                        raid_agenda["status"] = "Finalizado"
+
+                                    proxima_execucao = raid_agenda.get("data", "finalizado")
+                                    registrar_log(
+                                        client_id,
+                                        f"🛡️ RAID ENCERRADO em {raid_agenda['mapa']}! Próxima execução: {proxima_execucao}",
+                                        "info",
+                                    )
+                                    mudou = True
+                            except Exception as exc:
+                                print(f"Erro ao processar JSON de RAID OFF: {exc}")
+
+                # --- BAIXA O LOG UMA ÚNICA VEZ PARA OS PASSOS DE AUDITORIA/INTELIGÊNCIA ---
+                precisa_log = (
+                    feeds_config.get("glitch_subsolo")
+                    or feeds_config.get("glitch_hortas")
+                    or feeds_config.get("glitch_fogueiras")
+                    or feeds_config.get("mapa_calor", True)
+                    or feeds_config.get("ranking_auto", True)
+                )
+
+                if precisa_log:
+                    try:
+                        log_txt, _ = ftp_download_latest_adm(client_info["ftp"])
+                    except Exception as exc:
+                        print(f"Erro ao baixar ADM log de {client_id}: {exc}")
+                        log_txt = ""
+
+                if log_txt:
+                    try:
+                        eventos_pvp = extrair_eventos_pvp(log_txt)
+                    except Exception as exc:
+                        print(f"Erro ao extrair eventos PvP de {client_id}: {exc}")
+                        eventos_pvp = []
+
+                # --- PASSO 6: LÓGICA ANTI-GLITCH (GRC/GOVERNANÇA) ---
+                webhook_admin_logs = feeds_config.get("webhook_admin_logs")
+
+                if (
+                    feeds_config.get("glitch_subsolo")
+                    or feeds_config.get("glitch_hortas")
+                    or feeds_config.get("glitch_fogueiras")
+                ):
                     if log_txt:
-                        mapa_atual = cinfo.get("loja", {}).get("mapa_padrao", "Chernarus")
-                        alertas = analisar_glitches(log_txt, feeds, cinfo, mapa_atual)
-                        
-                        for v in alertas:
-                            if v.get("banir"): 
-                                sucesso = aplicar_banimento_ftp(cinfo["ftp"], v['jogador'])
+                        mapa_atual = client_info.get("loja", {}).get("mapa_padrao", "Chernarus")
+                        alertas = analisar_glitches(log_txt, feeds_config, client_info, mapa_atual)
+
+                        for alerta in alertas:
+                            if alerta.get("banir"):
+                                sucesso = aplicar_banimento_ftp(client_info["ftp"], alerta["jogador"])
                                 if sucesso:
-                                    msg = f"🔨 BANIMENTO AUTOMÁTICO: {v['jogador']} por {v['tipo']}!"
-                                    registrar_log(cid, msg, "erro")
-                                    
-                                    # Notifica o Discord (Staff) sobre o BAN
-                                    if webhook_admin:
+                                    msg = f"🔨 BANIMENTO AUTOMÁTICO: {alerta['jogador']} por {alerta['tipo']}!"
+                                    registrar_log(client_id, msg, "erro")
+
+                                    if webhook_admin_logs:
                                         enviar_ao_discord(
-                                            webhook_admin, 
-                                            "🔨 PUNIÇÃO EXECUTADA", 
-                                            f"**Jogador:** {v['jogador']}\n**Motivo:** {v['tipo']}\n**Detalhe:** {v['detalhe']}",
-                                            cor=16711680 # Vermelho Crítico
+                                            webhook_admin_logs,
+                                            "🔨 PUNIÇÃO EXECUTADA",
+                                            f"**Jogador:** {alerta['jogador']}\n**Motivo:** {alerta['tipo']}\n**Detalhe:** {alerta['detalhe']}",
+                                            cor=16711680,
                                         )
-                                    
-                                    cinfo.get("tracking_acoes", {}).pop(v['jogador'], None)
+
+                                    client_info.get("tracking_acoes", {}).pop(alerta["jogador"], None)
+                                    mudou = True
                                 else:
-                                    registrar_log(cid, f"❌ FALHA AO BANIR: {v['jogador']} (Erro FTP)", "erro")
+                                    registrar_log(
+                                        client_id,
+                                        f"❌ FALHA AO BANIR: {alerta['jogador']} (Erro FTP)",
+                                        "erro",
+                                    )
                             else:
-                                # Alerta comum de subsolo (apenas log/aviso)
-                                msg_alerta = f"🚨 ALERTA GLITCH: {v['jogador']} detectado em {v['tipo']}! Pos: {v['pos']}"
-                                registrar_log(cid, msg_alerta, "erro")
-                                
-                                # Notifica o Discord (Staff) sobre o Alerta
-                                if webhook_admin:
+                                msg_alerta = (
+                                    f"🚨 ALERTA GLITCH: {alerta['jogador']} detectado em "
+                                    f"{alerta['tipo']}! Pos: {alerta['pos']}"
+                                )
+                                registrar_log(client_id, msg_alerta, "erro")
+
+                                if webhook_admin_logs:
                                     enviar_ao_discord(
-                                        webhook_admin, 
-                                        "🚨 SUSPEITA DE GLITCH", 
-                                        f"**Jogador:** {v['jogador']}\n**Tipo:** {v['tipo']}\n**Posição:** {v['pos']}",
-                                        cor=16776960 # Amarelo Alerta
+                                        webhook_admin_logs,
+                                        "🚨 SUSPEITA DE GLITCH",
+                                        f"**Jogador:** {alerta['jogador']}\n**Tipo:** {alerta['tipo']}\n**Posição:** {alerta['pos']}",
+                                        cor=16776960,
                                     )
 
-                # --- PASSO 7: LOGICA MAPA DE CALOR (INTELIGÊNCIA) ---
-                if feeds.get("mapa_calor", True):
-                    # O sistema já baixou o log para o Anti-Glitch, aproveitamos o conteúdo
-                    if 'log_txt' in locals() and log_txt:
-                        novas_coords = extrair_coordenadas_mapa(log_txt)
-                        
-                        # Mantém apenas as últimas 5.000 posições para não inflar o JSON
-                        historico_coords = cinfo.get("heatmap_data", [])
-                        historico_coords.extend(novas_coords)
-                        cinfo["heatmap_data"] = historico_coords[-5000:]
+                # --- PASSO 7: LÓGICA MAPA DE CALOR (INTELIGÊNCIA) ---
+                if feeds_config.get("mapa_calor", True) and log_txt:
+                    novas_coords = extrair_coordenadas_mapa(log_txt)
+                    historico_coords = client_info.get("heatmap_data", [])
+                    historico_coords.extend(novas_coords)
+                    client_info["heatmap_data"] = historico_coords[-5000:]
+                    mudou = True
 
                 # --- PASSO 8: RANKING AUTOMATIZADO (GRC) ---
-                if feeds.get("ranking_auto", True):
-                    # Se os logs PvP já foram processados nesta rodada
-                    if 'eventos_pvp' in locals():
-                        ranking_atualizado = processar_ranking_global(eventos_pvp, [])
-                        cinfo["ranking_global"] = ranking_atualizado # Salva no DB
-
-
+                if feeds_config.get("ranking_auto", True) and eventos_pvp:
+                    ranking_atualizado = processar_ranking_global(eventos_pvp, [])
+                    client_info["ranking_global"] = ranking_atualizado
+                    mudou = True
 
             if mudou:
                 save_db(DB_CLIENTS, db_all)
-        except Exception as e:
-            print("Erro no proworker:", e)
+
+        except Exception as exc:
+            print("Erro no proworker:", exc)
+
         time.sleep(15)
 
 
@@ -2903,27 +2974,27 @@ if "feeds_config" not in client_data:
     }
     save_db(DB_CLIENTS, st.session_state.db_clients)
 
-if "ranking_config" not in client_data:
-        client_data["ranking_config"] = {
-                "ativo": True,
-                "data_inicial": "",
-                "modo_exibicao": "cumulativo",
-                "tipo_janela": "temporada",
-                "permitir_reprocessamento": True,
-                "ultima_reconfiguracao": "",
-        }
-        save_db(DB_CLIENTS, st.session_state.db_clients)
+if "ranking_config" not in clientdata:
+    clientdata["ranking_config"] = {
+        "ativo": True,
+        "datainicial": "",
+        "modoexibicao": "cumulativo",
+        "tipojanela": "temporada",
+        "permitirreprocessamento": True,
+        "ultimareconfiguracao": "",
+    }
+    savedb(DB_CLIENTS, st.session_state.dbclients)
 
-if "ranking_stats" not in client_data:
-        client_data["ranking_stats"] = {
-                "ultima_atualizacao": "",
-                "periodo_atual": "",
-                "acumulado": {},
-                "diario": {},
-                "semanal": {},
-                "mensal": {},
-        }
-        save_db(DB_CLIENTS, st.session_state.db_clients)
+if "rankingstats" not in clientdata:
+    clientdata["rankingstats"] = {
+        "ultimaatualizacao": "",
+        "periodoatual": "",
+        "acumulado": {},
+        "diario": {},
+        "semanal": {},
+        "mensal": {},
+    }
+    savedb(DB_CLIENTS, st.session_state.dbclients)
     
 # --- PASSO 7: ESTRUTURA PARA DETECÇÃO DE SPAM DE OBJETOS (GRC) ---
 if "tracking_acoes" not in client_data:
@@ -3144,7 +3215,7 @@ with st.sidebar:
 st.title(f"🎮 {user_info['server']}")
 
 # Inclusão da "⚙️ Feeds / Bot" entre "🏦 Banco / Carteira" e "💎 Planos"
-tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab_raid, tab6, tab7, tab_analytics, tab8, tab_feeds, tab_planos = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tabraid, tab6, tab7, tab_analytics, tab_ranking, tab8, tab_feeds, tab_planos = st.tabs([
     "📅 Eventos Agendados", 
     "📋 Histórico Logs", 
     "📢 Comunicados", 
@@ -3158,6 +3229,7 @@ tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeven
     "🛒 Loja / Trader", 
     "👥 Jogadores", 
     "📊 Analytics",
+    "🏆 Ranking",
     "🏦 Banco / Carteira", 
     "⚙️ Feeds / Bot",
     "💎 Planos",
@@ -5388,6 +5460,194 @@ with tab_analytics:
         render_heatmap(client_data)
     else:
         st.warning("⚠️ O Mapa de Calor está desativado nas configurações de Feeds (Aba ⚙️ Feeds / Bot).")
+
+with tab_ranking:
+    st.header("🏆 Configuração do Ranking")
+    st.caption("Defina o período, modo de exibição e gerencie o ranking do seu servidor.")
+
+    clients_data_rk = load_db(DB_CLIENTS, {})
+    client_data_rk = clients_data_rk.get(server_id, client_data)
+
+    ranking_config = client_data_rk.get("rankingconfig", {
+        "ativo": True,
+        "datainicial": "",
+        "modoexibicao": "cumulativo",
+        "tipojanela": "temporada",
+        "permitirreprocessamento": True,
+        "ultimareconfiguracao": "",
+    })
+
+    ranking_stats = client_data_rk.get("rankingstats", {
+        "ultimaatualizacao": "",
+        "periodoatual": "",
+        "acumulado": {},
+        "diario": {},
+        "semanal": {},
+        "mensal": {},
+    })
+
+    st.markdown("### Configurações do Período")
+
+    cfg_col_1, cfg_col_2 = st.columns(2)
+
+    with cfg_col_1:
+        ranking_ativo = st.toggle(
+            "Ranking ativo",
+            value=ranking_config.get("ativo", True),
+            key="ranking_ativo_toggle",
+            help="Desative para pausar o processamento do ranking sem apagar os dados.",
+        )
+
+        modo_opcoes = ["cumulativo", "janela"]
+        modo_labels = {
+            "cumulativo": "Cumulativo desde a data inicial",
+            "janela": "Por janela (período fixo)",
+        }
+        modo_atual = ranking_config.get("modoexibicao", "cumulativo")
+        modo_idx = modo_opcoes.index(modo_atual) if modo_atual in modo_opcoes else 0
+
+        ranking_modo = st.selectbox(
+            "Modo de exibição",
+            options=modo_opcoes,
+            index=modo_idx,
+            format_func=lambda x: modo_labels[x],
+            key="ranking_modo_select",
+            help="Cumulativo acumula tudo desde a data inicial. Janela reinicia a cada período.",
+        )
+
+    with cfg_col_2:
+        from datetime import date
+
+        data_inicial_str = ranking_config.get("datainicial", "")
+        try:
+            data_inicial_valor = datetime.strptime(data_inicial_str, "%d/%m/%Y").date() if data_inicial_str else date.today()
+        except ValueError:
+            data_inicial_valor = date.today()
+
+        ranking_data_inicial = st.date_input(
+            "Data inicial do ranking",
+            value=data_inicial_valor,
+            format="DD/MM/YYYY",
+            key="ranking_data_inicial_input",
+            help="Kills e eventos anteriores a esta data são ignorados no ranking.",
+        )
+
+        janela_opcoes = ["temporada", "semanal", "mensal"]
+        janela_labels = {
+            "temporada": "Temporada manual",
+            "semanal": "Semanal (reinicia toda segunda)",
+            "mensal": "Mensal (reinicia todo dia 1)",
+        }
+        janela_atual = ranking_config.get("tipojanela", "temporada")
+        janela_idx = janela_opcoes.index(janela_atual) if janela_atual in janela_opcoes else 0
+
+        ranking_janela = st.selectbox(
+            "Tipo de janela",
+            options=janela_opcoes,
+            index=janela_idx,
+            format_func=lambda x: janela_labels[x],
+            key="ranking_janela_select",
+            disabled=(ranking_modo == "cumulativo"),
+            help="Somente aplicável no modo por janela.",
+        )
+
+        ranking_reprocessamento = st.toggle(
+            "Permitir reprocessamento manual",
+            value=ranking_config.get("permitirreprocessamento", True),
+            key="ranking_reprocessamento_toggle",
+            help="Permite que o sistema reprocesse o ranking com base nos logs existentes ao salvar.",
+        )
+
+    st.divider()
+
+    if st.button("Salvar Configurações do Ranking", use_container_width=True, key="salvar_ranking_config"):
+        agora = get_hora_brasilia().strftime("%d/%m/%Y %H:%M")
+
+        client_data_rk["rankingconfig"] = {
+            "ativo": ranking_ativo,
+            "datainicial": ranking_data_inicial.strftime("%d/%m/%Y"),
+            "modoexibicao": ranking_modo,
+            "tipojanela": ranking_janela,
+            "permitirreprocessamento": ranking_reprocessamento,
+            "ultimareconfiguracao": agora,
+        }
+
+        clients_data_rk[server_id] = client_data_rk
+        save_db(DB_CLIENTS, clients_data_rk)
+        st.session_state.db_clients = clients_data_rk
+
+        st.success(f"Configurações do ranking salvas com sucesso em {agora}")
+        st.rerun()
+
+    st.markdown("### Status Atual")
+    status_col_1, status_col_2, status_col_3 = st.columns(3)
+
+    with status_col_1:
+        st.metric("Status", "Ativo" if ranking_config.get("ativo", True) else "Pausado")
+
+    with status_col_2:
+        st.metric("Última atualização", ranking_stats.get("ultimaatualizacao", "Nunca") or "Nunca")
+
+    with status_col_3:
+        st.metric("Período atual", ranking_stats.get("periodoatual", "-") or "-")
+
+    ultima_reconfiguracao = ranking_config.get("ultimareconfiguracao", "")
+    if ultima_reconfiguracao:
+        st.caption(f"Última reconfiguração: {ultima_reconfiguracao}")
+
+    st.divider()
+
+    st.markdown("### Ranking Atual")
+
+    modo_visualizacao = ranking_config.get("modoexibicao", "cumulativo")
+    if modo_visualizacao == "cumulativo":
+        dados_ranking = ranking_stats.get("acumulado", {})
+        st.caption("Exibindo dados cumulativos desde a data inicial.")
+    else:
+        janela_visualizacao = ranking_config.get("tipojanela", "temporada")
+        janela_labels_resumo = {
+            "temporada": "Temporada manual",
+            "semanal": "Semanal",
+            "mensal": "Mensal",
+        }
+        dados_ranking = ranking_stats.get(janela_visualizacao, ranking_stats.get("acumulado", {}))
+        st.caption(f"Exibindo dados da janela: {janela_labels_resumo.get(janela_visualizacao, janela_visualizacao)}.")
+
+    if dados_ranking:
+        ranking_list = []
+
+        for jogador, stats in dados_ranking.items():
+            if isinstance(stats, dict):
+                kills = stats.get("kills", 0)
+                mortes = stats.get("deaths", 0)
+                xp = stats.get("xp", 0)
+                kd = round(kills / max(mortes, 1), 2)
+
+                ranking_list.append({
+                    "Jogador": jogador,
+                    "Kills": kills,
+                    "Mortes": mortes,
+                    "KD": kd,
+                    "XP": xp,
+                })
+            else:
+                ranking_list.append({
+                    "Jogador": jogador,
+                    "Kills": int(stats),
+                    "Mortes": 0,
+                    "KD": 0.0,
+                    "XP": 0,
+                })
+
+        ranking_list.sort(key=lambda x: x["Kills"], reverse=True)
+
+        for posicao, row in enumerate(ranking_list, start=1):
+            row["#"] = posicao
+
+        df_ranking = pd.DataFrame(ranking_list)[["#", "Jogador", "Kills", "Mortes", "KD", "XP"]]
+        st.dataframe(df_ranking, use_container_width=True, hide_index=True)
+    else:
+        st.info("Nenhum dado de ranking disponível para o período configurado. Os dados são gerados automaticamente durante o processamento dos logs.")
 
 with tab8:
     st.subheader("🏦 Banco & Carteira")
