@@ -3215,7 +3215,7 @@ with st.sidebar:
 st.title(f"🎮 {user_info['server']}")
 
 # Inclusão da "⚙️ Feeds / Bot" entre "🏦 Banco / Carteira" e "💎 Planos"
-tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tabraid, tab6, tab7, tab_analytics, tab_ranking, tab8, tab_feeds, tab_planos = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab_raid, tab6, tab7, tab_analytics, tab_ranking, tab8, tab_feeds, tab_planos = st.tabs([
     "📅 Eventos Agendados", 
     "📋 Histórico Logs", 
     "📢 Comunicados", 
