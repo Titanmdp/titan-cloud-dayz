@@ -827,7 +827,7 @@ def proworker():
                             registrar_log(client_id, f"Arquivo perdido: {agenda['file']}", "erro")
                             mudou = True
                         else:
-                            ok, msg = disparar_ftp_pro(
+                            ok, msg = dispararftppro(
                                 client_id,
                                 "UPLOAD",
                                 agenda["file"],
@@ -843,7 +843,7 @@ def proworker():
                             mudou = True
 
                     if hora_saida and now >= hora_saida and agenda.get("status") == "Ativo":
-                        ok, msg = disparar_ftp_pro(
+                        ok, msg = dispararftppro(
                             client_id,
                             "DELETE",
                             agenda["file"],
@@ -874,7 +874,7 @@ def proworker():
 
                     # Ação: INICIAR RAID
                     if raid_agenda["status"] == "Aguardando" and now >= inicio_raid:
-                        ok, content, msg = baixar_cfggameplay_via_ftp(client_id, raid_agenda["mapa"])
+                        ok, content, msg = baixarcfggameplayviaftp(client_id, raid_agenda["mapa"])
                         if ok:
                             try:
                                 cfg_json = json.loads(content.decode("utf-8"))
@@ -902,7 +902,7 @@ def proworker():
 
                     # Ação: ENCERRAR RAID
                     elif raid_agenda["status"] == "Ativo" and now >= fim_raid:
-                        ok, content, msg = baixar_cfggameplay_via_ftp(client_id, raid_agenda["mapa"])
+                        ok, content, msg = baixarcfggameplayviaftp(client_id, raid_agenda["mapa"])
                         if ok:
                             try:
                                 cfg_json = json.loads(content.decode("utf-8"))
@@ -2983,7 +2983,7 @@ if "ranking_config" not in clientdata:
         "permitirreprocessamento": True,
         "ultimareconfiguracao": "",
     }
-    savedb(DB_CLIENTS, st.session_state.dbclients)
+    save_db(DB_CLIENTS, st.session_state.dbclients)
 
 if "rankingstats" not in clientdata:
     clientdata["rankingstats"] = {
@@ -2994,7 +2994,7 @@ if "rankingstats" not in clientdata:
         "semanal": {},
         "mensal": {},
     }
-    savedb(DB_CLIENTS, st.session_state.dbclients)
+    save_db(DB_CLIENTS, st.session_state.dbclients)
     
 # --- PASSO 7: ESTRUTURA PARA DETECÇÃO DE SPAM DE OBJETOS (GRC) ---
 if "tracking_acoes" not in client_data:
