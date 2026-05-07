@@ -842,6 +842,9 @@ def proworker():
                             )
                             mudou = True
 
+                            if ok:
+                                continue
+
                     if hora_saida and now >= hora_saida and agenda.get("status") == "Ativo":
                         ok, msg = dispararftppro(
                             client_id,
