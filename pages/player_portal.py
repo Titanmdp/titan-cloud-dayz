@@ -2649,18 +2649,17 @@ def main():
         clients_db[server_id] = client_data
         save_db(DB_CLIENTS, clients_db)
 
-    if "ranking_stats" not in client_data:
-        client_data["ranking_stats"] = {
-            "ultima_atualizacao": "",
-            "periodo_atual": "",
-            "acumulado": {},
-            "diario": {},
-            "semanal": {},
-            "mensal": {},
-        }
-        clients_db[server_id] = client_data
-        save_db(DB_CLIENTS, clients_db)
-
+if "ranking_stats" not in client_data:
+    client_data["ranking_stats"] = {
+        "ultima_atualizacao": "",
+        "periodo_atual": "",
+        "acumulado": {},
+        "diario": {},
+        "semanal": {},
+        "mensal": {},
+    }
+    clients_db[server_id] = client_data
+    save_db(DB_CLIENTS, clients_db)
     server_nome = st.session_state.get("portal_server_nome", "Servidor")
     nitrado_id = nitrado_id_map.get(server_id, server_id)
 
@@ -2944,7 +2943,20 @@ def main():
         st.markdown("### 🛒 Loja Virtual")
 
         clients_db_loja = load_db(DB_CLIENTS, {})
+        # Resolve client_data_loja pelo mesmo server_id que foi usado para
+        # carregar players/wallets/bank — garante que os saldos batem.
         client_data_loja = clients_db_loja.get(server_id, {})
+        # Se não encontrou dados (server_id pode ser KeyUser e dados estão em outro ID),
+        # tenta buscar pela KeyUser diretamente
+        if not client_data_loja.get("loja") and not client_data_loja.get("wallets"):
+            users_db_tmp = load_db(DB_USERS, {})
+            for _kuser, _kdata in users_db_tmp.get("keys", {}).items():
+                if _kdata.get("server_id", "") == server_id or _kuser == server_id:
+                    _alt = clients_db_loja.get(_kdata.get("server_id", _kuser), {})
+                    if _alt.get("loja") or _alt.get("wallets"):
+                        client_data_loja = _alt
+                        break
+
         loja = client_data_loja.get("loja", {})
         itens = [i for i in loja.get("itens", []) if i.get("ativo", True)]
 
@@ -2957,6 +2969,9 @@ def main():
             bank_loja = client_data_loja.get("bank", {})
             saldo_w = wallets_loja.get(gamertag_vinculada, {}).get("balance", 0)
             saldo_b = bank_loja.get(gamertag_vinculada, {}).get("balance", 0)
+
+            # DEBUG: log para rastrear saldo encontrado
+            print(f"[LOJA DEBUG] gamertag={gamertag_vinculada} | server_id={server_id} | saldo_w={saldo_w} | saldo_b={saldo_b}")
 
             col_sw, col_sb, col_st = st.columns(3)
             col_sw.metric("💰 Carteira", f"{saldo_w} DzCoins")
