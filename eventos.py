@@ -857,6 +857,25 @@ def proworker():
                                 agenda["localpath"],
                                 agenda["path"],
                             )
+                            if ok:
+                                cfgg_ok, cfgg_msg = adicionar_agenda_em_cfggameplay(
+                                    client_id,
+                                    agenda["mapa"],
+                                    agenda["file"],
+                                )
+                                if cfgg_ok:
+                                    registrar_log(
+                                        client_id,
+                                        f"Arquivo registrado em cfggameplay: {agenda['file']}",
+                                        "sucesso",
+                                    )
+                                else:
+                                    registrar_log(
+                                        client_id,
+                                        f"Falha ao registrar em cfggameplay: {cfgg_msg}",
+                                        "erro",
+                                    )
+
                             agenda["status"] = "Ativo" if ok else "Erro"
                             registrar_log(
                                 client_id,
@@ -868,7 +887,7 @@ def proworker():
                             if ok:
                                 continue
 
-                    if hora_saida and now >= hora_saida and agenda.get("status") == "Ativo":
+                    if hora_saida and now > hora_saida and agenda.get("status") == "Ativo":
                         ok, msg = dispararftppro(
                             client_id,
                             "DELETE",
@@ -1647,6 +1666,46 @@ def enviar_cfggameplay_via_ftp(clientid, localpath, mapa):
         remotedir=remotedir,
         remotefilename="cfggameplay.json",
     )
+
+
+def adicionar_agenda_em_cfggameplay(clientid, mapa, filename):
+    """
+    Garante que o arquivo de agenda esteja registrado em
+    WorldsData.objectSpawnersArr de cfggameplay.json e envia
+    o cfggameplay atualizado ao servidor.
+    """
+    ok, content, msg = baixarcfggameplayviaftp(clientid, mapa)
+    if not ok:
+        return False, f"Erro ao baixar cfggameplay.json: {msg}"
+
+    try:
+        cfg_json = json.loads(content.decode("utf-8"))
+    except Exception as e:
+        return False, f"JSON inválido cfggameplay.json: {e}"
+
+    worlds = cfg_json.setdefault("WorldsData", {})
+    object_spawners = worlds.get("objectSpawnersArr")
+    if not isinstance(object_spawners, list):
+        object_spawners = []
+
+    entry = f"custom/{filename}"
+    if entry not in object_spawners:
+        object_spawners.append(entry)
+        worlds["objectSpawnersArr"] = object_spawners
+        cfg_json["WorldsData"] = worlds
+
+        safe_cfg_name = f"{clientid[:5]}_cfggameplay_{mapa.lower()}_{int(time.time())}.json"
+        local_cfg_path = os.path.join(UPLOAD_DIR, safe_cfg_name)
+
+        try:
+            with open(local_cfg_path, "w", encoding="utf-8") as f:
+                json.dump(cfg_json, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            return False, f"Erro ao salvar cfggameplay localmente: {e}"
+
+        return enviar_cfggameplay_via_ftp(clientid, local_cfg_path, mapa)
+
+    return True, "Já registrado"
 
 def enviareventsviaftp(clientid, localpath, mapa):
     """
@@ -3362,6 +3421,22 @@ with tab1:
                         f"Agendado: {arquivo_em_sessao['name']} ({mapa})",
                         "info",
                     )
+
+                    ok_cfgg, msg_cfgg = adicionar_agenda_em_cfggameplay(
+                        user_id, mapa, arquivo_em_sessao["name"]
+                    )
+                    if ok_cfgg:
+                        registrar_log(
+                            user_id,
+                            f"Registrado em cfggameplay: {arquivo_em_sessao['name']}",
+                            "sucesso",
+                        )
+                    else:
+                        registrar_log(
+                            user_id,
+                            f"Falha ao registrar em cfggameplay: {msg_cfgg}",
+                            "erro",
+                        )
 
                     st.session_state.pop(upload_session_key, None)
 
