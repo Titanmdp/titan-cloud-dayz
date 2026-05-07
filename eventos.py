@@ -832,10 +832,11 @@ def proworker():
                         f"path={agenda.get('path')}"
                     )
 
+                    # UPLOAD: se estamos DENTRO da janela e ainda não foi upado
                     if (
                         hora_entrada
                         and now >= hora_entrada
-                        and now <= hora_saida
+                        and now < hora_saida
                         and agenda.get("status") == "Aguardando"
                     ):
                         if not os.path.exists(agenda["localpath"]) and agenda.get("filecontent"):
@@ -888,7 +889,14 @@ def proworker():
                             if ok:
                                 continue
 
-                    if hora_saida and now > hora_saida and agenda.get("status") == "Ativo":
+                    # DELETE: APENAS após a hora de saída
+                    if hora_saida and now >= hora_saida and agenda.get("status") == "Ativo":
+                        print(
+                            f"[AGENDA DELETE DEBUG] file={agenda.get('file')} | "
+                            f"now={now.strftime('%d/%m/%Y %H:%M:%S')} | "
+                            f"hora_saida={hora_saida} | "
+                            f"now >= hora_saida: {now >= hora_saida}"
+                        )
                         ok, msg = dispararftppro(
                             client_id,
                             "DELETE",
