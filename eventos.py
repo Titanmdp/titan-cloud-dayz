@@ -808,7 +808,6 @@ def proworker():
                     hora_entrada = str_to_time(agenda.get("data"), agenda.get("in"))
                     hora_saida = str_to_time(agenda.get("data"), agenda.get("out"))
 
-                    # Tolerância de 30s para eventos agendados muito próximos do horário atual
                     if (
                         hora_entrada
                         and now >= (hora_entrada - timedelta(seconds=30))
