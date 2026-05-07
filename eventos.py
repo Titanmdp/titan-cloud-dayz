@@ -172,8 +172,10 @@ def str_to_time(data_str, hora_str):
     Usa replace() apenas para definir o fuso — compatível com pytz-free.
     """
     try:
+        if not data_str or not hora_str:
+            return None
         return datetime.strptime(
-            f"{data_str} {hora_str}",
+            f"{str(data_str).strip()} {str(hora_str).strip()}",
             "%d/%m/%Y %H:%M"
         ).replace(tzinfo=FUSO_BR)
     except Exception:
@@ -832,7 +834,7 @@ def proworker():
 
                     if (
                         hora_entrada
-                        and now >= (hora_entrada - timedelta(seconds=30))
+                        and now >= hora_entrada
                         and agenda.get("status") == "Aguardando"
                     ):
                         if not os.path.exists(agenda["localpath"]) and agenda.get("filecontent"):
