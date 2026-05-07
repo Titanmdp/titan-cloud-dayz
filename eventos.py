@@ -835,6 +835,7 @@ def proworker():
                     if (
                         hora_entrada
                         and now >= hora_entrada
+                        and now <= hora_saida
                         and agenda.get("status") == "Aguardando"
                     ):
                         if not os.path.exists(agenda["localpath"]) and agenda.get("filecontent"):
