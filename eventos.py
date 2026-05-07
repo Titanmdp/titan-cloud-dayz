@@ -911,18 +911,31 @@ def proworker():
                             mudou = True
                             # Não faz continue aqui - deixa o loop continuar
 
-                    # DELETE: APENAS e EXCLUSIVAMENTE após a hora de saída ter passado
-                    # Condição: status "Ativo", passou hora_saida COMPLETAMENTE
+                    # Marca como finalizado quando a hora de saída passou
                     if (
                         hora_saida
-                        and now > hora_saida
+                        and now >= hora_saida
                         and agenda.get("status") == "Ativo"
                     ):
                         print(
-                            f"[AGENDA DELETE] Iniciando exclusão de {agenda.get('file')} | "
+                            f"[AGENDA FINALIZADA] {agenda.get('file')} agora está finalizada | "
                             f"now={now.strftime('%d/%m/%Y %H:%M:%S')} | "
-                            f"hora_saida={hora_saida.strftime('%d/%m/%Y %H:%M:%S')} | "
-                            f"Diferença: {(now - hora_saida).total_seconds()} segundos após saída"
+                            f"hora_saida={hora_saida.strftime('%d/%m/%Y %H:%M:%S')}"
+                        )
+                        agenda["status"] = "Finalizado"
+                        mudou = True
+                        continue
+
+                    # DELETE: somente se já estiver Finalizado e hora_saida tiver passado
+                    if (
+                        hora_saida
+                        and now > hora_saida
+                        and agenda.get("status") == "Finalizado"
+                    ):
+                        print(
+                            f"[AGENDA DELETE] Excluindo {agenda.get('file')} após finalização | "
+                            f"now={now.strftime('%d/%m/%Y %H:%M:%S')} | "
+                            f"hora_saida={hora_saida.strftime('%d/%m/%Y %H:%M:%S')}"
                         )
                         ok, msg = dispararftppro(
                             client_id,
