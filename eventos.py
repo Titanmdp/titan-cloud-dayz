@@ -550,19 +550,31 @@ def dispararftppro(clientid, acao, filename, localpath, mapapath):
         ftp = ftplib.FTP()
         ftp.connect(conf["host"], int(conf["port"]), timeout=15)
         ftp.login(conf["user"], conf["pass"])
-        ftp.cwd(mapapath)
+
+        # Remove barra inicial se houver (causa falha de cwd no Nitrado)
+        mapapath_clean = mapapath.lstrip("/")
+
+        print(f"[FTP DEBUG] acao={acao} | file={filename} | path={mapapath_clean}")
+        ftp.cwd(mapapath_clean)
+        print(f"[FTP DEBUG] cwd atual: {ftp.pwd()}")
+
         if acao == "UPLOAD":
+            print(f"[FTP DEBUG] nlst antes: {ftp.nlst()}")
             with open(localpath, "rb") as f:
                 ftp.storbinary(f"STOR {filename}", f)
+            print(f"[FTP DEBUG] nlst depois: {ftp.nlst()}")
         elif acao == "DELETE":
             try:
                 ftp.delete(filename)
-            except Exception:
-                pass
+                print(f"[FTP DEBUG] DELETE executado: {filename}")
+            except Exception as del_err:
+                print(f"[FTP DEBUG] DELETE falhou: {del_err}")
+
         ftp.quit()
         return True, "Sucesso"
-    except Exception:
-        return False, "Erro"
+    except Exception as e:
+        print(f"[FTP ERROR] dispararftppro: {e}")
+        return False, str(e)
 
 def worker_dzcoins_automatico():
     """
@@ -807,6 +819,16 @@ def proworker():
                 for agenda in client_info.get("agendas", []):
                     hora_entrada = str_to_time(agenda.get("data"), agenda.get("in"))
                     hora_saida = str_to_time(agenda.get("data"), agenda.get("out"))
+
+                    # [DEBUG] Logs de diagnóstico do agendamento
+                    print(
+                        f"[AGENDA DEBUG] file={agenda.get('file')} | "
+                        f"status={agenda.get('status')} | "
+                        f"now={now.strftime('%d/%m/%Y %H:%M:%S')} | "
+                        f"hora_entrada={hora_entrada} | "
+                        f"hora_saida={hora_saida} | "
+                        f"path={agenda.get('path')}"
+                    )
 
                     if (
                         hora_entrada
@@ -3321,9 +3343,9 @@ with tab1:
                         "localpath": path,
                         "filecontent": arquivo_em_sessao["b64"],
                         "mapa": mapa,
-                        "path": "/dayzxb_missions/dayzOffline.chernarusplus/custom"
+                        "path": "dayzxb_missions/dayzOffline.chernarusplus/custom"
                         if mapa == "Chernarus"
-                        else "/dayzxb_missions/dayzOffline.enoch/custom",
+                        else "dayzxb_missions/dayzOffline.enoch/custom",
                         "data": dt_ev.strftime("%d/%m/%Y"),
                         "in": h_in,
                         "out": h_out,
@@ -5661,8 +5683,13 @@ with tab8:
 
     # 1) Garante que há um servidor válido na sessão
     user_key = st.session_state.get("user_key", "")
-    nitrado_id = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", "")
-    server_id = user_key
+    server_id_real = st.session_state.db_users.get("keys", {}).get(user_key, {}).get("server_id", "")
+    nitrado_id = server_id_real
+
+    # Usa server_id real (onde players/wallets/bank estão salvos).
+    # Fallback para user_key se server_id não estiver configurado.
+    server_id = server_id_real if server_id_real else user_key
+
     if not server_id:
         st.error(
             "Nenhum servidor vinculado a este login.\n"
@@ -5672,7 +5699,11 @@ with tab8:
 
     # 2) Carrega dados do servidor
     clients_data = load_db(DB_CLIENTS, {})
+    # Tenta server_id real primeiro; fallback para user_key se vazio
     client_data = clients_data.get(server_id, {})
+    if not client_data and server_id != user_key:
+        client_data = clients_data.get(user_key, {})
+        server_id = user_key
     
     # Garante estruturas básicas
     players = client_data.get("players", {})
