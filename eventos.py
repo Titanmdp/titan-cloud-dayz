@@ -832,13 +832,24 @@ def proworker():
                         f"path={agenda.get('path')}"
                     )
 
-                    # UPLOAD: se estamos DENTRO da janela e ainda não foi upado
+                    # Inicializa flags de controle se não existirem
+                    if "ja_upado" not in agenda:
+                        agenda["ja_upado"] = False
+
+                    # UPLOAD: APENAS quando entramos na janela e ainda não foi upado
+                    # Condição: status "Aguardando", passou hora_entrada, ainda não atingiu hora_saida
                     if (
                         hora_entrada
+                        and hora_saida
                         and now >= hora_entrada
                         and now < hora_saida
                         and agenda.get("status") == "Aguardando"
+                        and not agenda.get("ja_upado")
                     ):
+                        print(
+                            f"[AGENDA UPLOAD] Iniciando upload de {agenda.get('file')} | "
+                            f"now={now.strftime('%d/%m/%Y %H:%M:%S')}"
+                        )
                         if not os.path.exists(agenda["localpath"]) and agenda.get("filecontent"):
                             try:
                                 os.makedirs(os.path.dirname(agenda["localpath"]), exist_ok=True)
@@ -849,6 +860,7 @@ def proworker():
 
                         if not os.path.exists(agenda["localpath"]):
                             agenda["status"] = "Erro"
+                            agenda["ja_upado"] = False
                             registrar_log(client_id, f"Arquivo perdido: {agenda['file']}", "erro")
                             mudou = True
                         else:
@@ -860,6 +872,7 @@ def proworker():
                                 agenda["path"],
                             )
                             if ok:
+                                print(f"[AGENDA UPLOAD OK] {agenda.get('file')} enviado ao FTP")
                                 cfgg_ok, cfgg_msg = adicionar_agenda_em_cfggameplay(
                                     client_id,
                                     agenda["mapa"],
@@ -878,24 +891,38 @@ def proworker():
                                         "erro",
                                     )
 
-                            agenda["status"] = "Ativo" if ok else "Erro"
-                            registrar_log(
-                                client_id,
-                                f"UPLOAD {agenda['file']} {'OK' if ok else msg}",
-                                "sucesso" if ok else "erro",
-                            )
+                                agenda["status"] = "Ativo"
+                                agenda["ja_upado"] = True  # Marca como upado
+                                registrar_log(
+                                    client_id,
+                                    f"UPLOAD {agenda['file']} OK - Arquivo permanecerá no FTP até {agenda.get('out')}",
+                                    "sucesso",
+                                )
+                            else:
+                                print(f"[AGENDA UPLOAD ERRO] {agenda.get('file')} - {msg}")
+                                agenda["status"] = "Erro"
+                                agenda["ja_upado"] = False
+                                registrar_log(
+                                    client_id,
+                                    f"UPLOAD {agenda['file']} FALHOU: {msg}",
+                                    "erro",
+                                )
+
                             mudou = True
+                            # Não faz continue aqui - deixa o loop continuar
 
-                            if ok:
-                                continue
-
-                    # DELETE: APENAS após a hora de saída
-                    if hora_saida and now >= hora_saida and agenda.get("status") == "Ativo":
+                    # DELETE: APENAS e EXCLUSIVAMENTE após a hora de saída ter passado
+                    # Condição: status "Ativo", passou hora_saida COMPLETAMENTE
+                    if (
+                        hora_saida
+                        and now > hora_saida
+                        and agenda.get("status") == "Ativo"
+                    ):
                         print(
-                            f"[AGENDA DELETE DEBUG] file={agenda.get('file')} | "
+                            f"[AGENDA DELETE] Iniciando exclusão de {agenda.get('file')} | "
                             f"now={now.strftime('%d/%m/%Y %H:%M:%S')} | "
-                            f"hora_saida={hora_saida} | "
-                            f"now >= hora_saida: {now >= hora_saida}"
+                            f"hora_saida={hora_saida.strftime('%d/%m/%Y %H:%M:%S')} | "
+                            f"Diferença: {(now - hora_saida).total_seconds()} segundos após saída"
                         )
                         ok, msg = dispararftppro(
                             client_id,
@@ -904,11 +931,17 @@ def proworker():
                             agenda["localpath"],
                             agenda["path"],
                         )
+                        print(
+                            f"[AGENDA DELETE {'OK' if ok else 'ERRO'}] {agenda.get('file')} - {msg}"
+                        )
                         registrar_log(
                             client_id,
                             f"DELETE {agenda['file']} {'OK' if ok else msg}",
                             "sucesso" if ok else "erro",
                         )
+
+                        # Reset da flag para reutilização em recorrências
+                        agenda["ja_upado"] = False
 
                         if agenda.get("rec") == "Diário":
                             agenda["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
