@@ -3494,11 +3494,6 @@ with tab1:
                         )
 
                     st.session_state.pop(upload_session_key, None)
-                    st.session_state.pop(f"h_in_main_{user_id}", None)
-                    st.session_state.pop(f"h_out_main_{user_id}", None)
-                    st.session_state.pop(f"date_sel_main_{user_id}", None)
-                    st.session_state.pop(f"map_sel_main_{user_id}", None)
-                    st.session_state.pop(f"rec_sel_main_{user_id}", None)
 
                     st.success("Evento agendado com sucesso!")
                     time.sleep(0.5)
