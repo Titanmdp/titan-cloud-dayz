@@ -911,6 +911,19 @@ def proworker():
                             mudou = True
                             # Não faz continue aqui - deixa o loop continuar
 
+                    elif (
+                        hora_saida
+                        and now >= hora_saida
+                        and agenda.get("status") == "Aguardando"
+                    ):
+                        print(
+                            f"[AGENDA EXPIRED] {agenda.get('file')} expirou sem upload | "
+                            f"now={now.strftime('%d/%m/%Y %H:%M:%S')} | "
+                            f"saida={hora_saida}"
+                        )
+                        agenda["status"] = "Finalizado"
+                        mudou = True
+
                     # Marca como finalizado quando a hora de saída passou
                     if (
                         hora_saida
