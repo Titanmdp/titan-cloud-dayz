@@ -3565,7 +3565,7 @@ with tab1:
     with c2:
         st.subheader("Lista de Execução")
 
-        agendaslista_original = clientdata.get("agendas", [])
+        agendaslista_original = client_data.get("agendas", [])
         agendaslista = []
 
         for agenda in agendaslista_original:
@@ -3609,10 +3609,10 @@ with tab1:
                         type="secondary",
                     ):
                         nome_arquivo = agenda["file"]
-                        clientdata["agendas"] = [
-                            a for a in clientdata["agendas"] if a["id"] != agenda["id"]
+                        client_data["agendas"] = [
+                            a for a in client_data["agendas"] if a["id"] != agenda["id"]
                         ]
-                        save_db(DB_CLIENTS, st.session_state.dbclients)
+                        save_db(DB_CLIENTS, st.session_state.db_clients)
                         registrar_log(userid, f"Removido {nome_arquivo}", "info")
                         st.toast(f"Evento {nome_arquivo} removido!")
                         st.rerun()
