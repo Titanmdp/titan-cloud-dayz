@@ -3562,60 +3562,60 @@ with tab1:
                 else:
                     st.warning("Selecione um arquivo antes de confirmar.")
 
-                    with c2:
-                    st.subheader("Lista de Execução")
+    with c2:
+        st.subheader("Lista de Execução")
 
-                    agendaslista_original = clientdata.get("agendas", [])
-                    agendaslista = []
+        agendaslista_original = clientdata.get("agendas", [])
+        agendaslista = []
 
-                    for agenda in agendaslista_original:
-                        # Oculta eventos únicos já finalizados da interface
-                        if agenda.get("rec") == "Único" and agenda.get("status") == "Finalizado":
-                            continue
-                        agendaslista.append(agenda)
+        for agenda in agendaslista_original:
+            # Oculta eventos únicos já finalizados da interface
+            if agenda.get("rec") == "Único" and agenda.get("status") == "Finalizado":
+                continue
+            agendaslista.append(agenda)
 
-                    if not agendaslista:
-                        st.info("Nenhum evento agendado.")
-                    else:
-                        for agenda in agendaslista:
-                            status_atual = agenda.get("status", "Aguardando")
-                            cor = {
-                                "Aguardando": "🟡",
-                                "Ativo": "🟢",
-                                "Finalizado": "⚫",
-                                "Erro": "🔴",
-                            }.get(status_atual, "⚪")
+        if not agendaslista:
+            st.info("Nenhum evento agendado.")
+        else:
+            for agenda in agendaslista:
+                status_atual = agenda.get("status", "Aguardando")
+                cor = {
+                    "Aguardando": "🟡",
+                    "Ativo": "🟢",
+                    "Finalizado": "⚫",
+                    "Erro": "🔴",
+                }.get(status_atual, "⚪")
 
-                            titulo_expander = f"{cor} {agenda['file']} - {agenda['data']} - {agenda['mapa']}"
+                titulo_expander = f"{cor} {agenda['file']} - {agenda['data']} - {agenda['mapa']}"
 
-                            with st.expander(titulo_expander):
-                                inf1, inf2 = st.columns(2)
+                with st.expander(titulo_expander):
+                    inf1, inf2 = st.columns(2)
 
-                                with inf1:
-                                    st.write(f"**Arquivo:** {agenda['file']}")
-                                    st.write(f"**Mapa:** {agenda['mapa']}")
-                                    st.write(f"**Recorrência:** {agenda.get('rec', 'Único')}")
+                    with inf1:
+                        st.write(f"**Arquivo:** {agenda['file']}")
+                        st.write(f"**Mapa:** {agenda['mapa']}")
+                        st.write(f"**Recorrência:** {agenda.get('rec', 'Único')}")
 
-                                with inf2:
-                                    st.write(f"**Janela:** {agenda['in']} às {agenda['out']}")
-                                    st.write(f"**Status:** {status_atual}")
+                    with inf2:
+                        st.write(f"**Janela:** {agenda['in']} às {agenda['out']}")
+                        st.write(f"**Status:** {status_atual}")
 
-                                st.divider()
+                    st.divider()
 
-                                if st.button(
-                                    "Remover Agendamento",
-                                    key=f"remmain_{agenda['id']}",
-                                    use_container_width=True,
-                                    type="secondary",
-                                ):
-                                    nome_arquivo = agenda["file"]
-                                    clientdata["agendas"] = [
-                                        a for a in clientdata["agendas"] if a["id"] != agenda["id"]
-                                    ]
-                                    save_db(DB_CLIENTS, st.session_state.dbclients)
-                                    registrar_log(userid, f"Removido {nome_arquivo}", "info")
-                                    st.toast(f"Evento {nome_arquivo} removido!")
-                                    st.rerun()
+                    if st.button(
+                        "Remover Agendamento",
+                        key=f"remmain_{agenda['id']}",
+                        use_container_width=True,
+                        type="secondary",
+                    ):
+                        nome_arquivo = agenda["file"]
+                        clientdata["agendas"] = [
+                            a for a in clientdata["agendas"] if a["id"] != agenda["id"]
+                        ]
+                        save_db(DB_CLIENTS, st.session_state.dbclients)
+                        registrar_log(userid, f"Removido {nome_arquivo}", "info")
+                        st.toast(f"Evento {nome_arquivo} removido!")
+                        st.rerun()
 
 with tab2:
     st.subheader("📜 Histórico de Atividades")
