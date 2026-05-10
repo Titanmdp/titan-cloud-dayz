@@ -817,13 +817,12 @@ def proworker():
                 if not feeds_config.get("baixar_logs", True):
                     continue
 
-                # --- 1. LÓGICA DE AGENDAS DE ARQUIVOS (AJUSTADA) ---
+                                # --- 1. LÓGICA DE AGENDAS DE ARQUIVOS ---
                 for agenda in client_info.get("agendas", []):
                     try:
                         hora_entrada = str_to_time(agenda.get("data"), agenda.get("in"))
                         hora_saida = str_to_time(agenda.get("data"), agenda.get("out"))
 
-                        # [DEBUG] Logs de diagnóstico do agendamento
                         print(
                             f"[AGENDA DEBUG] file={agenda.get('file')} | "
                             f"status={agenda.get('status')} | "
@@ -833,12 +832,10 @@ def proworker():
                             f"path={agenda.get('path')}"
                         )
 
-                        # Inicializa flags de controle se não existirem
                         if "ja_upado" not in agenda:
                             agenda["ja_upado"] = False
 
-                        # UPLOAD: APENAS quando entramos na janela e ainda não foi upado
-                        # Condição: status "Aguardando", passou hora_entrada, ainda não atingiu hora_saida
+                        # UPLOAD: entra na janela e sobe o arquivo
                         if (
                             hora_entrada
                             and hora_saida
@@ -851,6 +848,7 @@ def proworker():
                                 f"[AGENDA UPLOAD] Iniciando upload de {agenda.get('file')} | "
                                 f"now={now.strftime('%d/%m/%Y %H:%M:%S')}"
                             )
+
                             if not os.path.exists(agenda["localpath"]) and agenda.get("filecontent"):
                                 try:
                                     os.makedirs(os.path.dirname(agenda["localpath"]), exist_ok=True)
@@ -866,7 +864,11 @@ def proworker():
                             if not os.path.exists(agenda["localpath"]):
                                 agenda["status"] = "Erro"
                                 agenda["ja_upado"] = False
-                                registrar_log(client_id, f"Arquivo perdido: {agenda['file']}", "erro")
+                                registrar_log(
+                                    client_id,
+                                    f"Arquivo perdido: {agenda['file']}",
+                                    "erro",
+                                )
                                 mudou = True
                             else:
                                 ok, msg = dispararftppro(
@@ -876,13 +878,16 @@ def proworker():
                                     agenda["localpath"],
                                     agenda["path"],
                                 )
+
                                 if ok:
                                     print(f"[AGENDA UPLOAD OK] {agenda.get('file')} enviado ao FTP")
+
                                     cfgg_ok, cfgg_msg = adicionar_agenda_em_cfggameplay(
                                         client_id,
                                         agenda["mapa"],
                                         agenda["file"],
                                     )
+
                                     if cfgg_ok:
                                         registrar_log(
                                             client_id,
@@ -915,7 +920,7 @@ def proworker():
 
                                 mudou = True
 
-                        # Expirou sem nunca entrar como ativo
+                        # Expirou sem upload
                         elif (
                             hora_saida
                             and now >= hora_saida
@@ -955,8 +960,7 @@ def proworker():
 
                             mudou = True
 
-                        # DELETE: quando chegou a hora de saída e o evento está ativo
-                        # Regra correta: primeiro remove do FTP, depois finaliza ou reagenda
+                        # Horário de saída: remove do FTP e só depois finaliza/reagenda
                         if (
                             hora_saida
                             and now >= hora_saida
@@ -967,6 +971,7 @@ def proworker():
                                 f"now={now.strftime('%d/%m/%Y %H:%M:%S')} | "
                                 f"hora_saida={hora_saida.strftime('%d/%m/%Y %H:%M:%S')}"
                             )
+
                             ok, msg = dispararftppro(
                                 client_id,
                                 "DELETE",
@@ -974,16 +979,17 @@ def proworker():
                                 agenda["localpath"],
                                 agenda["path"],
                             )
+
                             print(
                                 f"[AGENDA DELETE {'OK' if ok else 'ERRO'}] {agenda.get('file')} - {msg}"
                             )
+
                             registrar_log(
                                 client_id,
                                 f"DELETE {agenda['file']} {'OK' if ok else msg}",
                                 "sucesso" if ok else "erro",
                             )
 
-                            # Reset da flag para reutilização em recorrências
                             agenda["ja_upado"] = False
 
                             if agenda.get("rec") == "Diário":
@@ -1018,7 +1024,9 @@ def proworker():
                             f"Erro inesperado no agendamento {agenda.get('file', '?')}: {exc_agenda}",
                             "erro",
                         )
-                        print(f"[PROWORKER][AGENDA] Erro em {client_id} / {agenda.get('file')}: {exc_agenda}")
+                        print(
+                            f"[PROWORKER][AGENDA] Erro em {client_id} / {agenda.get('file')}: {exc_agenda}"
+                        )
 
                 # --- 2. LÓGICA DE AGENDAS DE RAID AUTOMÁTICO ---
                 for raid_agenda in client_info.get("agendas_raid", []):
@@ -3554,59 +3562,60 @@ with tab1:
                 else:
                     st.warning("Selecione um arquivo antes de confirmar.")
 
-    with c2:
-        st.subheader("📋 Lista de Execução")
-        agendas_lista = client_data.get("agendas", [])
+                    with c2:
+                    st.subheader("Lista de Execução")
 
-        if not agendas_lista:
-            st.info("Nenhum evento agendado.")
-        else:
-            for agenda in agendas_lista:
-                status_atual = agenda.get("status", "Aguardando")
-                cor = {
-                    "Aguardando": "🔵",
-                    "Ativo": "🟢",
-                    "Finalizado": "⚪",
-                }.get(status_atual, "🔴")
+                    agendaslista_original = clientdata.get("agendas", [])
+                    agendaslista = []
 
-                titulo_expander = (
-                    f"{cor} {agenda['file']} | 📅 {agenda['data']} | 🗺️ {agenda['mapa']}"
-                )
+                    for agenda in agendaslista_original:
+                        # Oculta eventos únicos já finalizados da interface
+                        if agenda.get("rec") == "Único" and agenda.get("status") == "Finalizado":
+                            continue
+                        agendaslista.append(agenda)
 
-                with st.expander(titulo_expander):
-                    inf1, inf2 = st.columns(2)
+                    if not agendaslista:
+                        st.info("Nenhum evento agendado.")
+                    else:
+                        for agenda in agendaslista:
+                            status_atual = agenda.get("status", "Aguardando")
+                            cor = {
+                                "Aguardando": "🟡",
+                                "Ativo": "🟢",
+                                "Finalizado": "⚫",
+                                "Erro": "🔴",
+                            }.get(status_atual, "⚪")
 
-                    with inf1:
-                        st.write(f"**📄 Arquivo:** `{agenda['file']}`")
-                        st.write(f"**🗺️ Mapa:** {agenda['mapa']}")
-                        st.write(f"**🔄 Recorrência:** {agenda.get('rec', 'Único')}")
+                            titulo_expander = f"{cor} {agenda['file']} - {agenda['data']} - {agenda['mapa']}"
 
-                    with inf2:
-                        st.write(f"**⏰ Janela:** {agenda['in']} > {agenda['out']}")
-                        st.write(f"**📌 Status:** {status_atual}")
+                            with st.expander(titulo_expander):
+                                inf1, inf2 = st.columns(2)
 
-                    st.divider()
+                                with inf1:
+                                    st.write(f"**Arquivo:** {agenda['file']}")
+                                    st.write(f"**Mapa:** {agenda['mapa']}")
+                                    st.write(f"**Recorrência:** {agenda.get('rec', 'Único')}")
 
-                    if st.button(
-                        "Remover Agendamento",
-                        key=f"rem_main_{agenda['id']}",
-                        use_container_width=True,
-                        type="secondary",
-                    ):
-                        nome_arquivo = agenda["file"]
-                        client_data["agendas"] = [
-                            a for a in client_data["agendas"] if a["id"] != agenda["id"]
-                        ]
+                                with inf2:
+                                    st.write(f"**Janela:** {agenda['in']} às {agenda['out']}")
+                                    st.write(f"**Status:** {status_atual}")
 
-                        save_db(DB_CLIENTS, st.session_state.db_clients)
-                        registrar_log(
-                            user_id,
-                            f"Removido: {nome_arquivo}",
-                            "info",
-                        )
+                                st.divider()
 
-                        st.toast(f"Evento {nome_arquivo} removido!")
-                        st.rerun()
+                                if st.button(
+                                    "Remover Agendamento",
+                                    key=f"remmain_{agenda['id']}",
+                                    use_container_width=True,
+                                    type="secondary",
+                                ):
+                                    nome_arquivo = agenda["file"]
+                                    clientdata["agendas"] = [
+                                        a for a in clientdata["agendas"] if a["id"] != agenda["id"]
+                                    ]
+                                    save_db(DB_CLIENTS, st.session_state.dbclients)
+                                    registrar_log(userid, f"Removido {nome_arquivo}", "info")
+                                    st.toast(f"Evento {nome_arquivo} removido!")
+                                    st.rerun()
 
 with tab2:
     st.subheader("📜 Histórico de Atividades")
