@@ -3513,6 +3513,11 @@ with tab1:
                         with open(path, "wb") as f:
                             f.write(arquivo_em_sessao["bytes"])
                     except Exception as e:
+                        registrar_log(
+                            user_id,
+                            f"❌ Erro ao salvar arquivo localmente: {arquivo_em_sessao['name']} | {e}",
+                            "erro",
+                        )
                         st.error(f"Erro ao salvar arquivo localmente: {e}")
                         st.stop()
 
@@ -3523,36 +3528,80 @@ with tab1:
                         "filecontent": arquivo_em_sessao["b64"],
                         "mapa": mapa,
                         "path": "dayzxb_missions/dayzOffline.chernarusplus/custom" if mapa == "Chernarus" else "dayzxb_missions/dayzOffline.enoch/custom",
-                        "data": dtev.strftime("%d/%m/%Y"),
-                        "in": hin,
-                        "out": hout,
+                        "data": dt_ev.strftime("%d/%m/%Y"),
+                        "in": h_in,
+                        "out": h_out,
                         "rec": rec,
                         "status": "Aguardando",
                         "ja_upado": False,
                         "cfggameplay_registrado": False,
                     }
 
+                    agenda_duplicada = next(
+                        (
+                            item for item in client_data.get("agendas", [])
+                            if item.get("file") == nova_agenda.get("file")
+                            and item.get("mapa") == nova_agenda.get("mapa")
+                            and item.get("data") == nova_agenda.get("data")
+                            and item.get("in") == nova_agenda.get("in")
+                            and item.get("out") == nova_agenda.get("out")
+                            and item.get("rec", "Único") == nova_agenda.get("rec", "Único")
+                            and item.get("status") in ["Aguardando", "Ativo"]
+                        ),
+                        None,
+                    )
+
+                    if agenda_duplicada:
+                        registrar_log(
+                            user_id,
+                            (
+                                f"⚠️ Tentativa de agendamento duplicado bloqueada: "
+                                f"{nova_agenda.get('file')} | "
+                                f"Mapa: {nova_agenda.get('mapa')} | "
+                                f"Data: {nova_agenda.get('data')} | "
+                                f"Janela: {nova_agenda.get('in')} às {nova_agenda.get('out')}"
+                            ),
+                            "erro",
+                        )
+                        st.warning("Já existe um agendamento igual ativo ou aguardando para este arquivo.")
+                        st.stop()
+
+                    ok_cfgg, msg_cfgg = adicionar_agenda_em_cfggameplay(
+                        user_id,
+                        mapa,
+                        arquivo_em_sessao["name"],
+                    )
+
+                    if ok_cfgg:
+                        nova_agenda["cfggameplay_registrado"] = True
+                    else:
+                        nova_agenda["cfggameplay_registrado"] = False
+
                     client_data["agendas"].append(nova_agenda)
                     save_db(DB_CLIENTS, st.session_state.db_clients)
+
                     registrar_log(
                         user_id,
-                        f"Agendado: {arquivo_em_sessao['name']} ({mapa})",
+                        (
+                            f"📅 Agendado: {arquivo_em_sessao['name']} | "
+                            f"Mapa: {mapa} | "
+                            f"Data: {nova_agenda['data']} | "
+                            f"Janela: {h_in} às {h_out} | "
+                            f"Recorrência: {rec}"
+                        ),
                         "info",
                     )
 
-                    ok_cfgg, msg_cfgg = adicionar_agenda_em_cfggameplay(
-                        user_id, mapa, arquivo_em_sessao["name"]
-                    )
                     if ok_cfgg:
                         registrar_log(
                             user_id,
-                            f"Registrado em cfggameplay: {arquivo_em_sessao['name']}",
+                            f"✅ Registrado em cfggameplay: {arquivo_em_sessao['name']}",
                             "sucesso",
                         )
                     else:
                         registrar_log(
                             user_id,
-                            f"Falha ao registrar em cfggameplay: {msg_cfgg}",
+                            f"❌ Falha ao registrar em cfggameplay: {msg_cfgg}",
                             "erro",
                         )
 
