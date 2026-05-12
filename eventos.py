@@ -814,10 +814,8 @@ def proworker():
                 # --- TRAVA DE SEGURANÇA (GRC/GOVERNANÇA) ---
                 # Se o administrador desativar "Baixar Logs Servidor", o worker ignora este cliente
                 feeds_config = client_info.get("feeds_config", {})
-                if not feeds_config.get("baixar_logs", True):
-                    continue
 
-                                # --- 1. LÓGICA DE AGENDAS DE ARQUIVOS ---
+                # --- 1. LÓGICA DE AGENDAS DE ARQUIVOS ---
                 for agenda in client_info.get("agendas", []):
                     try:
                         hora_entrada = str_to_time(agenda.get("data"), agenda.get("in"))
@@ -849,28 +847,52 @@ def proworker():
                                 f"now={now.strftime('%d/%m/%Y %H:%M:%S')}"
                             )
 
-                            if not os.path.exists(agenda["localpath"]) and agenda.get("filecontent"):
+                            if not os.path.exists(agenda.get("localpath", "")) and agenda.get("filecontent"):
                                 try:
                                     os.makedirs(os.path.dirname(agenda["localpath"]), exist_ok=True)
                                     with open(agenda["localpath"], "wb") as file_obj:
                                         file_obj.write(base64.b64decode(agenda["filecontent"]))
-                                except Exception as exc:
+                                except Exception as exc_recriar:
                                     registrar_log(
                                         client_id,
-                                        f"Erro ao recriar arquivo {agenda.get('file')}: {exc}",
+                                        f"❌ Erro ao recriar arquivo {agenda.get('file')}: {exc_recriar}",
                                         "erro",
                                     )
 
-                            if not os.path.exists(agenda["localpath"]):
+                            if not os.path.exists(agenda.get("localpath", "")):
                                 agenda["status"] = "Erro"
                                 agenda["ja_upado"] = False
                                 registrar_log(
                                     client_id,
-                                    f"Arquivo perdido: {agenda['file']}",
+                                    f"❌ Arquivo perdido antes do upload: {agenda.get('file')}",
                                     "erro",
                                 )
                                 mudou = True
                             else:
+                                # Registra no cfggameplay apenas se ainda não foi registrado antes
+                                if not agenda.get("cfggameplay_registrado", False):
+                                    cfgg_ok, cfgg_msg = adicionar_agenda_em_cfggameplay(
+                                        client_id,
+                                        agenda["mapa"],
+                                        agenda["file"],
+                                    )
+
+                                    if cfgg_ok:
+                                        agenda["cfggameplay_registrado"] = True
+                                        registrar_log(
+                                            client_id,
+                                            f"✅ Arquivo registrado em cfggameplay: {agenda['file']}",
+                                            "sucesso",
+                                        )
+                                    else:
+                                        registrar_log(
+                                            client_id,
+                                            f"❌ Falha ao registrar em cfggameplay: {cfgg_msg}",
+                                            "erro",
+                                        )
+                                        mudou = True
+                                        continue
+
                                 ok, msg = dispararftppro(
                                     client_id,
                                     "UPLOAD",
@@ -881,31 +903,11 @@ def proworker():
 
                                 if ok:
                                     print(f"[AGENDA UPLOAD OK] {agenda.get('file')} enviado ao FTP")
-
-                                    cfgg_ok, cfgg_msg = adicionar_agenda_em_cfggameplay(
-                                        client_id,
-                                        agenda["mapa"],
-                                        agenda["file"],
-                                    )
-
-                                    if cfgg_ok:
-                                        registrar_log(
-                                            client_id,
-                                            f"Arquivo registrado em cfggameplay: {agenda['file']}",
-                                            "sucesso",
-                                        )
-                                    else:
-                                        registrar_log(
-                                            client_id,
-                                            f"Falha ao registrar em cfggameplay: {cfgg_msg}",
-                                            "erro",
-                                        )
-
                                     agenda["status"] = "Ativo"
                                     agenda["ja_upado"] = True
                                     registrar_log(
                                         client_id,
-                                        f"UPLOAD {agenda['file']} OK - Arquivo permanecerá no FTP até {agenda.get('out')}",
+                                        f"📤 UPLOAD OK no FTP: {agenda['file']} | pasta: {agenda.get('path')}",
                                         "sucesso",
                                     )
                                 else:
@@ -914,7 +916,7 @@ def proworker():
                                     agenda["ja_upado"] = False
                                     registrar_log(
                                         client_id,
-                                        f"UPLOAD {agenda['file']} FALHOU: {msg}",
+                                        f"❌ UPLOAD FALHOU no FTP: {agenda['file']} | erro: {msg}",
                                         "erro",
                                     )
 
@@ -3520,14 +3522,14 @@ with tab1:
                         "localpath": path,
                         "filecontent": arquivo_em_sessao["b64"],
                         "mapa": mapa,
-                        "path": "dayzxb_missions/dayzOffline.chernarusplus/custom"
-                        if mapa == "Chernarus"
-                        else "dayzxb_missions/dayzOffline.enoch/custom",
-                        "data": dt_ev.strftime("%d/%m/%Y"),
-                        "in": h_in,
-                        "out": h_out,
+                        "path": "dayzxb_missions/dayzOffline.chernarusplus/custom" if mapa == "Chernarus" else "dayzxb_missions/dayzOffline.enoch/custom",
+                        "data": dtev.strftime("%d/%m/%Y"),
+                        "in": hin,
+                        "out": hout,
                         "rec": rec,
                         "status": "Aguardando",
+                        "ja_upado": False,
+                        "cfggameplay_registrado": False,
                     }
 
                     client_data["agendas"].append(nova_agenda)
@@ -3586,19 +3588,53 @@ with tab1:
                     "Erro": "🔴",
                 }.get(status_atual, "⚪")
 
-                titulo_expander = f"{cor} {agenda['file']} - {agenda['data']} - {agenda['mapa']}"
+                agenda_id = agenda.get("id", "sem_id")
+                ja_upado = agenda.get("ja_upado", False)
+                cfggameplay_registrado = agenda.get("cfggameplay_registrado", False)
+
+                agenda_duplicada = False
+                quantidade_iguais = 0
+
+                for agenda_item in agendaslista_original:
+                    if (
+                        agenda_item.get("id") != agenda.get("id")
+                        and agenda_item.get("file") == agenda.get("file")
+                        and agenda_item.get("mapa") == agenda.get("mapa")
+                        and agenda_item.get("data") == agenda.get("data")
+                        and agenda_item.get("in") == agenda.get("in")
+                        and agenda_item.get("out") == agenda.get("out")
+                        and agenda_item.get("rec", "Único") == agenda.get("rec", "Único")
+                    ):
+                        agenda_duplicada = True
+                        quantidade_iguais += 1
+
+                titulo_expander = (
+                    f"{cor} {agenda['file']} - {agenda['data']} - {agenda['mapa']} - ID: {agenda_id}"
+                )
 
                 with st.expander(titulo_expander):
+                    if agenda_duplicada:
+                        st.warning(
+                            f"Possível duplicidade detectada para este agendamento. "
+                            f"Foram encontrados {quantidade_iguais} item(ns) com os mesmos dados."
+                        )
+
                     inf1, inf2 = st.columns(2)
 
                     with inf1:
                         st.write(f"**Arquivo:** {agenda['file']}")
                         st.write(f"**Mapa:** {agenda['mapa']}")
                         st.write(f"**Recorrência:** {agenda.get('rec', 'Único')}")
+                        st.write(f"**ID:** {agenda_id}")
 
                     with inf2:
                         st.write(f"**Janela:** {agenda['in']} às {agenda['out']}")
                         st.write(f"**Status:** {status_atual}")
+                        st.write(f"**Já upado no FTP:** {'Sim' if ja_upado else 'Não'}")
+                        st.write(
+                            f"**Registrado no cfggameplay:** "
+                            f"{'Sim' if cfggameplay_registrado else 'Não'}"
+                        )
 
                     st.divider()
 
@@ -3609,11 +3645,28 @@ with tab1:
                         type="secondary",
                     ):
                         nome_arquivo = agenda["file"]
+                        agenda_id_remover = agenda.get("id", "sem_id")
+                        mapa_agenda = agenda.get("mapa", "desconhecido")
+                        data_agenda = agenda.get("data", "sem_data")
+                        janela_agenda = f"{agenda.get('in', '--:--')} às {agenda.get('out', '--:--')}"
+
                         client_data["agendas"] = [
                             a for a in client_data["agendas"] if a["id"] != agenda["id"]
                         ]
                         save_db(DB_CLIENTS, st.session_state.db_clients)
-                        registrar_log(userid, f"Removido {nome_arquivo}", "info")
+
+                        registrar_log(
+                            userid,
+                            (
+                                f"Removido agendamento {nome_arquivo} | "
+                                f"ID: {agenda_id_remover} | "
+                                f"Mapa: {mapa_agenda} | "
+                                f"Data: {data_agenda} | "
+                                f"Janela: {janela_agenda}"
+                            ),
+                            "info",
+                        )
+
                         st.toast(f"Evento {nome_arquivo} removido!")
                         st.rerun()
 
