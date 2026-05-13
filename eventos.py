@@ -817,13 +817,27 @@ def proworker():
                 for agenda in client_info.get("agendas", []):
                     try:
                         hora_entrada = str_to_time(agenda.get("data"), agenda.get("in"))
-                        hora_saida = str_to_time(agenda.get("data"), agenda.get("out"))
+
+                        # ── CÁLCULO CORRETO DE hora_saida ────────────────────────────
+                        # Se out <= in (ex: 23:00→00:30), a saída é no DIA SEGUINTE à
+                        # data do evento. Isso evita que hora_saida < hora_entrada e o
+                        # worker delete/expire o arquivo antes de subir.
+                        _h_in  = agenda.get("in",  "00:00")
+                        _h_out = agenda.get("out", "00:00")
+                        _data  = agenda.get("data", "")
+                        hora_saida = str_to_time(_data, _h_out)
+
+                        if hora_saida and hora_entrada and hora_saida <= hora_entrada:
+                            # Saída cruza meia-noite → avança 1 dia
+                            _data_next = (
+                                datetime.strptime(_data, "%d/%m/%Y") + timedelta(days=1)
+                            ).strftime("%d/%m/%Y")
+                            hora_saida = str_to_time(_data_next, _h_out)
 
                         print(
                             f"[AGENDA DEBUG] file={agenda.get('file')} | "
                             f"status={agenda.get('status')} | "
                             f"ja_upado={agenda.get('ja_upado', False)} | "
-                            f"cfggameplay_registrado={agenda.get('cfggameplay_registrado', False)} | "
                             f"now={now.strftime('%d/%m/%Y %H:%M:%S')} | "
                             f"hora_entrada={hora_entrada} | hora_saida={hora_saida} | "
                             f"path={agenda.get('path')}"
@@ -837,7 +851,12 @@ def proworker():
                             agenda["cfggameplay_registrado"] = False
                             mudou = True
 
-                        # UPLOAD: entra na janela e sobe o arquivo UMA ÚNICA VEZ
+                        # ── UPLOAD ────────────────────────────────────────────────────
+                        # Condições:
+                        #   1. hora_entrada e hora_saida válidas
+                        #   2. now está DENTRO da janela (>= entrada E < saída)
+                        #   3. status ainda é Aguardando (não foi upado antes)
+                        #   4. ja_upado = False (flag extra de segurança)
                         if (
                             hora_entrada
                             and hora_saida
@@ -923,11 +942,15 @@ def proworker():
 
                                 mudou = True
 
-                        # EXPIROU sem subir
+                        # EXPIROU sem subir — só marca como expirado se hora_entrada
+                        # já passou E hora_saida também passou E nunca foi upado.
+                        # IMPORTANTE: hora_saida deve ser > hora_entrada (garantido acima).
                         elif (
-                            hora_saida
-                            and now >= hora_saida
+                            hora_entrada
+                            and hora_saida
+                            and now > hora_saida
                             and agenda.get("status") == "Aguardando"
+                            and not agenda.get("ja_upado", False)
                         ):
                             print(
                                 f"[AGENDA EXPIRED] {agenda.get('file')} expirou sem upload | "
@@ -962,11 +985,13 @@ def proworker():
 
                             mudou = True
 
-                        # DELETE: remove SOMENTE na saída
+                        # DELETE: remove o arquivo do FTP SOMENTE após hora_saida,
+                        # e SOMENTE se status == "Ativo" (foi upado com sucesso antes).
                         elif (
                             hora_saida
                             and now >= hora_saida
                             and agenda.get("status") == "Ativo"
+                            and agenda.get("ja_upado", False)
                         ):
                             print(
                                 f"[AGENDA DELETE] Removendo {agenda.get('file')} | "
@@ -3205,7 +3230,7 @@ if len(agendas_filtradas) != len(agendas_originais):
     client_data["agendas"] = agendas_filtradas
     save_db(DB_CLIENTS, st.session_state.db_clients)
     registrar_log(
-        user_id,
+        userid,
         "🧹 Limpeza automática: eventos únicos finalizados foram removidos do banco.",
         "info",
     )
@@ -3698,7 +3723,7 @@ with tab1:
 
         if st.button(
             "🧹 Limpar eventos finalizados do banco",
-            key=f"limpar_finalizados_{user_id}",
+            key=f"limpar_finalizados_{userid}",
             use_container_width=True,
             type="secondary",
         ):
@@ -3717,7 +3742,7 @@ with tab1:
             save_db(DB_CLIENTS, st.session_state.db_clients)
 
             registrar_log(
-                user_id,
+                userid,
                 f"🧹 Limpeza manual concluída: {removidos} evento(s) finalizado(s) removido(s) do banco.",
                 "info",
             )
@@ -3814,7 +3839,7 @@ with tab1:
                         save_db(DB_CLIENTS, st.session_state.db_clients)
 
                         registrar_log(
-                            user_id,
+                            userid,
                             (
                                 f"Removido agendamento {nome_arquivo} | "
                                 f"ID: {agenda_id_remover} | "
