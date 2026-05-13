@@ -542,40 +542,78 @@ def apply_df_to_types_xml(tree, root, df):
     return header + xmlbytes
 
 
-def dispararftppro(clientid, acao, filename, localpath, mapapath):
+def dispararftppro(client_id, acao, filename, localpath, mapapath):
+    """
+    Executa UPLOAD ou DELETE de arquivo no FTP do servidor.
+    Busca a config FTP pelo client_id — tenta direto e também via server_id
+    para cobrir casos em que o loop do proworker usa a chave do clients_data
+    mas as configs de FTP estão em outro nível.
+    """
     dbatual = load_db(DB_CLIENTS, {})
-    if clientid not in dbatual:
-        return False, "Erro"
 
-    conf = dbatual[clientid]["ftp"]
+    # Resolve config FTP: tenta client_id direto, depois procura por server_id
+    conf = None
+    if client_id in dbatual and dbatual[client_id].get("ftp", {}).get("host"):
+        conf = dbatual[client_id]["ftp"]
+    else:
+        # Fallback: percorre clients_data procurando FTP configurado
+        for _cid, _cdata in dbatual.items():
+            if _cdata.get("ftp", {}).get("host"):
+                # Verifica se esse entry corresponde ao client_id via users_db
+                users = load_db(DB_USERS, {})
+                for _key, _kdata in users.get("keys", {}).items():
+                    if _kdata.get("server_id", "") == client_id and _cid in (_key, client_id):
+                        conf = _cdata["ftp"]
+                        print(f"[FTP DEBUG] FTP resolvido via fallback: {_cid}")
+                        break
+                if conf:
+                    break
+        if not conf:
+            # Última tentativa: usa o primeiro FTP disponível desse client
+            _entry = dbatual.get(client_id, {})
+            if _entry.get("ftp", {}).get("host"):
+                conf = _entry["ftp"]
+
+    if not conf or not conf.get("host"):
+        erro_msg = f"Config FTP não encontrada para client_id={client_id}"
+        print(f"[FTP ERROR] {erro_msg}")
+        return False, erro_msg
+
     try:
         ftp = ftplib.FTP()
-        ftp.connect(conf["host"], int(conf["port"]), timeout=15)
+        ftp.connect(conf["host"], int(conf["port"]), timeout=20)
         ftp.login(conf["user"], conf["pass"])
 
         # Remove barra inicial se houver (causa falha de cwd no Nitrado)
         mapapath_clean = mapapath.lstrip("/")
 
-        print(f"[FTP DEBUG] acao={acao} | file={filename} | path={mapapath_clean}")
+        print(f"[FTP DEBUG] acao={acao} | file={filename} | path={mapapath_clean} | host={conf['host']}")
         ftp.cwd(mapapath_clean)
-        print(f"[FTP DEBUG] cwd atual: {ftp.pwd()}")
+        print(f"[FTP DEBUG] cwd confirmado: {ftp.pwd()}")
 
         if acao == "UPLOAD":
-            print(f"[FTP DEBUG] nlst antes: {ftp.nlst()}")
+            if not localpath or not os.path.exists(localpath):
+                ftp.quit()
+                return False, f"Arquivo local não encontrado: {localpath}"
+            print(f"[FTP DEBUG] nlst antes upload: {ftp.nlst()}")
             with open(localpath, "rb") as f:
                 ftp.storbinary(f"STOR {filename}", f)
-            print(f"[FTP DEBUG] nlst depois: {ftp.nlst()}")
+            arquivos_apos = ftp.nlst()
+            print(f"[FTP DEBUG] nlst após upload: {arquivos_apos}")
+            if filename not in arquivos_apos:
+                ftp.quit()
+                return False, f"Arquivo enviado mas NÃO encontrado no FTP após STOR: {filename}"
         elif acao == "DELETE":
             try:
                 ftp.delete(filename)
-                print(f"[FTP DEBUG] DELETE executado: {filename}")
+                print(f"[FTP DEBUG] DELETE OK: {filename}")
             except Exception as del_err:
-                print(f"[FTP DEBUG] DELETE falhou: {del_err}")
+                print(f"[FTP DEBUG] DELETE falhou (pode já não existir): {del_err}")
 
         ftp.quit()
         return True, "Sucesso"
     except Exception as e:
-        print(f"[FTP ERROR] dispararftppro: {e}")
+        print(f"[FTP ERROR] dispararftppro exception: {e}")
         return False, str(e)
 
 def worker_dzcoins_automatico():
@@ -1331,17 +1369,17 @@ def render_gestao_pedidos(client_data, server_id):
 
 # ---------- HELPER GENÉRICO DE DOWNLOAD VIA FTP ----------
 
-def baixar_arquivo_via_ftp(clientid, remotedir, remotefilename):
+def baixar_arquivo_via_ftp(client_id, remotedir, remotefilename):
     """
     Baixa um arquivo remoto via FTP e devolve:
     (ok: bool, file_bytes: bytes|None, msg: str)
     """
     dbatual = load_db(DB_CLIENTS, {})
 
-    if clientid not in dbatual:
+    if client_id not in dbatual:
         return False, None, "Cliente não encontrado"
 
-    conf = dbatual[clientid].get("ftp", {})
+    conf = dbatual[client_id].get("ftp", {})
     if not conf or not conf.get("host"):
         return False, None, "Configuração FTP não encontrada"
 
@@ -1363,41 +1401,41 @@ def baixar_arquivo_via_ftp(clientid, remotedir, remotefilename):
 
 # ---------- WRAPPERS ESPECÍFICOS DE DOWNLOAD ----------
 
-def baixartypesviaftp(clientid, mapa):
+def baixartypesviaftp(client_id, mapa):
     remotedir = TYPES_REMOTE_PATHS.get(mapa)
     if not remotedir:
         return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
-    return baixar_arquivo_via_ftp(clientid, remotedir, "types.xml")
+    return baixar_arquivo_via_ftp(client_id, remotedir, "types.xml")
 
-def baixarglobalsviaftp(clientid, mapa):
+def baixarglobalsviaftp(client_id, mapa):
     remotedir = GLOBALS_REMOTE_PATHS.get(mapa)
     if not remotedir:
         return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
-    return baixar_arquivo_via_ftp(clientid, remotedir, "globals.xml")
+    return baixar_arquivo_via_ftp(client_id, remotedir, "globals.xml")
 
-def baixarcfggameplayviaftp(clientid, mapa):
+def baixarcfggameplayviaftp(client_id, mapa):
     remotedir = CFGGAMEPLAY_REMOTE_PATHS.get(mapa)
     if not remotedir:
         return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
-    return baixar_arquivo_via_ftp(clientid, remotedir, "cfggameplay.json")
+    return baixar_arquivo_via_ftp(client_id, remotedir, "cfggameplay.json")
 
-def baixareventsviaftp(clientid, mapa):
+def baixareventsviaftp(client_id, mapa):
     remotedir = EVENTS_REMOTE_PATHS.get(mapa)
     if not remotedir:
         return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
-    return baixar_arquivo_via_ftp(clientid, remotedir, "events.xml")
+    return baixar_arquivo_via_ftp(client_id, remotedir, "events.xml")
 
-def baixarmessagesviaftp(clientid, mapa):
+def baixarmessagesviaftp(client_id, mapa):
     remotedir = MESSAGES_REMOTE_PATHS.get(mapa)
     if not remotedir:
         return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
-    return baixar_arquivo_via_ftp(clientid, remotedir, "messages.xml")
+    return baixar_arquivo_via_ftp(client_id, remotedir, "messages.xml")
 
-def baixarcfgeventspawnsviaftp(clientid, mapa):
+def baixarcfgeventspawnsviaftp(client_id, mapa):
     remotedir = CFGEVENTSPAWNS_REMOTE_PATHS.get(mapa)
     if not remotedir:
         return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
-    return baixar_arquivo_via_ftp(clientid, remotedir, "cfgeventspawns.xml")
+    return baixar_arquivo_via_ftp(client_id, remotedir, "cfgeventspawns.xml")
 
 # ---------- HELPERS CFGEVENTSPAWNS.XML ----------
 
@@ -1785,15 +1823,15 @@ def apply_df_to_messages_xml(tree, root, df_messages):
 
 # ---------- HELPER GENÉRICO DE FTP ----------
 
-def enviar_arquivo_via_ftp(clientid, localpath, remotedir, remotefilename):
+def enviar_arquivo_via_ftp(client_id, localpath, remotedir, remotefilename):
     """
     Envia um arquivo local para um diretório remoto específico via FTP.
     """
     dbatual = load_db(DB_CLIENTS, {})
-    if clientid not in dbatual:
+    if client_id not in dbatual:
         return False, "Cliente não encontrado"
 
-    conf = dbatual[clientid].get("ftp", {})
+    conf = dbatual[client_id].get("ftp", {})
     if not conf or not conf.get("host"):
         return False, "Configuração FTP não encontrada"
 
@@ -1815,7 +1853,7 @@ def enviar_arquivo_via_ftp(clientid, localpath, remotedir, remotefilename):
 
 # ---------- WRAPPERS ESPECÍFICOS ----------
 
-def enviar_types_via_ftp(clientid, localpath, mapa):
+def enviar_types_via_ftp(client_id, localpath, mapa):
     """
     Envia o arquivo types.xml já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
@@ -1825,13 +1863,13 @@ def enviar_types_via_ftp(clientid, localpath, mapa):
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
     return enviar_arquivo_via_ftp(
-        clientid=clientid,
+        client_id=client_id,
         localpath=localpath,
         remotedir=remotedir,
         remotefilename="types.xml",
     )
 
-def enviar_globals_via_ftp(clientid, localpath, mapa):
+def enviar_globals_via_ftp(client_id, localpath, mapa):
     """
     Envia o arquivo globals.xml já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
@@ -1841,13 +1879,13 @@ def enviar_globals_via_ftp(clientid, localpath, mapa):
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
     return enviar_arquivo_via_ftp(
-        clientid=clientid,
+        client_id=client_id,
         localpath=localpath,
         remotedir=remotedir,
         remotefilename="globals.xml",
     )
 
-def enviar_cfggameplay_via_ftp(clientid, localpath, mapa):
+def enviar_cfggameplay_via_ftp(client_id, localpath, mapa):
     """
     Envia o arquivo cfggameplay.json já salvo em localpath
     para o caminho correto no servidor, de acordo com o mapa.
@@ -1857,20 +1895,20 @@ def enviar_cfggameplay_via_ftp(clientid, localpath, mapa):
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
     return enviar_arquivo_via_ftp(
-        clientid=clientid,
+        client_id=client_id,
         localpath=localpath,
         remotedir=remotedir,
         remotefilename="cfggameplay.json",
     )
 
 
-def adicionar_agenda_em_cfggameplay(clientid, mapa, filename):
+def adicionar_agenda_em_cfggameplay(client_id, mapa, filename):
     """
     Garante que o arquivo de agenda esteja registrado em
     WorldsData.objectSpawnersArr de cfggameplay.json e envia
     o cfggameplay atualizado ao servidor.
     """
-    ok, content, msg = baixarcfggameplayviaftp(clientid, mapa)
+    ok, content, msg = baixarcfggameplayviaftp(client_id, mapa)
     if not ok:
         return False, f"Erro ao baixar cfggameplay.json: {msg}"
 
@@ -1890,7 +1928,7 @@ def adicionar_agenda_em_cfggameplay(clientid, mapa, filename):
         worlds["objectSpawnersArr"] = object_spawners
         cfg_json["WorldsData"] = worlds
 
-        safe_cfg_name = f"{clientid[:5]}_cfggameplay_{mapa.lower()}_{int(time.time())}.json"
+        safe_cfg_name = f"{client_id[:5]}_cfggameplay_{mapa.lower()}_{int(time.time())}.json"
         local_cfg_path = os.path.join(UPLOAD_DIR, safe_cfg_name)
 
         try:
@@ -1899,11 +1937,11 @@ def adicionar_agenda_em_cfggameplay(clientid, mapa, filename):
         except Exception as e:
             return False, f"Erro ao salvar cfggameplay localmente: {e}"
 
-        return enviar_cfggameplay_via_ftp(clientid, local_cfg_path, mapa)
+        return enviar_cfggameplay_via_ftp(client_id, local_cfg_path, mapa)
 
     return True, "Já registrado"
 
-def enviareventsviaftp(clientid, localpath, mapa):
+def enviareventsviaftp(client_id, localpath, mapa):
     """
     Envia o arquivo events.xml para o diretório correto do mapa.
     """
@@ -1912,23 +1950,23 @@ def enviareventsviaftp(clientid, localpath, mapa):
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
     return enviar_arquivo_via_ftp(
-        clientid=clientid,
+        client_id=client_id,
         localpath=localpath,
         remotedir=remotedir,
         remotefilename="events.xml",
     )
 
-def enviarmessagesviaftp(clientid, localpath, mapa):
+def enviarmessagesviaftp(client_id, localpath, mapa):
     MESSAGESREMOTEPATHS = {
         "Chernarus": "dayzxb_missions/dayzOffline.chernarusplus/db",
         "Livonia": "dayzxb_missions/dayzOffline.enoch/db",
     }
 
     dbatual = load_db(DB_CLIENTS, {})
-    if clientid not in dbatual:
+    if client_id not in dbatual:
         return False, "Cliente não encontrado"
 
-    conf = dbatual[clientid]["ftp"]
+    conf = dbatual[client_id]["ftp"]
     remotedir = MESSAGESREMOTEPATHS.get(mapa)
     if not remotedir:
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
@@ -1948,7 +1986,7 @@ def enviarmessagesviaftp(clientid, localpath, mapa):
         return False, str(e)
 
 
-def enviar_cfgeventspawns_via_ftp(clientid, localpath, mapa):
+def enviar_cfgeventspawns_via_ftp(client_id, localpath, mapa):
     """
     Envia o arquivo cfgeventspawns.xml para a raiz da missão do mapa.
     """
@@ -1957,7 +1995,7 @@ def enviar_cfgeventspawns_via_ftp(clientid, localpath, mapa):
         return False, f"Caminho remoto não configurado para o mapa {mapa}"
 
     return enviar_arquivo_via_ftp(
-        clientid=clientid,
+        client_id=client_id,
         localpath=localpath,
         remotedir=remotedir,
         remotefilename="cfgeventspawns.xml",
@@ -3677,10 +3715,22 @@ with tab1:
                         arquivo_em_sessao["name"],
                     )
 
+                    # Só marca como registrado se realmente funcionou
+                    # Se falhou, o proworker vai tentar de novo no momento do upload
                     if ok_cfgg:
                         nova_agenda["cfggameplay_registrado"] = True
+                        registrar_log(
+                            user_id,
+                            f"✅ cfggameplay registrado na criação da agenda: {arquivo_em_sessao['name']}",
+                            "sucesso",
+                        )
                     else:
                         nova_agenda["cfggameplay_registrado"] = False
+                        registrar_log(
+                            user_id,
+                            f"⚠️ cfggameplay não registrado na criação (será tentado no horário do upload): {msg_cfgg}",
+                            "info",
+                        )
 
                     client_data["agendas"].append(nova_agenda)
                     save_db(DB_CLIENTS, st.session_state.db_clients)
