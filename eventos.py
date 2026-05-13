@@ -3230,7 +3230,7 @@ if len(agendas_filtradas) != len(agendas_originais):
     client_data["agendas"] = agendas_filtradas
     save_db(DB_CLIENTS, st.session_state.db_clients)
     registrar_log(
-        userid,
+        user_id,
         "🧹 Limpeza automática: eventos únicos finalizados foram removidos do banco.",
         "info",
     )
@@ -3723,7 +3723,7 @@ with tab1:
 
         if st.button(
             "🧹 Limpar eventos finalizados do banco",
-            key=f"limpar_finalizados_{userid}",
+            key=f"limpar_finalizados_{user_id}",
             use_container_width=True,
             type="secondary",
         ):
@@ -3742,7 +3742,7 @@ with tab1:
             save_db(DB_CLIENTS, st.session_state.db_clients)
 
             registrar_log(
-                userid,
+                user_id,
                 f"🧹 Limpeza manual concluída: {removidos} evento(s) finalizado(s) removido(s) do banco.",
                 "info",
             )
@@ -3839,7 +3839,7 @@ with tab1:
                         save_db(DB_CLIENTS, st.session_state.db_clients)
 
                         registrar_log(
-                            userid,
+                            user_id,
                             (
                                 f"Removido agendamento {nome_arquivo} | "
                                 f"ID: {agenda_id_remover} | "
