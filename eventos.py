@@ -811,8 +811,6 @@ def proworker():
                 log_txt = ""
                 eventos_pvp = []
 
-                # --- TRAVA DE SEGURANÇA (GRC/GOVERNANÇA) ---
-                # Se o administrador desativar "Baixar Logs Servidor", o worker ignora este cliente
                 feeds_config = client_info.get("feeds_config", {})
 
                 # --- 1. LÓGICA DE AGENDAS DE ARQUIVOS ---
@@ -824,27 +822,33 @@ def proworker():
                         print(
                             f"[AGENDA DEBUG] file={agenda.get('file')} | "
                             f"status={agenda.get('status')} | "
+                            f"ja_upado={agenda.get('ja_upado', False)} | "
+                            f"cfggameplay_registrado={agenda.get('cfggameplay_registrado', False)} | "
                             f"now={now.strftime('%d/%m/%Y %H:%M:%S')} | "
-                            f"hora_entrada={hora_entrada} | "
-                            f"hora_saida={hora_saida} | "
+                            f"hora_entrada={hora_entrada} | hora_saida={hora_saida} | "
                             f"path={agenda.get('path')}"
                         )
 
                         if "ja_upado" not in agenda:
                             agenda["ja_upado"] = False
+                            mudou = True
 
-                        # UPLOAD: entra na janela e sobe o arquivo
+                        if "cfggameplay_registrado" not in agenda:
+                            agenda["cfggameplay_registrado"] = False
+                            mudou = True
+
+                        # UPLOAD: entra na janela e sobe o arquivo UMA ÚNICA VEZ
                         if (
                             hora_entrada
                             and hora_saida
                             and now >= hora_entrada
                             and now < hora_saida
                             and agenda.get("status") == "Aguardando"
-                            and not agenda.get("ja_upado")
+                            and not agenda.get("ja_upado", False)
                         ):
                             print(
                                 f"[AGENDA UPLOAD] Iniciando upload de {agenda.get('file')} | "
-                                f"now={now.strftime('%d/%m/%Y %H:%M:%S')}"
+                                f"janela={agenda.get('in')} às {agenda.get('out')}"
                             )
 
                             if not os.path.exists(agenda.get("localpath", "")) and agenda.get("filecontent"):
@@ -855,7 +859,7 @@ def proworker():
                                 except Exception as exc_recriar:
                                     registrar_log(
                                         client_id,
-                                        f"❌ Erro ao recriar arquivo {agenda.get('file')}: {exc_recriar}",
+                                        f"❌ Erro ao recriar arquivo '{agenda.get('file')}': {exc_recriar}",
                                         "erro",
                                     )
 
@@ -869,7 +873,6 @@ def proworker():
                                 )
                                 mudou = True
                             else:
-                                # Registra no cfggameplay apenas se ainda não foi registrado antes
                                 if not agenda.get("cfggameplay_registrado", False):
                                     cfgg_ok, cfgg_msg = adicionar_agenda_em_cfggameplay(
                                         client_id,
@@ -890,8 +893,8 @@ def proworker():
                                             f"❌ Falha ao registrar em cfggameplay: {cfgg_msg}",
                                             "erro",
                                         )
-                                        mudou = True
-                                        continue
+
+                                    mudou = True
 
                                 ok, msg = dispararftppro(
                                     client_id,
@@ -902,27 +905,25 @@ def proworker():
                                 )
 
                                 if ok:
-                                    print(f"[AGENDA UPLOAD OK] {agenda.get('file')} enviado ao FTP")
                                     agenda["status"] = "Ativo"
                                     agenda["ja_upado"] = True
                                     registrar_log(
                                         client_id,
-                                        f"📤 UPLOAD OK no FTP: {agenda['file']} | pasta: {agenda.get('path')}",
+                                        f"📤 UPLOAD OK no FTP: {agenda['file']} | Permanecerá na pasta até {agenda.get('out')}",
                                         "sucesso",
                                     )
                                 else:
-                                    print(f"[AGENDA UPLOAD ERRO] {agenda.get('file')} - {msg}")
                                     agenda["status"] = "Erro"
                                     agenda["ja_upado"] = False
                                     registrar_log(
                                         client_id,
-                                        f"❌ UPLOAD FALHOU no FTP: {agenda['file']} | erro: {msg}",
+                                        f"❌ UPLOAD FALHOU no FTP: {agenda['file']} | Erro: {msg}",
                                         "erro",
                                     )
 
                                 mudou = True
 
-                        # Expirou sem upload
+                        # EXPIROU sem subir
                         elif (
                             hora_saida
                             and now >= hora_saida
@@ -930,8 +931,7 @@ def proworker():
                         ):
                             print(
                                 f"[AGENDA EXPIRED] {agenda.get('file')} expirou sem upload | "
-                                f"now={now.strftime('%d/%m/%Y %H:%M:%S')} | "
-                                f"saida={hora_saida}"
+                                f"now={now.strftime('%d/%m/%Y %H:%M:%S')} | saida={hora_saida}"
                             )
 
                             agenda["ja_upado"] = False
@@ -941,7 +941,7 @@ def proworker():
                                 agenda["status"] = "Aguardando"
                                 registrar_log(
                                     client_id,
-                                    f"Evento expirado sem upload e reagendado para o próximo dia: {agenda['file']}",
+                                    f"⚠️ Evento expirado sem upload e reagendado para o próximo dia: {agenda['file']}",
                                     "erro",
                                 )
                             elif agenda.get("rec") == "Semanal":
@@ -949,29 +949,29 @@ def proworker():
                                 agenda["status"] = "Aguardando"
                                 registrar_log(
                                     client_id,
-                                    f"Evento expirado sem upload e reagendado para a próxima semana: {agenda['file']}",
+                                    f"⚠️ Evento expirado sem upload e reagendado para a próxima semana: {agenda['file']}",
                                     "erro",
                                 )
                             else:
                                 agenda["status"] = "Finalizado"
                                 registrar_log(
                                     client_id,
-                                    f"Evento expirado sem upload: {agenda['file']}",
+                                    f"⚠️ Evento expirado sem upload: {agenda['file']}",
                                     "erro",
                                 )
 
                             mudou = True
 
-                        # Horário de saída: remove do FTP e só depois finaliza/reagenda
-                        if (
+                        # DELETE: remove SOMENTE na saída
+                        elif (
                             hora_saida
                             and now >= hora_saida
                             and agenda.get("status") == "Ativo"
                         ):
                             print(
-                                f"[AGENDA DELETE] Excluindo {agenda.get('file')} no horário de saída | "
+                                f"[AGENDA DELETE] Removendo {agenda.get('file')} | "
                                 f"now={now.strftime('%d/%m/%Y %H:%M:%S')} | "
-                                f"hora_saida={hora_saida.strftime('%d/%m/%Y %H:%M:%S')}"
+                                f"saida={hora_saida.strftime('%d/%m/%Y %H:%M:%S')}"
                             )
 
                             ok, msg = dispararftppro(
@@ -982,13 +982,9 @@ def proworker():
                                 agenda["path"],
                             )
 
-                            print(
-                                f"[AGENDA DELETE {'OK' if ok else 'ERRO'}] {agenda.get('file')} - {msg}"
-                            )
-
                             registrar_log(
                                 client_id,
-                                f"DELETE {agenda['file']} {'OK' if ok else msg}",
+                                f"🗑️ DELETE '{agenda['file']}': {'OK' if ok else msg}",
                                 "sucesso" if ok else "erro",
                             )
 
@@ -999,7 +995,7 @@ def proworker():
                                 agenda["status"] = "Aguardando"
                                 registrar_log(
                                     client_id,
-                                    f"Evento diário reagendado: {agenda['file']}",
+                                    f"🔁 Evento diário reagendado após remoção do FTP: {agenda['file']}",
                                     "info",
                                 )
                             elif agenda.get("rec") == "Semanal":
@@ -1007,14 +1003,14 @@ def proworker():
                                 agenda["status"] = "Aguardando"
                                 registrar_log(
                                     client_id,
-                                    f"Evento semanal reagendado: {agenda['file']}",
+                                    f"🔁 Evento semanal reagendado após remoção do FTP: {agenda['file']}",
                                     "info",
                                 )
                             else:
                                 agenda["status"] = "Finalizado"
                                 registrar_log(
                                     client_id,
-                                    f"Evento finalizado após remoção do FTP: {agenda['file']}",
+                                    f"✅ Evento finalizado após remoção do FTP: {agenda['file']}",
                                     "info",
                                 )
 
@@ -1023,107 +1019,167 @@ def proworker():
                     except Exception as exc_agenda:
                         registrar_log(
                             client_id,
-                            f"Erro inesperado no agendamento {agenda.get('file', '?')}: {exc_agenda}",
+                            f"❌ Erro inesperado no agendamento '{agenda.get('file', '?')}': {exc_agenda}",
                             "erro",
                         )
-                        print(
-                            f"[PROWORKER][AGENDA] Erro em {client_id} / {agenda.get('file')}: {exc_agenda}"
-                        )
+                        print(f"[PROWORKER][AGENDA] Erro em {client_id} / {agenda.get('file')}: {exc_agenda}")
 
                 # --- 2. LÓGICA DE AGENDAS DE RAID AUTOMÁTICO ---
                 for raid_agenda in client_info.get("agendas_raid", []):
-                    inicio_raid = str_to_time(raid_agenda["data"], raid_agenda["in"])
-                    fim_raid = str_to_time(raid_agenda["data"], raid_agenda["out"])
+                    try:
+                        inicio_raid = str_to_time(raid_agenda.get("data"), raid_agenda.get("in"))
+                        fim_raid = str_to_time(raid_agenda.get("data"), raid_agenda.get("out"))
 
-                    # Ação: INICIAR RAID
-                    if raid_agenda["status"] == "Aguardando" and now >= inicio_raid:
-                        ok, content, msg = baixarcfggameplayviaftp(client_id, raid_agenda["mapa"])
-                        if ok:
-                            try:
-                                cfg_json = json.loads(content.decode("utf-8"))
-                                cfg_json["GeneralData"]["disableBaseDamage"] = False
+                        if not inicio_raid or not fim_raid:
+                            registrar_log(
+                                client_id,
+                                f"⚠️ RAID com data/hora inválida: {raid_agenda.get('mapa', '?')}",
+                                "erro",
+                            )
+                            continue
 
-                                temp_file = f"raid_on_{client_id}.json"
-                                with open(temp_file, "w", encoding="utf-8") as file_obj:
-                                    json.dump(cfg_json, file_obj, indent=4, ensure_ascii=False)
+                        # Ao INICIAR RAID
+                        if raid_agenda.get("status") == "Aguardando" and now >= inicio_raid:
+                            ok, content, msg = baixarcfggameplayviaftp(client_id, raid_agenda["mapa"])
+                            if ok:
+                                try:
+                                    cfg_json = json.loads(content.decode("utf-8"))
+                                    cfg_json["GeneralData"]["disableBaseDamage"] = False
 
-                                env_ok, env_msg = enviar_cfggameplay_via_ftp(
-                                    client_id,
-                                    temp_file,
-                                    raid_agenda["mapa"],
-                                )
-                                if env_ok:
-                                    raid_agenda["status"] = "Ativo"
-                                    registrar_log(
+                                    temp_file = f"raid_on_{client_id}.json"
+                                    with open(temp_file, "w", encoding="utf-8") as file_obj:
+                                        json.dump(cfg_json, file_obj, indent=4, ensure_ascii=False)
+
+                                    env_ok, env_msg = enviar_cfggameplay_via_ftp(
                                         client_id,
-                                        f"🔥 RAID INICIADO em {raid_agenda['mapa']}! Dano em bases ATIVADO.",
-                                        "sucesso",
+                                        temp_file,
+                                        raid_agenda["mapa"],
                                     )
-                                    mudou = True
-                            except Exception as exc:
-                                print(f"Erro ao processar JSON de RAID ON: {exc}")
 
-                    # Ação: ENCERRAR RAID
-                    elif raid_agenda["status"] == "Ativo" and now >= fim_raid:
-                        ok, content, msg = baixarcfggameplayviaftp(client_id, raid_agenda["mapa"])
-                        if ok:
-                            try:
-                                cfg_json = json.loads(content.decode("utf-8"))
-                                cfg_json["GeneralData"]["disableBaseDamage"] = True
-
-                                temp_file = f"raid_off_{client_id}.json"
-                                with open(temp_file, "w", encoding="utf-8") as file_obj:
-                                    json.dump(cfg_json, file_obj, indent=4, ensure_ascii=False)
-
-                                env_ok, env_msg = enviar_cfggameplay_via_ftp(
-                                    client_id,
-                                    temp_file,
-                                    raid_agenda["mapa"],
-                                )
-                                if env_ok:
-                                    if raid_agenda.get("rec") == "Diário":
-                                        raid_agenda["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
-                                        raid_agenda["status"] = "Aguardando"
-                                    elif raid_agenda.get("rec") == "Semanal":
-                                        raid_agenda["data"] = (now + timedelta(days=7)).strftime("%d/%m/%Y")
-                                        raid_agenda["status"] = "Aguardando"
+                                    if env_ok:
+                                        raid_agenda["status"] = "Ativo"
+                                        registrar_log(
+                                            client_id,
+                                            f"🔥 RAID INICIADO em {raid_agenda['mapa']}! Dano em bases ATIVADO.",
+                                            "sucesso",
+                                        )
                                     else:
-                                        raid_agenda["status"] = "Finalizado"
+                                        registrar_log(
+                                            client_id,
+                                            f"❌ RAID ON: falha ao enviar cfggameplay em {raid_agenda['mapa']}: {env_msg}",
+                                            "erro",
+                                        )
 
-                                    proxima_execucao = raid_agenda.get("data", "finalizado")
+                                    mudou = True
+
+                                except Exception as exc_raid_on:
                                     registrar_log(
                                         client_id,
-                                        f"🛡️ RAID ENCERRADO em {raid_agenda['mapa']}! Próxima execução: {proxima_execucao}",
-                                        "info",
+                                        f"❌ Erro ao processar JSON de RAID ON em {raid_agenda.get('mapa', '?')}: {exc_raid_on}",
+                                        "erro",
                                     )
+                                    print(f"[PROWORKER][RAID ON] Erro em {client_id}: {exc_raid_on}")
                                     mudou = True
-                            except Exception as exc:
-                                print(f"Erro ao processar JSON de RAID OFF: {exc}")
+                            else:
+                                registrar_log(
+                                    client_id,
+                                    f"❌ RAID ON: falha ao baixar cfggameplay em {raid_agenda.get('mapa', '?')}: {msg}",
+                                    "erro",
+                                )
+
+                        # Ao ENCERRAR RAID
+                        elif raid_agenda.get("status") == "Ativo" and now >= fim_raid:
+                            ok, content, msg = baixarcfggameplayviaftp(client_id, raid_agenda["mapa"])
+                            if ok:
+                                try:
+                                    cfg_json = json.loads(content.decode("utf-8"))
+                                    cfg_json["GeneralData"]["disableBaseDamage"] = True
+
+                                    temp_file = f"raid_off_{client_id}.json"
+                                    with open(temp_file, "w", encoding="utf-8") as file_obj:
+                                        json.dump(cfg_json, file_obj, indent=4, ensure_ascii=False)
+
+                                    env_ok, env_msg = enviar_cfggameplay_via_ftp(
+                                        client_id,
+                                        temp_file,
+                                        raid_agenda["mapa"],
+                                    )
+
+                                    if env_ok:
+                                        if raid_agenda.get("rec") == "Diário":
+                                            raid_agenda["data"] = (now + timedelta(days=1)).strftime("%d/%m/%Y")
+                                            raid_agenda["status"] = "Aguardando"
+                                        elif raid_agenda.get("rec") == "Semanal":
+                                            raid_agenda["data"] = (now + timedelta(days=7)).strftime("%d/%m/%Y")
+                                            raid_agenda["status"] = "Aguardando"
+                                        else:
+                                            raid_agenda["status"] = "Finalizado"
+
+                                        proxima_execucao = raid_agenda.get("data", "finalizado")
+                                        registrar_log(
+                                            client_id,
+                                            f"🛡️ RAID ENCERRADO em {raid_agenda['mapa']}! Próxima execução: {proxima_execucao}",
+                                            "info",
+                                        )
+                                    else:
+                                        registrar_log(
+                                            client_id,
+                                            f"❌ RAID OFF: falha ao enviar cfggameplay em {raid_agenda['mapa']}: {env_msg}",
+                                            "erro",
+                                        )
+
+                                    mudou = True
+
+                                except Exception as exc_raid_off:
+                                    registrar_log(
+                                        client_id,
+                                        f"❌ Erro ao processar JSON de RAID OFF em {raid_agenda.get('mapa', '?')}: {exc_raid_off}",
+                                        "erro",
+                                    )
+                                    print(f"[PROWORKER][RAID OFF] Erro em {client_id}: {exc_raid_off}")
+                                    mudou = True
+                            else:
+                                registrar_log(
+                                    client_id,
+                                    f"❌ RAID OFF: falha ao baixar cfggameplay em {raid_agenda.get('mapa', '?')}: {msg}",
+                                    "erro",
+                                )
+
+                    except Exception as exc_raid:
+                        registrar_log(
+                            client_id,
+                            f"❌ Erro inesperado na agenda RAID '{raid_agenda.get('mapa', '?')}': {exc_raid}",
+                            "erro",
+                        )
+                        print(f"[PROWORKER][RAID] Erro em {client_id}: {exc_raid}")
 
                 # --- BAIXA O LOG UMA ÚNICA VEZ PARA OS PASSOS DE AUDITORIA/INTELIGÊNCIA ---
                 precisa_log = (
-                    feeds_config.get("glitch_subsolo")
-                    or feeds_config.get("glitch_hortas")
-                    or feeds_config.get("glitch_fogueiras")
-                    or feeds_config.get("mapa_calor", True)
-                    or feeds_config.get("ranking_auto", True)
+                    feeds_config.get("baixar_logs", True)
+                    and (
+                        feeds_config.get("glitch_subsolo")
+                        or feeds_config.get("glitch_hortas")
+                        or feeds_config.get("glitch_fogueiras")
+                        or feeds_config.get("mapa_calor", True)
+                        or feeds_config.get("ranking_auto", True)
+                    )
                 )
 
                 if precisa_log:
                     try:
                         log_txt, _ = ftp_download_latest_adm(client_info["ftp"])
                     except Exception as exc:
-                        print(f"Erro ao baixar ADM log de {client_id}: {exc}")
+                        print(f"[PROWORKER] Erro ao baixar ADM log de {client_id}: {exc}")
                         log_txt = ""
 
                 if log_txt:
                     try:
                         eventos_pvp = extrair_eventos_pvp(log_txt)
                     except Exception as exc:
-                        print(f"Erro ao extrair eventos PvP de {client_id}: {exc}")
+                        print(f"[PROWORKER] Erro ao extrair eventos PvP de {client_id}: {exc}")
                         eventos_pvp = []
 
-                # --- PASSO 6: LÓGICA ANTI-GLITCH (GRC/GOVERNANÇA) ---
+                # --- PASSO 6: LÓGICA ANTI-GLITCH / GOVERNANÇA ---
                 webhook_admin_logs = feeds_config.get("webhook_admin_logs")
 
                 if (
@@ -1141,7 +1197,6 @@ def proworker():
                                 if sucesso:
                                     msg = f"🔨 BANIMENTO AUTOMÁTICO: {alerta['jogador']} por {alerta['tipo']}!"
                                     registrar_log(client_id, msg, "erro")
-
                                     if webhook_admin_logs:
                                         enviar_ao_discord(
                                             webhook_admin_logs,
@@ -1149,7 +1204,6 @@ def proworker():
                                             f"**Jogador:** {alerta['jogador']}\n**Motivo:** {alerta['tipo']}\n**Detalhe:** {alerta['detalhe']}",
                                             cor=16711680,
                                         )
-
                                     client_info.get("tracking_acoes", {}).pop(alerta["jogador"], None)
                                     mudou = True
                                 else:
@@ -1164,7 +1218,6 @@ def proworker():
                                     f"{alerta['tipo']}! Pos: {alerta['pos']}"
                                 )
                                 registrar_log(client_id, msg_alerta, "erro")
-
                                 if webhook_admin_logs:
                                     enviar_ao_discord(
                                         webhook_admin_logs,
@@ -1173,7 +1226,7 @@ def proworker():
                                         cor=16776960,
                                     )
 
-                # --- PASSO 7: LÓGICA MAPA DE CALOR (INTELIGÊNCIA) ---
+                # --- PASSO 7: LÓGICA MAPA DE CALOR / INTELIGÊNCIA ---
                 if feeds_config.get("mapa_calor", True) and log_txt:
                     novas_coords = extrair_coordenadas_mapa(log_txt)
                     historico_coords = client_info.get("heatmap_data", [])
@@ -1181,7 +1234,7 @@ def proworker():
                     client_info["heatmap_data"] = historico_coords[-5000:]
                     mudou = True
 
-                # --- PASSO 8: RANKING AUTOMATIZADO (GRC) ---
+                # --- PASSO 8: RANKING AUTOMATIZADO / GRC ---
                 if feeds_config.get("ranking_auto", True) and eventos_pvp:
                     ranking_atualizado = processar_ranking_global(eventos_pvp, [])
                     client_info["ranking_global"] = ranking_atualizado
@@ -1191,7 +1244,7 @@ def proworker():
                 save_db(DB_CLIENTS, db_all)
 
         except Exception as exc:
-            print("Erro no proworker:", exc)
+            print("[PROWORKER] Erro no ciclo:", exc)
 
         time.sleep(15)
 
@@ -3138,6 +3191,25 @@ if user_id not in st.session_state.db_clients:
     st.session_state.db_clients[user_id] = {}
 client_data = st.session_state.db_clients[user_id]
 
+# --- LIMPEZA AUTOMÁTICA DE EVENTOS ÚNICOS FINALIZADOS ---
+agendas_originais = client_data.get("agendas", [])
+agendas_filtradas = [
+    agenda for agenda in agendas_originais
+    if not (
+        agenda.get("rec", "Único") == "Único"
+        and agenda.get("status") == "Finalizado"
+    )
+]
+
+if len(agendas_filtradas) != len(agendas_originais):
+    client_data["agendas"] = agendas_filtradas
+    save_db(DB_CLIENTS, st.session_state.db_clients)
+    registrar_log(
+        userid,
+        "🧹 Limpeza automática: eventos únicos finalizados foram removidos do banco.",
+        "info",
+    )
+
 # --- PASSO 1: INICIALIZAÇÃO DA ESTRUTURA FTP ---
 if "ftp" not in client_data:
     client_data["ftp"] = {"host": "", "user": "", "pass": "", "port": "21"}
@@ -3245,7 +3317,15 @@ limite_agendas = int(
         st.session_state.db_users.get("config_planos", PLANOS).get(plano_atual, 2),
     )
 )
-total_agendas = len(client_data.get("agendas", []))
+agendas_validas = [
+    agenda for agenda in client_data.get("agendas", [])
+    if not (
+        agenda.get("rec", "Único") == "Único"
+        and agenda.get("status") == "Finalizado"
+    )
+]
+
+total_agendas = len(agendas_validas)
 
 if st.session_state.role == "admin":
     exp_status = "Ilimitado (Admin)"
@@ -3615,6 +3695,35 @@ with tab1:
 
     with c2:
         st.subheader("Lista de Execução")
+
+        if st.button(
+            "🧹 Limpar eventos finalizados do banco",
+            key=f"limpar_finalizados_{userid}",
+            use_container_width=True,
+            type="secondary",
+        ):
+            agendas_originais = client_data.get("agendas", [])
+            agendas_filtradas = [
+                agenda for agenda in agendas_originais
+                if not (
+                    agenda.get("rec", "Único") == "Único"
+                    and agenda.get("status") == "Finalizado"
+                )
+            ]
+
+            removidos = len(agendas_originais) - len(agendas_filtradas)
+
+            client_data["agendas"] = agendas_filtradas
+            save_db(DB_CLIENTS, st.session_state.db_clients)
+
+            registrar_log(
+                userid,
+                f"🧹 Limpeza manual concluída: {removidos} evento(s) finalizado(s) removido(s) do banco.",
+                "info",
+            )
+
+            st.success(f"{removidos} evento(s) removido(s) do banco.")
+            st.rerun()
 
         agendaslista_original = client_data.get("agendas", [])
         agendaslista = []
