@@ -3747,12 +3747,13 @@ with tab1:
                     # ── Salvar agenda no disco com merge fresco ──────────────────
                     # Carrega o disco no momento do save para não sobrescrever
                     # mudanças que o proworker possa ter feito desde o último load.
+                    # Neste contexto a chave do clients_data é user_id.
                     _db_fresco = load_db(DB_CLIENTS, {})
-                    _entry = _db_fresco.get(server_id, client_data)
+                    _entry = _db_fresco.get(user_id, client_data)
                     if "agendas" not in _entry:
                         _entry["agendas"] = []
                     _entry["agendas"].append(nova_agenda)
-                    _db_fresco[server_id] = _entry
+                    _db_fresco[user_id] = _entry
                     save_db(DB_CLIENTS, _db_fresco)
                     # Atualiza session_state com versão fresquinha
                     st.session_state.db_clients = _db_fresco
