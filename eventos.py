@@ -228,19 +228,18 @@ def load_db(file, default_data):
 
 
 def save_db(file, data):
-    with db_lock:  # ADICIONAR ESTA LINHA
-        if data is None:
-            return
+    if data is None:
+        return
+    with db_lock:
+        try:
+            # Cria backup antes de sobrescrever, se existir
+            if os.path.exists(file):
+                shutil.copy(file, file + ".bak")
 
-    try:
-        # Cria backup antes de sobrescrever, se existir
-        if os.path.exists(file):
-            shutil.copy(file, file + ".bak")
-
-        with open(file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-    except Exception as e:
-        st.error(f"Erro ao salvar banco de dados: {e}")
+            with open(file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"[save_db] Erro ao salvar {file}: {e}")
 
 
 def enviar_email(destino, assunto, mensagem):
@@ -952,6 +951,19 @@ def proworker():
                                         )
 
                                     mudou = True
+
+                                # Confirma que client_id tem FTP antes de chamar
+                                _ftp_conf = client_info.get("ftp", {})
+                                if not _ftp_conf.get("host"):
+                                    registrar_log(
+                                        client_id,
+                                        f"❌ FTP não configurado para este servidor (client_id={client_id}). Upload abortado.",
+                                        "erro",
+                                    )
+                                    agenda["status"] = "Erro"
+                                    agenda["ja_upado"] = False
+                                    mudou = True
+                                    continue
 
                                 ok, msg = dispararftppro(
                                     client_id,
@@ -3732,8 +3744,18 @@ with tab1:
                             "info",
                         )
 
-                    client_data["agendas"].append(nova_agenda)
-                    save_db(DB_CLIENTS, st.session_state.db_clients)
+                    # ── Salvar agenda no disco com merge fresco ──────────────────
+                    # Carrega o disco no momento do save para não sobrescrever
+                    # mudanças que o proworker possa ter feito desde o último load.
+                    _db_fresco = load_db(DB_CLIENTS, {})
+                    _entry = _db_fresco.get(server_id, client_data)
+                    if "agendas" not in _entry:
+                        _entry["agendas"] = []
+                    _entry["agendas"].append(nova_agenda)
+                    _db_fresco[server_id] = _entry
+                    save_db(DB_CLIENTS, _db_fresco)
+                    # Atualiza session_state com versão fresquinha
+                    st.session_state.db_clients = _db_fresco
 
                     registrar_log(
                         user_id,
