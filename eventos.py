@@ -555,23 +555,27 @@ def dispararftppro(client_id, acao, filename, localpath, mapapath):
     if client_id in dbatual and dbatual[client_id].get("ftp", {}).get("host"):
         conf = dbatual[client_id]["ftp"]
     else:
-        # Fallback: percorre clients_data procurando FTP configurado
-        for _cid, _cdata in dbatual.items():
-            if _cdata.get("ftp", {}).get("host"):
-                # Verifica se esse entry corresponde ao client_id via users_db
-                users = load_db(DB_USERS, {})
-                for _key, _kdata in users.get("keys", {}).items():
-                    if _kdata.get("server_id", "") == client_id and _cid in (_key, client_id):
-                        conf = _cdata["ftp"]
-                        print(f"[FTP DEBUG] FTP resolvido via fallback: {_cid}")
-                        break
-                if conf:
-                    break
+        # Fallback: percorre users_db para achar o server_id real da KeyUser client_id
+        users = load_db(DB_USERS, {})
+        _server_id_real = None
+        for _key, _kdata in users.get("keys", {}).items():
+            # client_id pode ser a KeyUser ou o server_id
+            if _key == client_id or _kdata.get("server_id", "") == client_id:
+                _server_id_real = _kdata.get("server_id", _key)
+                break
+
+        if _server_id_real and _server_id_real in dbatual:
+            _entry = dbatual[_server_id_real]
+            if _entry.get("ftp", {}).get("host"):
+                conf = _entry["ftp"]
+                print(f"[FTP DEBUG] FTP resolvido via server_id_real={_server_id_real}")
+
         if not conf:
-            # Última tentativa: usa o primeiro FTP disponível desse client
+            # Última tentativa: entry direto pelo client_id
             _entry = dbatual.get(client_id, {})
             if _entry.get("ftp", {}).get("host"):
                 conf = _entry["ftp"]
+                print(f"[FTP DEBUG] FTP resolvido direto em client_id={client_id}")
 
     if not conf or not conf.get("host"):
         erro_msg = f"Config FTP não encontrada para client_id={client_id}"
@@ -909,9 +913,15 @@ def proworker():
 
                             if not os.path.exists(agenda.get("localpath", "")) and agenda.get("filecontent"):
                                 try:
-                                    os.makedirs(os.path.dirname(agenda["localpath"]), exist_ok=True)
+                                    _dir = os.path.dirname(agenda["localpath"])
+                                    if _dir:
+                                        os.makedirs(_dir, exist_ok=True)
+                                    else:
+                                        os.makedirs(UPLOAD_DIR, exist_ok=True)
+                                        agenda["localpath"] = os.path.join(UPLOAD_DIR, agenda["file"])
                                     with open(agenda["localpath"], "wb") as file_obj:
                                         file_obj.write(base64.b64decode(agenda["filecontent"]))
+                                    print(f"[AGENDA] Arquivo recriado em: {agenda['localpath']}")
                                 except Exception as exc_recriar:
                                     registrar_log(
                                         client_id,
@@ -1316,7 +1326,22 @@ def proworker():
                     mudou = True
 
             if mudou:
-                save_db(DB_CLIENTS, db_all)
+                # Merge fresco: recarrega disco para preservar logs escritos
+                # pelo registrar_log() durante este ciclo e aplica só as
+                # mudanças de status/flags das agendas e outros campos do worker
+                _db_save = load_db(DB_CLIENTS, {})
+                for _cid, _cinfo in db_all.items():
+                    if _cid in _db_save:
+                        # Preserva logs do disco, aplica agendas atualizadas
+                        _db_save[_cid]["agendas"] = _cinfo.get("agendas", [])
+                        # Propaga outros campos que o worker possa ter mudado
+                        for _campo in ["xp_stats", "wallets", "bank", "ranking_stats",
+                                       "dzcoins_config", "ranking_global", "tracking_acoes"]:
+                            if _campo in _cinfo:
+                                _db_save[_cid][_campo] = _cinfo[_campo]
+                    else:
+                        _db_save[_cid] = _cinfo
+                save_db(DB_CLIENTS, _db_save)
 
         except Exception as exc:
             print("[PROWORKER] Erro no ciclo:", exc)
@@ -3278,7 +3303,14 @@ agendas_filtradas = [
 
 if len(agendas_filtradas) != len(agendas_originais):
     client_data["agendas"] = agendas_filtradas
-    save_db(DB_CLIENTS, st.session_state.db_clients)
+    # Merge fresco: carrega disco atual e aplica só a limpeza, sem sobrescrever
+    # mudanças que o proworker possa ter feito desde o último load
+    _db_limpeza = load_db(DB_CLIENTS, {})
+    _entry_limpeza = _db_limpeza.get(user_id, {})
+    _entry_limpeza["agendas"] = agendas_filtradas
+    _db_limpeza[user_id] = _entry_limpeza
+    save_db(DB_CLIENTS, _db_limpeza)
+    st.session_state.db_clients = _db_limpeza
     registrar_log(
         user_id,
         "🧹 Limpeza automática: eventos únicos finalizados foram removidos do banco.",
