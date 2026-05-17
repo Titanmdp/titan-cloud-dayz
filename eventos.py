@@ -3306,7 +3306,7 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                 time.sleep(1)
                 st.rerun()
 
-        # --- TAB 4: BACKUP / RESTORE ---
+                # --- TAB 4: BACKUP / RESTORE ---
         with tab_adm4:
             st.subheader("📦 Central de Migração de Dados")
             st.info("Faça backup antes de atualizar e restaure logo após o deploy.")
@@ -3405,10 +3405,37 @@ if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
                     "clients": st.session_state.db_clients,
                 }
                 json_string = json.dumps(dados_totais, indent=4, ensure_ascii=False)
+                clients_data_json = json.dumps(
+                    st.session_state.db_clients,
+                    indent=4,
+                    ensure_ascii=False,
+                )
+                users_db_json = json.dumps(
+                    st.session_state.db_users,
+                    indent=4,
+                    ensure_ascii=False,
+                )
+
                 st.download_button(
                     label="💾 Baixar Backup Geral (JSON)",
                     data=json_string,
                     file_name=f"backup_titan_{get_hora_brasilia().strftime('%d_%m_%Y')}.json",
+                    mime="application/json",
+                    use_container_width=True,
+                )
+
+                st.download_button(
+                    label="🗂️ Baixar clients_data.json",
+                    data=clients_data_json,
+                    file_name="clients_data.json",
+                    mime="application/json",
+                    use_container_width=True,
+                )
+
+                st.download_button(
+                    label="👤 Baixar users_db.json",
+                    data=users_db_json,
+                    file_name="users_db.json",
                     mime="application/json",
                     use_container_width=True,
                 )
