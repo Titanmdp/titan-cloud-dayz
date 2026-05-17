@@ -2759,12 +2759,12 @@ def montar_embed_radar(alerta: dict, nitrado_id: str) -> dict:
     nome_rad = radar.get("nome", "Radar")
 
     # Link izurvive — Chernarus ou Livonia
-    if "livonia" in mapa.lower() or "enoch" in mapa.lower():
-        mapa_id = "livoniaSat"
+    if "livonia" in mapa.lower():
+        map_slug = "livonia"
     else:
-        mapa_id = "chernarusSat"
+        map_slug = "chernarusplussatmap"
 
-    link_izurvive = f"https://www.izurvive.com/{mapa_id}/#location={px:.1f};{pz:.1f}"
+    link_izurvive = f"https://www.izurvive.com/{map_slug}/#location={px:.1f};{pz:.1f};3.0"
 
     descricao = (
         f"🚨 Invasor **{invasor}** detectado no perímetro do radar.\n"
@@ -6864,8 +6864,8 @@ with tab_radares:
     else:
         for _idx_r, _rad in enumerate(_radares):
             _status_icon = "🟢" if _rad.get("ativo", True) else "⏸️"
-            _mapa_id_r = "livoniaSat" if "livonia" in _rad.get("mapa", "").lower() else "chernarusSat"
-            _link_r = f"https://www.izurvive.com/{_mapa_id_r}/#location={_rad.get('x', 0):.1f};{_rad.get('z', 0):.1f}"
+            _mapa_id_r = "livoniasatmap" if "livonia" in _rad.get("mapa", "").lower() else "chernarusplussatmap"
+            _link_r = f"https://www.izurvive.com/{_mapa_id_r}/#location={_rad.get('x', 0):.1f};{_rad.get('z', 0):.1f};3.0"
 
             with st.expander(
                 f"{_status_icon} {_rad.get('nome', 'Radar')} | 👤 {_rad.get('dono_gamertag', '?')} | ⭕ {_rad.get('raio', 0)}m | 🗺️ {_rad.get('mapa', '?')}",
