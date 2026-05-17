@@ -1,3 +1,53 @@
+# =========================================================
+# TITAN CLOUD PRO — Eventos.py
+# Arquivo principal do sistema. Contém toda a lógica de:
+#   - Autenticação (admin e cliente)
+#   - Worker de agendamentos FTP (proworker)
+#   - Worker de DzCoins automático
+#   - Painel do Administrador
+#   - Painel do Cliente (todas as abas)
+#
+# ÍNDICE DE SEÇÕES:
+#   1. IMPORTS
+#   2. CONFIG / AMBIENTE / CONSTANTES
+#   3. FUNÇÕES UTILITÁRIAS / INFRA
+#      3.1 Banco de dados (load_db / save_db)
+#      3.2 Tempo / Fuso horário
+#      3.3 FTP — upload, download, wrappers
+#      3.4 Workers (proworker / dzcoins)
+#      3.5 Discord / Webhooks
+#      3.6 Helpers XML (types, globals, events, messages, cfgeventspawns)
+#      3.7 Helpers JSON (loja, players)
+#      3.8 Email / WhatsApp
+#      3.9 Autenticação e acesso
+#   4. INICIALIZAÇÃO DE ESTADO (session_state)
+#   5. SIDEBAR
+#   6. TELA DE LOGIN
+#   7. ÁREA DO ADMINISTRADOR
+#   8. ÁREA DO CLIENTE
+#      8.1  Tab: Eventos Agendados
+#      8.2  Tab: Histórico de Logs
+#      8.3  Tab: Comunicados
+#      8.4  Tab: Loot / types.xml
+#      8.5  Tab: Ambiente / globals.xml
+#      8.6  Tab: Gameplay / cfggameplay.json
+#      8.7  Tab: Eventos / events.xml
+#      8.8  Tab: Mensagens / messages.xml
+#      8.9  Tab: Spawns / cfgeventspawns.xml
+#      8.10 Tab: Agenda de RAID
+#      8.11 Tab: Loja / Trader
+#      8.12 Tab: Jogadores
+#      8.13 Tab: Analytics
+#      8.14 Tab: Ranking
+#      8.15 Tab: Banco / Carteira
+#      8.16 Tab: Feeds / Bot
+#      8.17 Tab: Planos
+#   9. INÍCIO DOS WORKERS (boot)
+# =========================================================
+
+# =========================================================
+# 1. IMPORTS
+# =========================================================
 import streamlit as st
 import ftplib
 import os
@@ -22,7 +72,7 @@ from streamlit_javascript import st_javascript
 db_lock = threading.Lock()
 
 # =========================================================
-# 1. CONFIG / AMBIENTE / CONSTANTES
+# 2. CONFIG / AMBIENTE / CONSTANTES
 # =========================================================
 
 # --- DETECÇÃO DE AMBIENTE E PERSISTÊNCIA DE DADOS ---
@@ -163,8 +213,12 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 # =========================================================
-# 2. FUNÇÕES UTILITÁRIAS / INFRA
+# 3. FUNÇÕES UTILITÁRIAS / INFRA
 # =========================================================
+
+# ---------------------------------------------------------
+# 3.1 TEMPO / FUSO HORÁRIO
+# ---------------------------------------------------------
 
 def str_to_time(data_str, hora_str):
     """
@@ -206,6 +260,11 @@ def manter_vivo():
 threading.Thread(target=manter_vivo, daemon=True).start()
 
 
+# ---------------------------------------------------------
+# 3.2 BANCO DE DADOS — load_db / save_db
+# Toda leitura/escrita de JSON passa por aqui.
+# db_lock garante que worker e Streamlit não escrevam juntos.
+# ---------------------------------------------------------
 def load_db(file, default_data):
     with db_lock:
         if os.path.exists(file):
@@ -242,6 +301,9 @@ def save_db(file, data):
             print(f"[save_db] Erro ao salvar {file}: {e}")
 
 
+# ---------------------------------------------------------
+# 3.3 EMAIL / WHATSAPP
+# ---------------------------------------------------------
 def enviar_email(destino, assunto, mensagem):
     email_user = os.environ.get("EMAIL_USER")
     email_pass = os.environ.get("EMAIL_PASS")
@@ -280,6 +342,9 @@ def enviar_whatsapp(numero, mensagem):
         return False
 
 
+# ---------------------------------------------------------
+# 3.4 AUTENTICAÇÃO, LOGS E LOCALIZAÇÃO
+# ---------------------------------------------------------
 def registrar_log(client_id, mensagem, tipo="info"):
     db_disco = load_db(DB_CLIENTS, {})
 
@@ -333,6 +398,9 @@ def get_user_location():
         "pais": "---",
     }
 
+# ---------------------------------------------------------
+# 3.5 DISCORD / WEBHOOKS
+# ---------------------------------------------------------
 def enviar_ao_discord(webhook_url: str, titulo: str, mensagem: str, cor: int = 65280):
     """
     Envia um Embed formatado para o Discord via Webhook.
@@ -464,7 +532,13 @@ def render_heatmap(client_data):
 
     st.plotly_chart(fig, use_container_width=True)
 
-# ---------- HELPERS TYPES.XML (ECONOMIA) ----------
+# ---------------------------------------------------------
+# 3.6 HELPERS XML
+# Parsers e aplicadores para types.xml, globals.xml,
+# events.xml, messages.xml e cfgeventspawns.xml
+# ---------------------------------------------------------
+
+# ---------- types.xml (Loot / Economia) ----------
 
 def parse_types_xml(xmlbytes):
     """
@@ -541,6 +615,11 @@ def apply_df_to_types_xml(tree, root, df):
     return header + xmlbytes
 
 
+# ---------------------------------------------------------
+# 3.7 FTP — UPLOAD / DOWNLOAD / WRAPPERS
+# dispararftppro: função central de UPLOAD e DELETE no FTP.
+# Resolve config de FTP pelo client_id com fallback via server_id.
+# ---------------------------------------------------------
 def dispararftppro(client_id, acao, filename, localpath, mapapath):
     """
     Executa UPLOAD ou DELETE de arquivo no FTP do servidor.
@@ -619,6 +698,17 @@ def dispararftppro(client_id, acao, filename, localpath, mapapath):
         print(f"[FTP ERROR] dispararftppro exception: {e}")
         return False, str(e)
 
+# ---------------------------------------------------------
+# 3.8 WORKERS — proworker e worker_dzcoins_automatico
+# proworker: roda em thread daemon, ciclo de 15s.
+#   - Processa agendamentos de arquivos (upload/delete FTP)
+#   - Processa feeds de logs do servidor
+#   - Atualiza ranking e XP
+#   - Gerencia Agenda de RAID
+# worker_dzcoins_automatico: distribui DzCoins para jogadores online.
+# ---------------------------------------------------------
+
+# --- worker_dzcoins_automatico ---
 def worker_dzcoins_automatico():
     """
     Worker que distribui DzCoins automaticamente APENAS para jogadores
@@ -841,6 +931,7 @@ def worker_dzcoins_automatico():
         time.sleep(sleep_min * 60)
 
 
+# --- proworker (agendamentos FTP + feeds + ranking + RAID) ---
 def proworker():
     while True:
         try:
@@ -1325,6 +1416,51 @@ def proworker():
                     client_info["ranking_global"] = ranking_atualizado
                     mudou = True
 
+                # --- PASSO 9: RADAR DE BASE ---
+                # Verifica se algum jogador invadiu o perímetro de algum radar cadastrado.
+                # Dispara alerta no Discord e registra no histórico do radar.
+                if feeds_config.get("radar_ativo", True) and log_txt:
+                    try:
+                        _nitrado_id = str(client_info.get(
+                            "nitrado_id",
+                            client_info.get("loja", {}).get("mapa_padrao", client_id)
+                        ))
+                        _alertas_radar = verificar_radares(log_txt, client_info, client_id)
+                        for _alerta in _alertas_radar:
+                            _radar = _alerta["radar"]
+                            _invasor = _alerta["invasor"]
+                            _dist = _alerta["distancia"]
+                            _nome_rad = _radar.get("nome", "Radar")
+
+                            # Log no sistema
+                            registrar_log(
+                                client_id,
+                                f"🚨 RADAR [{_nome_rad}]: invasor {_invasor} a {_dist}m do epicentro.",
+                                "erro",
+                            )
+
+                            # Webhook do radar (canal específico do dono)
+                            _webhook_radar = _radar.get("webhook_url", "").strip()
+                            if _webhook_radar:
+                                try:
+                                    _embed = montar_embed_radar(_alerta, _nitrado_id)
+                                    requests.post(_webhook_radar, json=_embed, timeout=5)
+                                except Exception as _we:
+                                    print(f"[RADAR] Erro webhook radar {_nome_rad}: {_we}")
+
+                            # Webhook admin (canal geral do servidor)
+                            _webhook_adm = feeds_config.get("webhook_admin_logs", "")
+                            if _webhook_adm:
+                                try:
+                                    _embed_adm = montar_embed_radar(_alerta, _nitrado_id)
+                                    requests.post(_webhook_adm, json=_embed_adm, timeout=5)
+                                except Exception as _we:
+                                    print(f"[RADAR] Erro webhook admin {client_id}: {_we}")
+
+                            mudou = True
+                    except Exception as _exc_radar:
+                        print(f"[PROWORKER][RADAR] Erro em {client_id}: {_exc_radar}")
+
             if mudou:
                 # Merge fresco: recarrega disco para preservar logs escritos
                 # pelo registrar_log() durante este ciclo e aplica só as
@@ -1349,6 +1485,7 @@ def proworker():
         time.sleep(15)
 
 
+# --- Inicialização dos workers (chamado no boot do app) ---
 WORKER_STARTED = False
 def start_worker_once():
     global WORKER_STARTED
@@ -1361,7 +1498,9 @@ def start_worker_once():
 # Inicia o worker imediatamente no boot do app (independente de login)
 start_worker_once()
 
-# ---------- HELPER GESTÃO DE PEDIDOS (ADMIN SERVIDOR) ----------
+# ---------------------------------------------------------
+# 3.8.1 FTP — GESTÃO DE PEDIDOS (LOJA)
+# ---------------------------------------------------------
 def render_gestao_pedidos(client_data, server_id):
     st.subheader("📦 Auditoria e Gestão de Pedidos")
     st.info("Monitore as vendas e realize estornos de DzCoins se necessário.")
@@ -1404,7 +1543,7 @@ def render_gestao_pedidos(client_data, server_id):
                 save_db(DB_CLIENTS, st.session_state.db_clients)
                 st.success("✅ Estorno concluído!"); time.sleep(1); st.rerun()
 
-# ---------- HELPER GENÉRICO DE DOWNLOAD VIA FTP ----------
+# --- FTP Download — função genérica e wrappers por arquivo ---
 
 def baixar_arquivo_via_ftp(client_id, remotedir, remotefilename):
     """
@@ -1436,7 +1575,7 @@ def baixar_arquivo_via_ftp(client_id, remotedir, remotefilename):
     except Exception as e:
         return False, None, str(e)
 
-# ---------- WRAPPERS ESPECÍFICOS DE DOWNLOAD ----------
+# --- Wrappers de download por tipo de arquivo ---
 
 def baixartypesviaftp(client_id, mapa):
     remotedir = TYPES_REMOTE_PATHS.get(mapa)
@@ -1474,7 +1613,7 @@ def baixarcfgeventspawnsviaftp(client_id, mapa):
         return False, None, f"Caminho remoto não configurado para o mapa {mapa}"
     return baixar_arquivo_via_ftp(client_id, remotedir, "cfgeventspawns.xml")
 
-# ---------- HELPERS CFGEVENTSPAWNS.XML ----------
+# ---------- cfgeventspawns.xml (Spawns) ----------
 
 def parse_cfgeventspawns_xml(xml_bytes):
     """
@@ -1566,7 +1705,7 @@ def aplicar_eventos_map_no_cfgeventspawns(tree, root, eventos_map):
 
 
 
-# ---------- HELPERS EVENTS.XML ----------
+# ---------- events.xml (Eventos de servidor) ----------
 
 def parse_events_xml(xml_bytes):
     """
@@ -1686,7 +1825,7 @@ def apply_df_to_events_xml(tree, root, df_events):
     header = b'<?xml version="1.0" encoding="utf-8"?>\n'
     return header + xml_bytes
 
-# ---------- HELPERS MESSAGES.XML ----------
+# ---------- messages.xml (Mensagens automáticas) ----------
 
 def parse_messages_xml(xml_bytes):
     """
@@ -1858,7 +1997,7 @@ def apply_df_to_messages_xml(tree, root, df_messages):
     xml_bytes = ET.tostring(root, encoding="utf-8", method="xml")
     return b"\n" + xml_bytes
 
-# ---------- HELPER GENÉRICO DE FTP ----------
+# --- FTP Upload — função genérica ---
 
 def enviar_arquivo_via_ftp(client_id, localpath, remotedir, remotefilename):
     """
@@ -1888,7 +2027,7 @@ def enviar_arquivo_via_ftp(client_id, localpath, remotedir, remotefilename):
         return False, str(e)
 
 
-# ---------- WRAPPERS ESPECÍFICOS ----------
+# --- Wrappers de upload por tipo de arquivo ---
 
 def enviar_types_via_ftp(client_id, localpath, mapa):
     """
@@ -1939,6 +2078,7 @@ def enviar_cfggameplay_via_ftp(client_id, localpath, mapa):
     )
 
 
+# --- Registra arquivo de agenda no cfggameplay.json via FTP ---
 def adicionar_agenda_em_cfggameplay(client_id, mapa, filename):
     """
     Garante que o arquivo de agenda esteja registrado em
@@ -2173,7 +2313,7 @@ def worker_processar_pedidos():
         
         time.sleep(30)
 
-# ---------- HELPERS GLOBALS.XML (AMBIENTE) ----------
+# ---------- globals.xml (Ambiente / Clima) ----------
 
 # Lista das variáveis que vamos expor na UI primeiro
 GLOBALS_KEYS_FOCO = [
@@ -2232,7 +2372,11 @@ def apply_globals_changes(tree, root, vars_dict):
     header = b'<?xml version="1.0" encoding="utf-8"?>\n'
     return header + xml_bytes
 
-# ---------- HELPERS LOJA / TRADER (JSON) ----------
+# ---------------------------------------------------------
+# 3.9 HELPERS JSON — LOJA E PLAYERS
+# ---------------------------------------------------------
+
+# ---------- Loja / Trader ----------
 
 LOJA_DEFAULT = {
     "mapa_padrao": "Chernarus",
@@ -2296,7 +2440,7 @@ def df_to_loja_itens(df):
     itens.sort(key=lambda x: x["id"])
     return itens
 
-# ---------- HELPERS PLAYERS / VÍNCULOS ----------
+# ---------- Players / Vínculos ----------
 
 PLAYERS_DEFAULT = {}  # dict: {gamertag: {...dados...}}
 
@@ -2348,8 +2492,302 @@ def df_to_players(df):
         }
     return players
 
+
 # =========================================================
-# 3. INICIALIZAÇÃO DE ESTADO
+# 3.8 FUNÇÕES DE PARSING DE LOG ADM — RADAR DE BASE
+# Parsers para o arquivo .ADM do DayZ Xbox (Nitrado).
+# Usados pelo proworker para:
+#   - Extrair posições de jogadores (radar de base)
+#   - Extrair eventos PvP (ranking)
+#   - Extrair coordenadas para mapa de calor
+#   - Detectar glitches
+# =========================================================
+
+import re as _re
+import io as _io
+import math as _math
+
+def ftp_download_latest_adm(ftp_cfg: dict):
+    """
+    Baixa o arquivo .ADM mais recente do servidor via FTP.
+    Retorna (texto_str, nome_arquivo) ou ("", "").
+    O arquivo fica em dayzxb/config/*.ADM
+    """
+    if not ftp_cfg or not ftp_cfg.get("host"):
+        return "", ""
+    try:
+        with ftplib.FTP() as ftp:
+            ftp.connect(ftp_cfg["host"], int(ftp_cfg.get("port", 21)), timeout=20)
+            ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
+            ftp.cwd("dayzxb/config")
+            arquivos = [a for a in ftp.nlst() if a.upper().endswith(".ADM")]
+            if not arquivos:
+                return "", ""
+            arquivos.sort(reverse=True)
+            ultimo = arquivos[0]
+            buf = _io.BytesIO()
+            ftp.retrbinary(f"RETR {ultimo}", buf.write)
+            texto = buf.getvalue().decode("utf-8", errors="ignore")
+            return texto, ultimo
+    except Exception as e:
+        print(f"[ftp_download_latest_adm] Erro: {e}")
+        return "", ""
+
+
+def extrair_posicoes_jogadores(log_txt: str) -> dict:
+    """
+    Extrai a posição mais recente de cada jogador no log ADM.
+    Formato da linha de posição no DayZ ADM:
+      HH:MM:SS | Player "NOME" (id=...) | pos=<X, Y, Z>
+    Retorna dict: { "gamertag": {"x": float, "y": float, "z": float, "hora": str} }
+    """
+    posicoes = {}
+    # Padrão: Player "Nome" ... pos=<X, Y, Z>
+    padrao = _re.compile(
+        r'(\d{2}:\d{2}:\d{2})\s*\|\s*Player\s+"([^"]+)"[^\r\n]*pos=<\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*>',
+        _re.IGNORECASE,
+    )
+    for m in padrao.finditer(log_txt):
+        hora  = m.group(1)
+        nome  = m.group(2).strip()
+        x     = float(m.group(3))
+        y     = float(m.group(4))
+        z     = float(m.group(5))
+        posicoes[nome] = {"x": x, "y": y, "z": z, "hora": hora}
+    return posicoes
+
+
+def extrair_coordenadas_mapa(log_txt: str) -> list:
+    """
+    Extrai lista de (x, z) para o mapa de calor.
+    """
+    coords = []
+    padrao = _re.compile(
+        r'Player\s+"[^"]+"\s+[^\r\n]*pos=<\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*>',
+        _re.IGNORECASE,
+    )
+    for m in padrao.finditer(log_txt):
+        try:
+            coords.append({"x": float(m.group(1)), "z": float(m.group(3))})
+        except Exception:
+            pass
+    return coords
+
+
+def extrair_eventos_pvp(log_txt: str) -> list:
+    """
+    Extrai eventos PvP (kills) do log ADM.
+    Formato: HH:MM:SS | Player "KILLER" killed Player "VICTIM"
+    Retorna lista de dicts com killer, victim, hora.
+    """
+    eventos = []
+    padrao = _re.compile(
+        r'(\d{2}:\d{2}:\d{2})\s*\|\s*Player\s+"([^"]+)"\s+killed\s+Player\s+"([^"]+)"',
+        _re.IGNORECASE,
+    )
+    for m in padrao.finditer(log_txt):
+        eventos.append({
+            "hora":   m.group(1),
+            "killer": m.group(2).strip(),
+            "victim": m.group(3).strip(),
+        })
+    return eventos
+
+
+def processar_ranking_global(eventos_pvp: list, ranking_atual: list) -> list:
+    """
+    Atualiza ranking global com base em eventos PvP.
+    Retorna lista ordenada por kills.
+    """
+    tabela = {r["gamertag"]: r for r in ranking_atual if "gamertag" in r}
+    for ev in eventos_pvp:
+        killer = ev.get("killer", "")
+        victim = ev.get("victim", "")
+        if killer:
+            if killer not in tabela:
+                tabela[killer] = {"gamertag": killer, "kills": 0, "deaths": 0}
+            tabela[killer]["kills"] += 1
+        if victim:
+            if victim not in tabela:
+                tabela[victim] = {"gamertag": victim, "kills": 0, "deaths": 0}
+            tabela[victim]["deaths"] += 1
+    return sorted(tabela.values(), key=lambda r: r.get("kills", 0), reverse=True)
+
+
+def analisar_glitches(log_txt: str, feeds_config: dict, client_info: dict, mapa: str) -> list:
+    """
+    Analisa o log ADM em busca de suspeitas de glitch (subsolo, hortas, fogueiras).
+    Retorna lista de dicts com jogador, tipo, pos, banir.
+    """
+    alertas = []
+    posicoes = extrair_posicoes_jogadores(log_txt)
+    for nome, pos in posicoes.items():
+        y = pos.get("y", 0)
+        # Glitch subsolo: Y muito negativo
+        if feeds_config.get("glitch_subsolo") and y < -0.5:
+            alertas.append({
+                "jogador": nome,
+                "tipo":    "Subsolo",
+                "pos":     f"{pos['x']:.1f} x {pos['z']:.1f} x {y:.1f}",
+                "detalhe": f"Y={y:.2f} (abaixo do terreno)",
+                "banir":   False,
+            })
+    return alertas
+
+
+def aplicar_banimento_ftp(ftp_cfg: dict, gamertag: str) -> bool:
+    """
+    Placeholder para banimento automático via FTP.
+    DayZ Xbox via Nitrado não suporta ban direto por FTP,
+    mas o log é registrado para ação manual.
+    """
+    print(f"[BAN] Banimento solicitado para: {gamertag} (ação manual necessária)")
+    return False
+
+
+def calcular_distancia_2d(x1: float, z1: float, x2: float, z2: float) -> float:
+    """
+    Calcula distância 2D entre dois pontos no mapa DayZ (eixos X e Z).
+    """
+    return _math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2)
+
+
+def verificar_radares(log_txt: str, client_info: dict, client_id: str) -> list:
+    """
+    Verifica se algum jogador entrou no raio de algum radar cadastrado.
+    Retorna lista de alertas para disparar webhook/log.
+
+    Estrutura de cada radar em client_info["radares"]:
+        {
+            "id": int,
+            "nome": str,
+            "dono_gamertag": str,
+            "dono_discord_id": str,
+            "webhook_url": str,
+            "mapa": str,
+            "x": float,  "z": float,  "y": float,
+            "raio": int,
+            "ativo": bool,
+            "cooldown_minutos": int,
+            "ultimo_alerta": str,   # "dd/mm/yyyy HH:MM"
+            "historico": []
+        }
+    """
+    alertas = []
+    radares = client_info.get("radares", [])
+    if not radares or not log_txt:
+        return alertas
+
+    posicoes = extrair_posicoes_jogadores(log_txt)
+    if not posicoes:
+        return alertas
+
+    now = datetime.now(FUSO_BR)
+    server_nome = client_info.get("loja", {}).get("mapa_padrao", "BR")
+
+    for radar in radares:
+        if not radar.get("ativo", True):
+            continue
+
+        # Cooldown: evita spam de alertas no mesmo radar
+        ultimo = radar.get("ultimo_alerta", "")
+        if ultimo:
+            try:
+                dt_ultimo = datetime.strptime(ultimo, "%d/%m/%Y %H:%M").replace(tzinfo=FUSO_BR)
+                minutos_passados = (now - dt_ultimo).total_seconds() / 60
+                cooldown = int(radar.get("cooldown_minutos", 5))
+                if minutos_passados < cooldown:
+                    continue
+            except Exception:
+                pass
+
+        epicentro_x = float(radar.get("x", 0))
+        epicentro_z = float(radar.get("z", 0))
+        raio        = float(radar.get("raio", 150))
+        dono        = radar.get("dono_gamertag", "")
+
+        for gamertag, pos in posicoes.items():
+            # Dono do radar não dispara alerta
+            if gamertag.lower() == dono.lower():
+                continue
+
+            dist = calcular_distancia_2d(epicentro_x, epicentro_z, pos["x"], pos["z"])
+            if dist <= raio:
+                alertas.append({
+                    "radar":       radar,
+                    "invasor":     gamertag,
+                    "distancia":   round(dist, 2),
+                    "pos_x":       pos["x"],
+                    "pos_y":       pos["y"],
+                    "pos_z":       pos["z"],
+                    "hora_log":    pos["hora"],
+                    "server_nome": server_nome,
+                    "client_id":   client_id,
+                    "timestamp":   now.strftime("%d/%m/%Y %H:%M"),
+                })
+                # Atualiza último alerta e histórico do radar
+                radar["ultimo_alerta"] = now.strftime("%d/%m/%Y %H:%M")
+                entrada_historico = {
+                    "invasor":   gamertag,
+                    "distancia": round(dist, 2),
+                    "pos":       f"{pos['x']:.1f} x {pos['z']:.1f} x {pos['y']:.1f}",
+                    "hora":      now.strftime("%d/%m/%Y %H:%M:%S"),
+                }
+                if "historico" not in radar:
+                    radar["historico"] = []
+                radar["historico"].insert(0, entrada_historico)
+                radar["historico"] = radar["historico"][:100]  # mantém últimos 100
+                break  # 1 alerta por radar por ciclo
+
+    return alertas
+
+
+def montar_embed_radar(alerta: dict, nitrado_id: str) -> dict:
+    """
+    Monta o payload embed Discord para alerta de radar.
+    Segue o mesmo padrão visual do BotBigode.
+    """
+    radar    = alerta["radar"]
+    invasor  = alerta["invasor"]
+    dist     = alerta["distancia"]
+    px       = alerta["pos_x"]
+    py       = alerta["pos_y"]
+    pz       = alerta["pos_z"]
+    hora_log = alerta["hora_log"]
+    server   = alerta["server_nome"]
+    mapa     = radar.get("mapa", "Chernarus")
+    nome_rad = radar.get("nome", "Radar")
+
+    # Link izurvive — Chernarus ou Livonia
+    if "livonia" in mapa.lower() or "enoch" in mapa.lower():
+        mapa_id = "livoniaSat"
+    else:
+        mapa_id = "chernarusSat"
+
+    link_izurvive = f"https://www.izurvive.com/{mapa_id}/#location={px:.1f};{pz:.1f}"
+
+    descricao = (
+        f"🚨 Invasor **{invasor}** detectado no perímetro do radar.\n"
+        f"╒┄**Servidor:** {nitrado_id}\n"
+        f"╘┄**Raio:** {dist} metros\n"
+        f"[📍 Local {px:.1f} x {pz:.1f} x {py:.1f}]({link_izurvive})\n"
+        f"`⏰ log:▶{hora_log} - server({server})`"
+    )
+
+    return {
+        "embeds": [{
+            "title": f"》🄰larme — {nome_rad}",
+            "description": descricao,
+            "color": 0xFF0000,
+            "footer": {"text": "Titan Cloud PRO • Radar de Base"},
+            "timestamp": datetime.now(FUSO_BR).isoformat(),
+        }]
+    }
+
+# =========================================================
+# 4. INICIALIZAÇÃO DE ESTADO (session_state)
+# Garante que todas as chaves do session_state existam
+# antes de qualquer renderização.
 # =========================================================
 
 if "db_users" not in st.session_state:
@@ -2380,7 +2818,8 @@ if "view_mode" not in st.session_state:
 
 
 # =========================================================
-# 4. SIDEBAR — TITAN CLOUD PRO
+# 5. SIDEBAR — TITAN CLOUD PRO
+# Logo, relógio de Brasília, configurações FTP e logout.
 # =========================================================
 
 with st.sidebar:
@@ -2388,7 +2827,9 @@ with st.sidebar:
 
 
 # =========================================================
-# 5. TELA DE LOGIN (APENAS PARA PORTAL DO ADMIN)
+# 6. TELA DE LOGIN
+# Autenticação via admin_key ou KeyUser.
+# MFA (código de e-mail) habilitado para admin.
 # =========================================================
 
 if not st.session_state.get("authenticated"):
@@ -2525,7 +2966,9 @@ if not st.session_state.get("authenticated"):
 
 
 # =========================================================
-# 6. ÁREA DO ADMINISTRADOR
+# 7. ÁREA DO ADMINISTRADOR
+# Acessível apenas com admin_key.
+# Tabs: Gestão de Clientes | Corrigir Banco | Planos | Logs
 # =========================================================
 
 if st.session_state.role == "admin" and st.session_state.view_mode == "admin":
@@ -3251,7 +3694,9 @@ elif st.session_state.get("view_mode") == "client":
     pass  # continua para a Área do Cliente abaixo
 
 # =========================================================
-# 7. ÁREA DO CLIENTE
+# 8. ÁREA DO CLIENTE
+# Acessível via KeyUser válida.
+# Todas as abas do servidor são renderizadas aqui.
 # =========================================================
 
 user_id = st.session_state.user_key
@@ -3291,7 +3736,12 @@ if user_id not in st.session_state.db_clients:
     st.session_state.db_clients[user_id] = {}
 client_data = st.session_state.db_clients[user_id]
 
-# --- LIMPEZA AUTOMÁTICA DE EVENTOS ÚNICOS FINALIZADOS ---
+# ---------------------------------------------------------
+# 8.1 PRÉ-PROCESSAMENTO — Limpeza e inicialização de estruturas
+# Executado a cada re-run do Streamlit antes de renderizar as abas.
+# ---------------------------------------------------------
+
+# --- Limpeza automática de eventos únicos finalizados ---
 agendas_originais = client_data.get("agendas", [])
 agendas_filtradas = [
     agenda for agenda in agendas_originais
@@ -3444,7 +3894,10 @@ else:
     except Exception:
         exp_status = "Erro na data"
 
-# --- SIDEBAR CLIENTE ---
+# ---------------------------------------------------------
+# 8.2 SIDEBAR DO CLIENTE
+# FTP config, teste de conexão, status Nitrado, saldo DzCoins.
+# ---------------------------------------------------------
 with st.sidebar:
     st.title("👤 Minha Conta")
 
@@ -3601,11 +4054,15 @@ with st.sidebar:
 
     sidebar_clock()
 
-# --- TABS PRINCIPAIS CLIENTE ---
+# ---------------------------------------------------------
+# 8.3 TABS PRINCIPAIS
+# Cada tab é uma seção independente. Veja comentários dentro
+# de cada bloco 'with tabX:' para detalhes.
+# ---------------------------------------------------------
 st.title(f"🎮 {user_info['server']}")
 
 # Inclusão da "⚙️ Feeds / Bot" entre "🏦 Banco / Carteira" e "💎 Planos"
-tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab_raid, tab6, tab7, tab_analytics, tab_ranking, tab8, tab_feeds, tab_planos = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeventspawns, tab_raid, tab6, tab7, tab_analytics, tab_ranking, tab_radares, tab8, tab_feeds, tab_planos = st.tabs([
     "📅 Eventos Agendados", 
     "📋 Histórico Logs", 
     "📢 Comunicados", 
@@ -3620,11 +4077,18 @@ tab1, tab2, tab3, tab4, tab5, tabcfggameplay, tabevents, tabmessages, tabcfgeven
     "👥 Jogadores", 
     "📊 Analytics",
     "🏆 Ranking",
+    "📡 Radar de Base",
     "🏦 Banco / Carteira", 
     "⚙️ Feeds / Bot",
     "💎 Planos",
 ])
 
+# ---------------------------------------------------------
+# TAB 8.4 — EVENTOS AGENDADOS
+# Upload de arquivo + criação de nova_agenda.
+# Exibe lista de execução com status e botão de remoção.
+# Worker: proworker processa as agendas no horário definido.
+# ---------------------------------------------------------
 with tab1:
     c1, c2 = st.columns([1, 1.5])
 
@@ -3958,6 +4422,11 @@ with tab1:
                         st.toast(f"Evento {nome_arquivo} removido!")
                         st.rerun()
 
+# ---------------------------------------------------------
+# TAB 8.5 — HISTÓRICO DE LOGS
+# Exibe os últimos 50 logs do servidor (sucesso / erro / info).
+# Botão para limpar histórico.
+# ---------------------------------------------------------
 with tab2:
     st.subheader("📜 Histórico de Atividades")
     db_fresco = load_db(DB_CLIENTS, {})
@@ -3979,6 +4448,10 @@ with tab2:
             else:
                 st.info(log)
 
+# ---------------------------------------------------------
+# TAB 8.6 — COMUNICADOS
+# Envio de avisos para jogadores via webhook Discord.
+# ---------------------------------------------------------
 with tab3:
     st.subheader("📢 Comunicados Oficiais")
     comunicados = client_data.get("comunicados", [])
@@ -4012,6 +4485,11 @@ with tab3:
                     save_db(DB_CLIENTS, st.session_state.db_clients)
                     st.rerun()
                     
+# ---------------------------------------------------------
+# TAB 8.7 — LOOT / TYPES.XML
+# Baixa, edita e envia o types.xml via FTP.
+# Controle de quantidade min/max/nominal de itens.
+# ---------------------------------------------------------
 with tab4:
     if not plano_permite(plano_atual, "editor_types"):
         bloquear_funcionalidade(plano_atual, "🧬 Editor de Loot (types.xml)")
@@ -4234,6 +4712,11 @@ with tab4:
                 "itens de base costumam ter lifetime mais alto que loot comum."
             )  # [web:65]
     
+# ---------------------------------------------------------
+# TAB 8.8 — AMBIENTE / GLOBALS.XML
+# Baixa, edita e envia o globals.xml via FTP.
+# Controle de clima, temperatura e outros parâmetros globais.
+# ---------------------------------------------------------
 with tab5:
     if not plano_permite(plano_atual, "editor_globals"):
         bloquear_funcionalidade(plano_atual, "🌍 Editor de Ambiente (globals.xml)")
@@ -4486,6 +4969,11 @@ with tab5:
                         )
                         st.error(f"Erro ao salvar/enviar globals.xml: {e}")
                         
+# ---------------------------------------------------------
+# TAB 8.9 — GAMEPLAY / CFGGAMEPLAY.JSON
+# Baixa, edita e envia o cfggameplay.json via FTP.
+# Configurações gerais de gameplay (dano, stamina, etc).
+# ---------------------------------------------------------
 with tabcfggameplay:
     if not plano_permite(plano_atual, "editor_cfggameplay"):
         bloquear_funcionalidade(plano_atual, "⚙️ Editor de Gameplay (cfggameplay.json)")
@@ -5000,6 +5488,11 @@ with tabcfggameplay:
         else:
             st.info("Envie o cfggameplay.json do seu servidor para começar a editar.")
     
+# ---------------------------------------------------------
+# TAB 8.10 — EVENTOS / EVENTS.XML
+# Baixa, edita e envia o events.xml via FTP.
+# Controle de spawns de veículos, helis e objetos dinâmicos.
+# ---------------------------------------------------------
 with tabevents:
     if not plano_permite(plano_atual, "editor_events"):
         bloquear_funcionalidade(plano_atual, "📅 Editor de Eventos (events.xml)")
@@ -5269,6 +5762,11 @@ with tabevents:
             st.info("Envie o events.xml do seu servidor para começar a editar.")
     
     
+# ---------------------------------------------------------
+# TAB 8.11 — MENSAGENS / MESSAGES.XML
+# Baixa, edita e envia o messages.xml via FTP.
+# Mensagens automáticas exibidas no servidor em intervalos.
+# ---------------------------------------------------------
 with tabmessages:
     if not plano_permite(plano_atual, "editor_messages"):
         bloquear_funcionalidade(plano_atual, "💬 Editor de Mensagens (messages.xml)")
@@ -5547,6 +6045,11 @@ with tabmessages:
             st.info("Envie o messages.xml do seu servidor para começar a visualizar, editar e incluir novas mensagens.")
     
     
+# ---------------------------------------------------------
+# TAB 8.12 — SPAWNS / CFGEVENTSPAWNS.XML
+# Baixa, edita e envia o cfgeventspawns.xml via FTP.
+# Coordenadas e quantidades de spawn por tipo de evento.
+# ---------------------------------------------------------
 with tabcfgeventspawns:
     if not plano_permite(plano_atual, "editor_cfgeventspawns"):
         bloquear_funcionalidade(plano_atual, "📍 Editor de Spawns (cfgeventspawns.xml)")
@@ -5732,6 +6235,11 @@ with tabcfgeventspawns:
             st.write(f"- Evento: {evento_sel}")
             st.write(f"- Total de posições carregadas: {len(edited_df)}")
 
+# ---------------------------------------------------------
+# TAB 8.13 — AGENDA DE RAID
+# Define janelas de RAID (ativar/desativar dano a bases).
+# Worker alterna disableBaseDamage no cfggameplay.json via FTP.
+# ---------------------------------------------------------
 with tab_raid:
     st.subheader("🛡️ Gestão de Horários de RAID")
     st.info("O RAID automatizado altera o arquivo `cfggameplay.json`. No início do RAID o dano em bases é ativado, e no fim é desativado automaticamente.")
@@ -5780,6 +6288,11 @@ with tab_raid:
                     save_db(DB_CLIENTS, st.session_state.db_clients)
                     st.rerun()
     
+# ---------------------------------------------------------
+# TAB 8.14 — LOJA / TRADER
+# Cadastro de itens da loja com preço em DzCoins.
+# Histórico de pedidos e gestão de itens ativos/inativos.
+# ---------------------------------------------------------
 with tab6:
     st.subheader("🛒 Loja / Trader & Gestão de Vendas")
     
@@ -5911,6 +6424,11 @@ with tab6:
                 st.session_state.pop(df_loja_key, None)
                 st.rerun()
 
+# ---------------------------------------------------------
+# TAB 8.15 — JOGADORES
+# Vínculo de Gamertag com Discord ID.
+# Lista de jogadores cadastrados e observações.
+# ---------------------------------------------------------
 with tab7:
     st.subheader("👤 Jogadores / Vínculos")
     st.info(
@@ -6012,6 +6530,10 @@ with tab7:
 
             st.success("Vínculos de jogadores salvos com sucesso no Titan Cloud!")
 
+# ---------------------------------------------------------
+# TAB 8.16 — ANALYTICS
+# Gráficos de XP, kills, conexões e atividade dos jogadores.
+# ---------------------------------------------------------
 with tab_analytics:
     # Verifica se o administrador ativou o feed no painel de Governança
     feeds = client_data.get("feeds_config", {})
@@ -6020,6 +6542,11 @@ with tab_analytics:
     else:
         st.warning("⚠️ O Mapa de Calor está desativado nas configurações de Feeds (Aba ⚙️ Feeds / Bot).")
 
+# ---------------------------------------------------------
+# TAB 8.17 — RANKING
+# Configuração do período do ranking (data inicial, modo, janela).
+# Exibe tabela de ranking atual por kills/mortes/XP.
+# ---------------------------------------------------------
 with tab_ranking:
     st.header("🏆 Configuração do Ranking")
     st.caption("Defina o período, modo de exibição e gerencie o ranking do seu servidor.")
@@ -6208,6 +6735,199 @@ with tab_ranking:
     else:
         st.info("Nenhum dado de ranking disponível para o período configurado. Os dados são gerados automaticamente durante o processamento dos logs.")
 
+
+# ---------------------------------------------------------
+# TAB 8.17 — RADAR DE BASE
+# Cadastro e gerenciamento de radares de perímetro.
+# O proworker verifica posições no log ADM e dispara
+# alertas Discord + sistema quando invasores são detectados.
+# ---------------------------------------------------------
+with tab_radares:
+    st.header("📡 Radar de Base")
+    st.caption("Cadastre radares de perímetro para monitorar invasores nas bases dos jogadores.")
+
+    _db_rad = load_db(DB_CLIENTS, {})
+    _entry_rad = _db_rad.get(user_id, {})
+    if "radares" not in _entry_rad:
+        _entry_rad["radares"] = []
+    _radares = _entry_rad["radares"]
+
+    # ── Toggle geral ──────────────────────────────────────────────────────────
+    _feeds_rad = _entry_rad.get("feeds_config", {})
+    _radar_global_ativo = st.toggle(
+        "🔴 Sistema de Radar ativo",
+        value=_feeds_rad.get("radar_ativo", True),
+        key="toggle_radar_global",
+        help="Desativa todos os radares sem remover as configurações.",
+    )
+    if _radar_global_ativo != _feeds_rad.get("radar_ativo", True):
+        _feeds_rad["radar_ativo"] = _radar_global_ativo
+        _entry_rad["feeds_config"] = _feeds_rad
+        _db_rad[user_id] = _entry_rad
+        save_db(DB_CLIENTS, _db_rad)
+        st.session_state.db_clients = _db_rad
+        st.success("✅ Configuração salva.")
+        st.rerun()
+
+    st.divider()
+
+    # ── Formulário de novo radar ──────────────────────────────────────────────
+    st.markdown("### ➕ Cadastrar Novo Radar")
+    with st.expander("Preencha os dados do novo radar", expanded=False):
+        _players_disp = list(_entry_rad.get("players", {}).keys())
+
+        _r_nome = st.text_input("Nome do radar (ex: Base Alpha)", key="r_nome")
+        _r_dono = st.selectbox(
+            "Jogador dono do radar",
+            options=_players_disp if _players_disp else ["(nenhum jogador cadastrado)"],
+            key="r_dono",
+        )
+        _r_mapa = st.selectbox("Mapa", options=["Chernarus", "Livonia"], key="r_mapa")
+
+        _rc1, _rc2, _rc3 = st.columns(3)
+        with _rc1:
+            _r_x = st.number_input("Coordenada X", value=0.0, format="%.1f", key="r_x")
+        with _rc2:
+            _r_z = st.number_input("Coordenada Z", value=0.0, format="%.1f", key="r_z")
+        with _rc3:
+            _r_y = st.number_input("Altitude Y", value=0.0, format="%.1f", key="r_y")
+
+        _r_raio = st.select_slider(
+            "Raio do perímetro (metros)",
+            options=[50, 75, 100, 125, 150, 175, 200, 250, 300],
+            value=150,
+            key="r_raio",
+        )
+        _r_cooldown = st.number_input(
+            "Cooldown entre alertas (minutos)",
+            min_value=1, max_value=60, value=5, key="r_cooldown",
+            help="Evita spam de alertas. O mínimo recomendado é 5 minutos.",
+        )
+        _r_webhook = st.text_input(
+            "Webhook Discord do radar (opcional)",
+            placeholder="https://discord.com/api/webhooks/...",
+            key="r_webhook",
+            help="Se preenchido, o alerta vai para este canal além do webhook admin.",
+        )
+
+        if _r_x and _r_z:
+            _mapa_id_prev = "livoniaSat" if _r_mapa == "Livonia" else "chernarusSat"
+            _link_prev = f"https://www.izurvive.com/{_mapa_id_prev}/#location={_r_x:.1f};{_r_z:.1f}"
+            st.markdown(f"🗺️ [Ver epicentro no izurvive]({_link_prev})")
+
+        if st.button("💾 Cadastrar Radar", use_container_width=True, key="btn_cadastrar_radar"):
+            if not _r_nome.strip():
+                st.error("Informe o nome do radar.")
+            elif _r_x == 0.0 and _r_z == 0.0:
+                st.error("Informe as coordenadas do epicentro.")
+            elif not _players_disp or _r_dono == "(nenhum jogador cadastrado)":
+                st.error("Cadastre jogadores na aba 👥 Jogadores antes de criar um radar.")
+            else:
+                _novo_radar = {
+                    "id":               int(datetime.now(FUSO_BR).timestamp()),
+                    "nome":             _r_nome.strip(),
+                    "dono_gamertag":    _r_dono,
+                    "dono_discord_id":  _entry_rad.get("players", {}).get(_r_dono, {}).get("discord_id", ""),
+                    "webhook_url":      _r_webhook.strip(),
+                    "mapa":             _r_mapa,
+                    "x":                _r_x,
+                    "z":                _r_z,
+                    "y":                _r_y,
+                    "raio":             _r_raio,
+                    "ativo":            True,
+                    "cooldown_minutos": int(_r_cooldown),
+                    "ultimo_alerta":    "",
+                    "historico":        [],
+                }
+                _db_rad2 = load_db(DB_CLIENTS, {})
+                _entry_rad2 = _db_rad2.get(user_id, {})
+                if "radares" not in _entry_rad2:
+                    _entry_rad2["radares"] = []
+                _entry_rad2["radares"].append(_novo_radar)
+                _db_rad2[user_id] = _entry_rad2
+                save_db(DB_CLIENTS, _db_rad2)
+                st.session_state.db_clients = _db_rad2
+                registrar_log(
+                    user_id,
+                    f"📡 Radar cadastrado: {_r_nome.strip()} | Dono: {_r_dono} | Raio: {_r_raio}m",
+                    "info",
+                )
+                st.success(f"✅ Radar '{_r_nome.strip()}' cadastrado!")
+                st.rerun()
+
+    st.divider()
+
+    # ── Lista de radares ──────────────────────────────────────────────────────
+    st.markdown("### 📋 Radares Cadastrados")
+    if not _radares:
+        st.info("Nenhum radar cadastrado. Use o formulário acima para criar o primeiro.")
+    else:
+        for _idx_r, _rad in enumerate(_radares):
+            _status_icon = "🟢" if _rad.get("ativo", True) else "⏸️"
+            _mapa_id_r = "livoniaSat" if "livonia" in _rad.get("mapa", "").lower() else "chernarusSat"
+            _link_r = f"https://www.izurvive.com/{_mapa_id_r}/#location={_rad.get('x', 0):.1f};{_rad.get('z', 0):.1f}"
+
+            with st.expander(
+                f"{_status_icon} {_rad.get('nome', 'Radar')} | 👤 {_rad.get('dono_gamertag', '?')} | ⭕ {_rad.get('raio', 0)}m | 🗺️ {_rad.get('mapa', '?')}",
+                expanded=False,
+            ):
+                _col_info, _col_acoes = st.columns([2, 1])
+                with _col_info:
+                    st.markdown(f"**Epicentro:** X={_rad.get('x', 0):.1f} | Z={_rad.get('z', 0):.1f} | Y={_rad.get('y', 0):.1f}")
+                    st.markdown(f"**Raio:** {_rad.get('raio', 0)} metros  |  **Cooldown:** {_rad.get('cooldown_minutos', 5)} min")
+                    st.markdown(f"**Último alerta:** {_rad.get('ultimo_alerta', 'Nunca') or 'Nunca'}")
+                    st.markdown(f"[🗺️ Ver epicentro no izurvive]({_link_r})")
+
+                with _col_acoes:
+                    _ativo_atual = _rad.get("ativo", True)
+                    _novo_ativo = st.toggle(
+                        "Ativo",
+                        value=_ativo_atual,
+                        key=f"toggle_radar_{_rad.get('id', _idx_r)}",
+                    )
+                    if _novo_ativo != _ativo_atual:
+                        _rad["ativo"] = _novo_ativo
+                        _db_rad3 = load_db(DB_CLIENTS, {})
+                        _entry_rad3 = _db_rad3.get(user_id, {})
+                        _entry_rad3["radares"] = _radares
+                        _db_rad3[user_id] = _entry_rad3
+                        save_db(DB_CLIENTS, _db_rad3)
+                        st.session_state.db_clients = _db_rad3
+                        st.rerun()
+
+                    if st.button(
+                        "🗑️ Remover",
+                        key=f"del_radar_{_rad.get('id', _idx_r)}",
+                        use_container_width=True,
+                    ):
+                        _db_rad4 = load_db(DB_CLIENTS, {})
+                        _entry_rad4 = _db_rad4.get(user_id, {})
+                        _entry_rad4["radares"] = [
+                            r for r in _entry_rad4.get("radares", [])
+                            if r.get("id") != _rad.get("id")
+                        ]
+                        _db_rad4[user_id] = _entry_rad4
+                        save_db(DB_CLIENTS, _db_rad4)
+                        st.session_state.db_clients = _db_rad4
+                        registrar_log(user_id, f"🗑️ Radar removido: {_rad.get('nome', '?')}", "info")
+                        st.rerun()
+
+                _hist = _rad.get("historico", [])
+                if _hist:
+                    st.markdown("**📜 Últimas invasões detectadas:**")
+                    for _h in _hist[:10]:
+                        st.markdown(
+                            f"- `{_h.get('hora', '?')}` — **{_h.get('invasor', '?')}** "
+                            f"a {_h.get('distancia', '?')}m | {_h.get('pos', '?')}"
+                        )
+                else:
+                    st.caption("Nenhuma invasão detectada ainda.")
+
+# ---------------------------------------------------------
+# TAB 8.18 — BANCO / CARTEIRA
+# Saldo de DzCoins por jogador (carteira e banco).
+# Transferências, depósitos, saques e histórico.
+# ---------------------------------------------------------
 with tab8:
     st.subheader("🏦 Banco & Carteira")
 
@@ -6558,6 +7278,12 @@ with tab8:
         unsafe_allow_html=True,
     )
 
+# ---------------------------------------------------------
+# TAB 8.19 — FEEDS / BOT
+# Configuração dos feeds automáticos (killfeed, conexão,
+# construção, combatlog, loja automática, glitch detector).
+# Cada feed é um toggle que liga/desliga no proworker.
+# ---------------------------------------------------------
 with tab_feeds:
     st.header("🔔 Feeds & Webhooks")
     st.caption("Configure os canais do Discord e escolha quais eventos cada canal vai receber.")
@@ -6813,6 +7539,10 @@ with tab_feeds:
         st.success("✅ Configurações de auditoria salvas!")
     
     # --- ABA PLANOS ---
+# ---------------------------------------------------------
+# TAB 8.20 — PLANOS
+# Exibe o plano atual do cliente e funcionalidades disponíveis.
+# ---------------------------------------------------------
 with tab_planos:
     starter_border = "2px solid #aaaaaa" if plano_atual == "Starter" else "1px solid #444"
     starter_badge = '<div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#aaaaaa; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;">SEU PLANO</div>' if plano_atual == "Starter" else '<div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#aaaaaa; color:#000; font-size:11px; font-weight:bold; padding:3px 14px; border-radius:999px;">BÁSICO</div>'
@@ -6921,7 +7651,11 @@ with tab_planos:
     """.format(starter_border=starter_border, starter_badge=starter_badge, pro_border=pro_border, pro_badge=pro_badge, enterprise_border=enterprise_border, enterprise_badge=enterprise_badge)
     st.markdown(html, unsafe_allow_html=True)
 
-# --- INÍCIO DO WORKER DE AUTOMAÇÃO ---
+# =========================================================
+# 9. BOOT DOS WORKERS
+# Chamado uma única vez no boot do app (via start_worker_once).
+# proworker e worker_dzcoins_automatico rodam em threads daemon.
+# =========================================================
 if "worker_started" not in st.session_state:
     threading.Thread(target=proworker, daemon=True).start()
     st.session_state["worker_started"] = True
