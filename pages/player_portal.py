@@ -2738,8 +2738,39 @@ def main():
                     "observacoes": observacoes.strip(),
                 }
                 client_data["players"] = players
-                clients_db[server_id] = client_data
-                save_db(DB_CLIENTS, clients_db)
+
+                # Inicializa wallet e bank com saldo 0 imediatamente após o vínculo.
+                # Garante que o worker de DzCoins já encontra a carteira pronta
+                # na próxima distribuição, sem depender de o jogador estar online.
+                if "wallets" not in client_data:
+                    client_data["wallets"] = {}
+                if "bank" not in client_data:
+                    client_data["bank"] = {}
+
+                if gamertag_clean not in client_data["wallets"]:
+                    client_data["wallets"][gamertag_clean] = {
+                        "balance": 0,
+                        "historico": [],
+                    }
+                if gamertag_clean not in client_data["bank"]:
+                    client_data["bank"][gamertag_clean] = {
+                        "balance": 0,
+                        "historico": [],
+                    }
+
+                # Merge fresco para não sobrescrever dados do worker
+                _db_vinculo = load_db(DB_CLIENTS, {})
+                _entry_vinculo = _db_vinculo.get(server_id, client_data)
+                _entry_vinculo["players"] = players
+                _entry_vinculo.setdefault("wallets", {})[gamertag_clean] = (
+                    client_data["wallets"][gamertag_clean]
+                )
+                _entry_vinculo.setdefault("bank", {})[gamertag_clean] = (
+                    client_data["bank"][gamertag_clean]
+                )
+                _db_vinculo[server_id] = _entry_vinculo
+                save_db(DB_CLIENTS, _db_vinculo)
+
                 st.session_state.portal_gamertag = gamertag_clean
                 st.success(f"✅ Gamertag **{gamertag_clean}** vinculada com sucesso!")
                 st.rerun()
