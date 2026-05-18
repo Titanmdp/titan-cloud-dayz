@@ -1187,6 +1187,68 @@ def aplicar_banimento_ftp(ftp_cfg: dict, gamertag: str):
 # 4.3 RANKING SEMANAL — ACUMULADO 7 DIAS
 # =========================================================
 
+def ftp_download_adm_files_since(ftp_cfg: dict, data_inicial_str: str) -> str:
+    """
+    Baixa TODOS os arquivos .ADM a partir de uma data_inicial (início da season).
+    data_inicial_str: "dd/mm/yyyy" — formato do admin config.
+    Retorna string concatenada de todos os logs desde aquela data.
+    """
+    arquivos_todos = ftp_list_adm_files(ftp_cfg)
+    if not arquivos_todos:
+        return ""
+
+    # Converte data_inicial para objeto date para comparar com nome do arquivo
+    # Arquivos ADM seguem o padrão: DayZXbox_2026-05-01_14-30-00.ADM
+    _data_corte = None
+    if data_inicial_str:
+        try:
+            _data_corte = datetime.strptime(data_inicial_str, "%d/%m/%Y").date()
+        except Exception:
+            pass
+
+    # Filtra arquivos a partir da data_inicial
+    _arquivos_filtrados = []
+    import re as _re_mod
+    _re_data_adm = _re_mod.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})")
+    for _arq in arquivos_todos:
+        if _data_corte is None:
+            _arquivos_filtrados.append(_arq)
+            continue
+        _m = _re_data_adm.search(_arq)
+        if _m:
+            try:
+                _data_arq = datetime.strptime(_m.group(1), "%Y-%m-%d").date()
+                if _data_arq >= _data_corte:
+                    _arquivos_filtrados.append(_arq)
+            except Exception:
+                _arquivos_filtrados.append(_arq)
+        else:
+            _arquivos_filtrados.append(_arq)
+
+    if not _arquivos_filtrados:
+        return ""
+
+    _conteudo = ""
+    try:
+        with FTP() as ftp:
+            ftp.connect(ftp_cfg["host"], ftp_cfg["port"], timeout=30)
+            ftp.login(ftp_cfg["user"], ftp_cfg["pass"])
+            ftp.cwd(DAYZ_LOG_DIR)
+            for _nome in _arquivos_filtrados:
+                _buf = io.BytesIO()
+                try:
+                    ftp.retrbinary(f"RETR {_nome}", _buf.write)
+                    _txt = _buf.getvalue().decode("utf-8", errors="ignore")
+                    if _txt.strip():
+                        _conteudo += _txt + "\n"
+                except Exception as _e:
+                    print(f"[TITAN SEASON] Erro ao baixar {_nome}: {_e}")
+    except Exception as _e:
+        print(f"[TITAN SEASON] Erro FTP season: {_e}")
+
+    return _conteudo
+
+
 def ftp_download_adm_files_weekly(ftp_cfg: dict, max_files: int = 7) -> str:
     arquivos = ftp_list_adm_files(ftp_cfg)
     if not arquivos:
@@ -2165,20 +2227,55 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
 
     @st.fragment(run_every="300s")
     def _ranking(ftp_cfg, gamertag_vinculada, clients_db, server_id):
-        with st.spinner("Carregando ranking semanal (últimos 7 dias)..."):
-            log_text_semanal = ftp_download_adm_files_weekly(ftp_cfg, max_files=7)
 
-        if not log_text_semanal or not log_text_semanal.strip():
+        # ── Lê configuração da season definida pelo admin ─────────────────────
+        _rk_cfg        = client_data.get("ranking_config", {})
+        _data_inicial  = _rk_cfg.get("data_inicial", "")
+        _modo_exib     = _rk_cfg.get("modo_exibicao", "cumulativo")
+        _season_ativa  = bool(_data_inicial) and _modo_exib == "cumulativo"
+
+        # ── Selector de período ───────────────────────────────────────────────
+        _col_p1, _col_p2 = st.columns([2, 2])
+        with _col_p1:
+            _periodo_opcoes = ["📅 Últimos 7 dias"]
+            if _season_ativa:
+                _periodo_opcoes.insert(0, f"🏆 Season (desde {_data_inicial})")
+            _periodo_sel = st.radio(
+                "Período do ranking",
+                options=_periodo_opcoes,
+                horizontal=True,
+                key="rk_periodo_sel",
+            )
+        with _col_p2:
+            if _season_ativa:
+                st.caption(
+                    f"**Season ativa desde {_data_inicial}** — "
+                    "dados de toda a temporada."
+                )
+            else:
+                st.caption("Season não configurada. Configure na aba 🏆 Ranking do painel admin.")
+
+        # ── Baixa logs conforme período selecionado ───────────────────────────
+        _is_season = _season_ativa and "Season" in _periodo_sel
+
+        if _is_season:
+            with st.spinner(f"Carregando ranking da season (desde {_data_inicial})..."):
+                _log_txt = ftp_download_adm_files_since(ftp_cfg, _data_inicial)
+        else:
+            with st.spinner("Carregando ranking semanal (últimos 7 dias)..."):
+                _log_txt = ftp_download_adm_files_weekly(ftp_cfg, max_files=7)
+
+        if not _log_txt or not _log_txt.strip():
             st.warning("Não foi possível carregar os logs do servidor.")
             return
 
-        stats = parse_adm_semanal(log_text_semanal)
+        stats = parse_adm_semanal(_log_txt)
 
         if not stats:
-            st.info("Nenhuma estatística encontrada nos logs da semana.")
+            st.info("Nenhuma estatística encontrada nos logs do período selecionado.")
             return
 
-        # Persiste XP e nível no clients_data (nunca regride)
+        # ── Persiste XP e nível no clients_data (nunca regride) ───────────────
         clients_db_fresh = load_db(DB_CLIENTS, {})
         client_fresh = clients_db_fresh.get(server_id, {})
         if "xp_stats" not in client_fresh:
@@ -2197,12 +2294,15 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
         clients_db_fresh[server_id] = client_fresh
         save_db(DB_CLIENTS, clients_db_fresh)
 
+        _label_periodo = (
+            f"season (desde {_data_inicial})" if _is_season else "últimos 7 dias"
+        )
         st.caption(
-            f"📊 {len(stats)} jogadores encontrados nos logs dos últimos 7 dias — "
+            f"📊 {len(stats)} jogadores encontrados nos logs dos {_label_periodo} — "
             "dados atualizados a cada 5 minutos."
         )
 
-        # ---- Sub-abas de ranking ----
+        # ── Sub-abas de ranking ───────────────────────────────────────────────
         sub_play, sub_surv, sub_xp, sub_pvp, sub_pve, sub_dzcoins = st.tabs([
             "⏱️ Tempo de Jogo",
             "🏕️ Sobrevivência",
@@ -2451,7 +2551,7 @@ def render_ranking(client_data: dict, gamertag_vinculada: str, clients_db: dict,
         st.markdown("#### 👤 Meu desempenho na semana")
         meu = stats.get(gamertag_vinculada)
         if not meu:
-            st.info("Sua Gamertag ainda não aparece nos logs desta semana.")
+            st.info(f"Sua Gamertag ainda não aparece nos logs {'da season' if _is_season else 'desta semana'}.")
         else:
             col1, col2, col3, col4, col5 = st.columns(5)
             col1.metric("⏱️ Tempo de Jogo", format_seconds_hhmmss(meu.get("total_play_seconds", 0)))
@@ -2738,39 +2838,8 @@ def main():
                     "observacoes": observacoes.strip(),
                 }
                 client_data["players"] = players
-
-                # Inicializa wallet e bank com saldo 0 imediatamente após o vínculo.
-                # Garante que o worker de DzCoins já encontra a carteira pronta
-                # na próxima distribuição, sem depender de o jogador estar online.
-                if "wallets" not in client_data:
-                    client_data["wallets"] = {}
-                if "bank" not in client_data:
-                    client_data["bank"] = {}
-
-                if gamertag_clean not in client_data["wallets"]:
-                    client_data["wallets"][gamertag_clean] = {
-                        "balance": 0,
-                        "historico": [],
-                    }
-                if gamertag_clean not in client_data["bank"]:
-                    client_data["bank"][gamertag_clean] = {
-                        "balance": 0,
-                        "historico": [],
-                    }
-
-                # Merge fresco para não sobrescrever dados do worker
-                _db_vinculo = load_db(DB_CLIENTS, {})
-                _entry_vinculo = _db_vinculo.get(server_id, client_data)
-                _entry_vinculo["players"] = players
-                _entry_vinculo.setdefault("wallets", {})[gamertag_clean] = (
-                    client_data["wallets"][gamertag_clean]
-                )
-                _entry_vinculo.setdefault("bank", {})[gamertag_clean] = (
-                    client_data["bank"][gamertag_clean]
-                )
-                _db_vinculo[server_id] = _entry_vinculo
-                save_db(DB_CLIENTS, _db_vinculo)
-
+                clients_db[server_id] = client_data
+                save_db(DB_CLIENTS, clients_db)
                 st.session_state.portal_gamertag = gamertag_clean
                 st.success(f"✅ Gamertag **{gamertag_clean}** vinculada com sucesso!")
                 st.rerun()
