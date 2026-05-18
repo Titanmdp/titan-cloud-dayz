@@ -546,6 +546,15 @@ def parse_types_xml(xmlbytes):
     - tree: objeto ET.ElementTree
     - root: elemento raiz
     - df: DataFrame com colunas principais para edição
+
+    Campos extraídos:
+    - name     : classe do item
+    - category : categoria (<category name="..."/>)
+    - nominal  : quantidade alvo
+    - min      : quantidade mínima
+    - lifetime : tempo de vida em segundos
+    - tier     : tiers do item — lidos de <usage name="TierX"/> ou <value name="TierX"/>
+                 ex: "Tier1, Tier2"  |  "" se não definido
     """
     tree = ET.ElementTree(ET.fromstring(xmlbytes))
     root = tree.getroot()
@@ -553,6 +562,8 @@ def parse_types_xml(xmlbytes):
 
     for t in root.findall("type"):
         name = t.get("name", "")
+
+        # Categoria
         cat = None
         catelem = t.find("category")
         if catelem is not None:
@@ -567,17 +578,32 @@ def parse_types_xml(xmlbytes):
                     return default
             return default
 
-        nominal = getint("nominal", 0)
-        minv = getint("min", 0)
+        nominal  = getint("nominal", 0)
+        minv     = getint("min", 0)
         lifetime = getint("lifetime", 0)
+
+        # Tiers: lê todas as tags <usage name="TierX"/> e <value name="TierX"/>
+        # DayZ usa "usage" para equipamentos/itens e "value" para outros contextos.
+        # Ambos podem conter Tier1..Tier4.
+        _tier_set = []
+        for _tag in ("usage", "value"):
+            for _elem in t.findall(_tag):
+                _n = (_elem.get("name") or "").strip()
+                if _n.lower().startswith("tier") and _n not in _tier_set:
+                    _tier_set.append(_n)
+
+        # Ordena: Tier1, Tier2, Tier3, Tier4
+        _tier_set.sort(key=lambda x: x.lower())
+        tier_str = ", ".join(_tier_set) if _tier_set else ""
 
         rows.append(
             {
-                "name": name,
+                "name":     name,
                 "category": cat,
-                "nominal": nominal,
-                "min": minv,
+                "nominal":  nominal,
+                "min":      minv,
                 "lifetime": lifetime,
+                "tier":     tier_str,
             }
         )
 
@@ -589,6 +615,8 @@ def apply_df_to_types_xml(tree, root, df):
     """
     Aplica as alterações do DataFrame de volta no XML
     e devolve bytes do novo types.xml.
+    Suporta edição de: nominal, min, lifetime e tier.
+    Tier é salvo como tags <usage name="TierX"/> no elemento <type>.
     """
     dfindexed = df.set_index("name")
 
@@ -609,6 +637,26 @@ def apply_df_to_types_xml(tree, root, df):
         setint("nominal", row.get("nominal"))
         setint("min", row.get("min"))
         setint("lifetime", row.get("lifetime"))
+
+        # Aplica tiers: remove <usage> existentes com Tier e recria conforme o df
+        _tier_val = row.get("tier", "")
+        if _tier_val is not None and not (isinstance(_tier_val, float) and pd.isna(_tier_val)):
+            # Remove todos os <usage name="TierX"> e <value name="TierX"> existentes
+            for _tag in ("usage", "value"):
+                for _el in list(t.findall(_tag)):
+                    if (_el.get("name") or "").lower().startswith("tier"):
+                        t.remove(_el)
+
+            # Recria a partir do valor editado no df
+            # Aceita: "Tier1, Tier2" ou "Tier1" ou ""
+            _tiers_novos = [
+                _tr.strip()
+                for _tr in str(_tier_val).replace(";", ",").split(",")
+                if _tr.strip().lower().startswith("tier")
+            ]
+            for _tr in _tiers_novos:
+                _el_novo = ET.SubElement(t, "usage")
+                _el_novo.set("name", _tr)
 
     xmlbytes = ET.tostring(root, encoding="utf-8", method="xml")
     header = b'<?xml version="1.0" encoding="utf-8"?>\n'
@@ -4613,31 +4661,54 @@ with tab4:
             df_types = st.session_state[key_df]
     
             st.markdown("### 🔍 Filtros rápidos")
-    
-            col_f1, col_f2, col_f3 = st.columns(3)
+
+            # Garante que a coluna tier existe mesmo em sessões antigas
+            if "tier" not in df_types.columns:
+                df_types["tier"] = ""
+                st.session_state[key_df] = df_types
+
+            col_f1, col_f2, col_f3, col_f4 = st.columns(4)
             with col_f1:
                 categoria_sel = st.selectbox(
                     "Categoria",
                     options=["Todas"] + sorted(
-                        [c for c in df_types["category"].dropna().unique().tolist()]
+                        [c for c in df_types["category"].dropna().unique().tolist() if c]
                     ),
                     index=0,
                 )
             with col_f2:
-                only_nom_zero = st.checkbox("Mostrar apenas itens sem spawn (nominal = 0)")
+                # Opções de tier disponíveis no arquivo carregado
+                _tiers_disponiveis = set()
+                for _tv in df_types["tier"].dropna().unique():
+                    for _t in str(_tv).split(","):
+                        _t = _t.strip()
+                        if _t:
+                            _tiers_disponiveis.add(_t)
+                _tiers_opcoes = ["Todos"] + sorted(_tiers_disponiveis)
+                tier_sel = st.selectbox("Tier", options=_tiers_opcoes, index=0)
             with col_f3:
+                only_nom_zero = st.checkbox("Sem spawn (nominal = 0)")
+            with col_f4:
                 nome_busca = st.text_input("Buscar por nome (contém)", "")
-    
+
             df_view = df_types.copy()
-    
+
             if categoria_sel != "Todas":
                 df_view = df_view[df_view["category"] == categoria_sel]
-    
+
+            if tier_sel != "Todos":
+                df_view = df_view[
+                    df_view["tier"].str.contains(tier_sel, case=False, na=False)
+                ]
+
             if only_nom_zero:
                 df_view = df_view[df_view["nominal"] == 0]
-    
+
             if nome_busca.strip():
-                df_view = df_view[df_view["name"].str.contains(nome_busca.strip(), case=False)]
+                df_view = df_view[df_view["name"].str.contains(nome_busca.strip(), case=False, na=False)]
+
+            # Contador de itens exibidos
+            st.caption(f"Exibindo {len(df_view)} de {len(df_types)} itens.")
     
             st.markdown("### ✏️ Ajuste de parâmetros")
     
@@ -4646,8 +4717,35 @@ with tab4:
                 num_rows="fixed",
                 hide_index=True,
                 column_config={
-                    "name": "Classe",
-                    "category": "Categoria",
+                    "name": st.column_config.TextColumn(
+                        "Classe",
+                        help="Nome da classe do item no DayZ.",
+                    ),
+                    "category": st.column_config.TextColumn(
+                        "Categoria",
+                        help="Categoria do item (Weapons, Tools, Food, etc).",
+                    ),
+                    "tier": st.column_config.SelectboxColumn(
+                        "Tier",
+                        help=(
+                            "Tier(s) de spawn do item. "
+                            "Tier1 = zona segura, Tier4 = zona militar/perigosa. "
+                            "Para múltiplos tiers, separe por vírgula: Tier1, Tier2"
+                        ),
+                        options=[
+                            "",
+                            "Tier1",
+                            "Tier2",
+                            "Tier3",
+                            "Tier4",
+                            "Tier1, Tier2",
+                            "Tier1, Tier2, Tier3",
+                            "Tier2, Tier3",
+                            "Tier2, Tier3, Tier4",
+                            "Tier3, Tier4",
+                            "Tier1, Tier2, Tier3, Tier4",
+                        ],
+                    ),
                     "nominal": st.column_config.NumberColumn(
                         "Nominal",
                         help="Quantidade alvo do item no mapa.",
@@ -4668,7 +4766,8 @@ with tab4:
                     ),
                 },
                 disabled=["name", "category"],
-            )  # [web:67][web:61]
+                column_order=["name", "category", "tier", "nominal", "min", "lifetime"],
+            )
     
             st.markdown("### 💾 Salvar alterações no types.xml")
     
@@ -4681,8 +4780,9 @@ with tab4:
     
                     for idx in edited_indexed.index:
                         if idx in df_merged.index:
-                            for col in ["nominal", "min", "lifetime"]:
-                                df_merged.loc[idx, col] = edited_indexed.loc[idx, col]
+                            for col in ["nominal", "min", "lifetime", "tier"]:
+                                if col in edited_indexed.columns:
+                                    df_merged.loc[idx, col] = edited_indexed.loc[idx, col]
     
                     st.session_state[key_df] = df_merged.reset_index()
                     st.success("Alterações aplicadas internamente (ainda não gerou novo XML).")
