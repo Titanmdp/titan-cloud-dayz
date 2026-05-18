@@ -6675,17 +6675,44 @@ with tab7:
                     for g in removidos:
                         del client_data[secao][g]
 
+            # Inicializa wallet e bank para TODOS os jogadores ativos
+            # que ainda não têm registro — garante que DzCoins e banco
+            # funcionem mesmo antes do primeiro login no servidor
+            if "wallets" not in client_data:
+                client_data["wallets"] = {}
+            if "bank" not in client_data:
+                client_data["bank"] = {}
+
+            _wallets_novos = []
+            for _gt in gamertags_ativas:
+                if _gt not in client_data["wallets"]:
+                    client_data["wallets"][_gt] = {"balance": 0, "historico": []}
+                    _wallets_novos.append(_gt)
+                if _gt not in client_data["bank"]:
+                    client_data["bank"][_gt] = {"balance": 0, "historico": []}
+
             # Atualiza o client_data e o dicionário carregado do arquivo
             client_data["players"] = players_atualizados
             db_clients[server_id] = client_data
 
-            # Salva em disco
-            save_db(DB_CLIENTS, db_clients)
+            # Salva em disco com merge fresco para não sobrescrever o worker
+            _db_fresh = load_db(DB_CLIENTS, {})
+            _entry_fresh = _db_fresh.get(server_id, {})
+            _entry_fresh["players"] = players_atualizados
+            _entry_fresh["wallets"] = client_data["wallets"]
+            _entry_fresh["bank"]    = client_data["bank"]
+            _db_fresh[server_id] = _entry_fresh
+            save_db(DB_CLIENTS, _db_fresh)
+            st.session_state.db_clients = _db_fresh
 
             # Mantém o DF da sessão sincronizado com o que foi salvo
             st.session_state[df_players_key] = edited_df_players
 
-            st.success("Vínculos de jogadores salvos com sucesso no Titan Cloud!")
+            _msg_extra = (
+                f" Carteiras inicializadas para: {', '.join(_wallets_novos)}."
+                if _wallets_novos else ""
+            )
+            st.success(f"Vínculos de jogadores salvos com sucesso no Titan Cloud!{_msg_extra}")
 
 # ---------------------------------------------------------
 # TAB 8.16 — ANALYTICS
