@@ -2507,6 +2507,30 @@ import re as _re
 import io as _io
 import math as _math
 
+# Import seguro do resolver de elevação do player_portal
+# (mesmo diretório — disponível em runtime no Render)
+try:
+    from pages.player_portal import get_local_elevation_by_map as _get_elevation
+    _ELEVATION_DISPONIVEL = True
+except Exception as _e_elev:
+    _ELEVATION_DISPONIVEL = False
+    print(f"[Radar] Módulo de elevação indisponível: {_e_elev}")
+
+def get_y_radar(x: float, z: float, mapa: str) -> float | None:
+    """
+    Retorna o Y do terreno para as coordenadas X/Z do radar.
+    Usa o mesmo heightmap do player_portal (Chernarus ou Livonia).
+    Retorna None se o módulo de elevação não estiver disponível.
+    """
+    if not _ELEVATION_DISPONIVEL:
+        return None
+    try:
+        y, _ = _get_elevation(x, z, mapa)
+        return round(float(y), 1) if y is not None else None
+    except Exception as _e:
+        print(f"[Radar] Erro ao obter Y para ({x}, {z}): {_e}")
+        return None
+
 def ftp_download_latest_adm(ftp_cfg: dict):
     """
     Baixa o arquivo .ADM mais recente do servidor via FTP.
@@ -2706,9 +2730,15 @@ def verificar_radares(log_txt: str, client_info: dict, client_id: str) -> list:
         raio        = float(radar.get("raio", 150))
         dono        = radar.get("dono_gamertag", "")
 
+        # Lista de isentos: dono + membros do clã cadastrados no radar
+        _membros_isentos = {dono.lower()}
+        for _m in radar.get("membros", []):
+            if _m.strip():
+                _membros_isentos.add(_m.strip().lower())
+
         for gamertag, pos in posicoes.items():
-            # Dono do radar não dispara alerta
-            if gamertag.lower() == dono.lower():
+            # Dono e membros do clã não disparam alerta
+            if gamertag.lower() in _membros_isentos:
                 continue
 
             dist = calcular_distancia_2d(epicentro_x, epicentro_z, pos["x"], pos["z"])
@@ -6811,13 +6841,29 @@ with tab_radares:
         )
         _r_mapa = st.selectbox("Mapa", options=["Chernarus", "Livonia"], key="r_mapa")
 
-        _rc1, _rc2, _rc3 = st.columns(3)
+        _rc1, _rc2 = st.columns(2)
         with _rc1:
             _r_x = st.number_input("Coordenada X", value=0.0, format="%.1f", key="r_x")
         with _rc2:
             _r_z = st.number_input("Coordenada Z", value=0.0, format="%.1f", key="r_z")
-        with _rc3:
-            _r_y = st.number_input("Altitude Y", value=0.0, format="%.1f", key="r_y")
+
+        # Calcula Y automaticamente pelo heightmap quando X e Z são informados
+        _r_y_auto = None
+        if _r_x != 0.0 or _r_z != 0.0:
+            _r_y_auto = get_y_radar(_r_x, _r_z, _r_mapa)
+
+        if _r_y_auto is not None:
+            st.success(f"✅ Altitude Y calculada automaticamente pelo terreno: **{_r_y_auto} m**")
+            _r_y = _r_y_auto
+        else:
+            # Fallback manual caso o heightmap não esteja disponível
+            _r_y = st.number_input(
+                "Altitude Y (manual — heightmap indisponível)",
+                value=0.0,
+                format="%.1f",
+                key="r_y",
+                help="Normalmente calculado automaticamente. Informe manualmente se necessário.",
+            )
 
         _r_raio = st.select_slider(
             "Raio do perímetro (metros)",
@@ -6837,10 +6883,26 @@ with tab_radares:
             help="Se preenchido, o alerta vai para este canal além do webhook admin.",
         )
 
-        if _r_x and _r_z:
+        _r_membros = st.text_area(
+            "👥 Membros do clã isentos do radar",
+            placeholder="Gamertag1, Gamertag2, Gamertag3",
+            key="r_membros",
+            height=80,
+            help=(
+                "Gamertags que NÃO dispararão alerta neste radar. "
+                "Separe por vírgula. O dono já é isento automaticamente. "
+                "Ex: Titamdp, PDA gvbrxz, Pastorelli1743"
+            ),
+        )
+
+        if _r_x != 0.0 or _r_z != 0.0:
             _mapa_id_prev = "livoniaSat" if _r_mapa == "Livonia" else "chernarusSat"
             _link_prev = f"https://www.izurvive.com/{_mapa_id_prev}/#location={_r_x:.1f};{_r_z:.1f}"
-            st.markdown(f"🗺️ [Ver epicentro no izurvive]({_link_prev})")
+            _y_display = f"{_r_y:.1f}" if _r_y else "?"
+            st.markdown(
+                f"🗺️ [Ver epicentro no izurvive]({_link_prev})  "
+                f"&nbsp;|&nbsp; 📍 X: `{_r_x:.1f}` Z: `{_r_z:.1f}` Y: `{_y_display}`"
+            )
 
         if st.button("💾 Cadastrar Radar", use_container_width=True, key="btn_cadastrar_radar"):
             if not _r_nome.strip():
@@ -6850,6 +6912,10 @@ with tab_radares:
             elif not _players_disp or _r_dono == "(nenhum jogador cadastrado)":
                 st.error("Cadastre jogadores na aba 👥 Jogadores antes de criar um radar.")
             else:
+                # Processa lista de membros do clã (separados por vírgula ou linha)
+                _membros_raw = _r_membros.replace("\n", ",").split(",")
+                _membros_lista = [m.strip() for m in _membros_raw if m.strip()]
+
                 _novo_radar = {
                     "id":               int(datetime.now(FUSO_BR).timestamp()),
                     "nome":             _r_nome.strip(),
@@ -6860,11 +6926,13 @@ with tab_radares:
                     "x":                _r_x,
                     "z":                _r_z,
                     "y":                _r_y,
+                    "y_auto":           _r_y_auto is not None,
                     "raio":             _r_raio,
                     "ativo":            True,
                     "cooldown_minutos": int(_r_cooldown),
                     "ultimo_alerta":    "",
                     "historico":        [],
+                    "membros":          _membros_lista,
                 }
                 _db_rad2 = load_db(DB_CLIENTS, {})
                 _entry_rad2 = _db_rad2.get(user_id, {})
@@ -6939,6 +7007,83 @@ with tab_radares:
                         registrar_log(user_id, f"🗑️ Radar removido: {_rad.get('nome', '?')}", "info")
                         st.rerun()
 
+                # ── Membros isentos ──────────────────────────────────
+                st.markdown("**👥 Membros do clã (isentos do radar):**")
+                _membros_atuais = _rad.get("membros", [])
+
+                # Exibe membros com botão de remoção individual
+                if _membros_atuais:
+                    for _mi, _membro in enumerate(_membros_atuais):
+                        _mcol1, _mcol2 = st.columns([4, 1])
+                        with _mcol1:
+                            st.markdown(f"- `{_membro}`")
+                        with _mcol2:
+                            if st.button(
+                                "✖",
+                                key=f"rem_membro_{_rad.get('id', _idx_r)}_{_mi}",
+                                help=f"Remover {_membro} do radar",
+                            ):
+                                _rad["membros"] = [
+                                    m for m in _membros_atuais if m != _membro
+                                ]
+                                _db_mrem = load_db(DB_CLIENTS, {})
+                                _entry_mrem = _db_mrem.get(user_id, {})
+                                _entry_mrem["radares"] = _radares
+                                _db_mrem[user_id] = _entry_mrem
+                                save_db(DB_CLIENTS, _db_mrem)
+                                st.session_state.db_clients = _db_mrem
+                                registrar_log(
+                                    user_id,
+                                    f"👥 Membro removido do radar {_rad.get('nome', '?')}: {_membro}",
+                                    "info",
+                                )
+                                st.rerun()
+                else:
+                    st.caption("Nenhum membro cadastrado além do dono.")
+
+                # Adicionar novo membro
+                _add_mcol1, _add_mcol2 = st.columns([3, 1])
+                with _add_mcol1:
+                    _novo_membro_input = st.text_input(
+                        "Adicionar membro",
+                        placeholder="Gamertag do membro",
+                        key=f"add_membro_input_{_rad.get('id', _idx_r)}",
+                        label_visibility="collapsed",
+                    )
+                with _add_mcol2:
+                    if st.button(
+                        "➕ Adicionar",
+                        key=f"add_membro_btn_{_rad.get('id', _idx_r)}",
+                        use_container_width=True,
+                    ):
+                        _nm = _novo_membro_input.strip()
+                        if not _nm:
+                            st.warning("Digite a gamertag.")
+                        elif _nm.lower() in [m.lower() for m in _membros_atuais]:
+                            st.warning(f"'{_nm}' já está na lista.")
+                        elif _nm.lower() == _rad.get("dono_gamertag", "").lower():
+                            st.warning("O dono já é isento automaticamente.")
+                        else:
+                            if "membros" not in _rad:
+                                _rad["membros"] = []
+                            _rad["membros"].append(_nm)
+                            _db_madd = load_db(DB_CLIENTS, {})
+                            _entry_madd = _db_madd.get(user_id, {})
+                            _entry_madd["radares"] = _radares
+                            _db_madd[user_id] = _entry_madd
+                            save_db(DB_CLIENTS, _db_madd)
+                            st.session_state.db_clients = _db_madd
+                            registrar_log(
+                                user_id,
+                                f"👥 Membro adicionado ao radar {_rad.get('nome', '?')}: {_nm}",
+                                "info",
+                            )
+                            st.success(f"✅ '{_nm}' adicionado como membro isento.")
+                            st.rerun()
+
+                st.divider()
+
+                # ── Histórico de invasões ─────────────────────────────
                 _hist = _rad.get("historico", [])
                 if _hist:
                     st.markdown("**📜 Últimas invasões detectadas:**")
